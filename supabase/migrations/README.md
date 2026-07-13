@@ -1,0 +1,9 @@
+-- Migration files applied to Supabase project Hugo
+-- 20260710104232 painel_controle_policies (pre-existing)
+-- 20260710120000 app_usuarios_and_helpers
+-- 20260710120001 app_notas_and_log
+-- 20260710120002 mensagens_table
+-- 20260710120003 auth_rls_policies
+-- 20260710120004 realtime_and_audit
+-- 20260710120005 seed_mensagens_teste
+-- 20260710130000 mensagens_ingest_functions

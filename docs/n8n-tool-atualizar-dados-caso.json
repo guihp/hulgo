@@ -1,0 +1,40 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "toolDescription": "Preenche/atualiza a FICHA DO CASO no painel do escritório conforme os dados aparecem na conversa. Chame sempre que descobrir um dado novo do cliente: nome, CPF, data de nascimento, benefício desejado, área (rural | urbano | assistencial), tipo de segurado, se o INSS já negou e o motivo, se já tem processo, se já recebe benefício, requisitos preenchidos/pendentes, pontos de análise jurídica e benefícios alternativos. Envie SOMENTE os campos novos — os demais deixe em branco; nada é apagado. Não espere o fim da triagem: atualize aos poucos.",
+        "method": "POST",
+        "url": "https://hzfvciamevimjzuvidcp.supabase.co/functions/v1/caso-atualizar",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer COLE_AQUI_A_SERVICE_ROLE_KEY"
+            },
+            {
+              "name": "apikey",
+              "value": "COLE_AQUI_A_SERVICE_ROLE_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"telefone_cliente\": \"{{ $('mapear_dados').first().json.telefone }}\",\n  \"nome\": \"{{ $fromAI('nome', 'Nome completo do cliente, se informado. Senão vazio.', 'string') }}\",\n  \"cpf\": \"{{ $fromAI('cpf', 'CPF do cliente, se informado. Senão vazio.', 'string') }}\",\n  \"data_nascimento\": \"{{ $fromAI('data_nascimento', 'Data de nascimento DD/MM/YYYY, se informada. Senão vazio.', 'string') }}\",\n  \"beneficio_identificado\": \"{{ $fromAI('beneficio_identificado', 'Benefício identificado, ex: Aposentadoria por Idade Rural. Senão vazio.', 'string') }}\",\n  \"area\": \"{{ $fromAI('area', 'rural | urbano | assistencial. Senão vazio.', 'string') }}\",\n  \"tipo_segurado\": \"{{ $fromAI('tipo_segurado', 'Ex: segurado especial, empregado, contribuinte individual. Senão vazio.', 'string') }}\",\n  \"ja_negou_inss\": \"{{ $fromAI('ja_negou_inss', 'sim | não | vazio se não souber', 'string') }}\",\n  \"motivo_negativa\": \"{{ $fromAI('motivo_negativa', 'Motivo da negativa do INSS, se houve. Senão vazio.', 'string') }}\",\n  \"ja_tem_processo\": \"{{ $fromAI('ja_tem_processo', 'sim | não | vazio se não souber', 'string') }}\",\n  \"ja_recebe_beneficio\": \"{{ $fromAI('ja_recebe_beneficio', 'Qual benefício já recebe, se algum. Senão vazio.', 'string') }}\",\n  \"requisitos_preenchidos\": \"{{ $fromAI('requisitos_preenchidos', 'Requisitos legais que o cliente já demonstrou preencher. Senão vazio.', 'string') }}\",\n  \"requisitos_pendentes\": \"{{ $fromAI('requisitos_pendentes', 'Requisitos ainda não comprovados. Senão vazio.', 'string') }}\",\n  \"pontos_analise_juridica\": \"{{ $fromAI('pontos_analise_juridica', 'Dúvidas/pontos para o advogado analisar. Senão vazio.', 'string') }}\",\n  \"beneficios_alternativos\": \"{{ $fromAI('beneficios_alternativos', 'Outros benefícios possivelmente cabíveis. Senão vazio.', 'string') }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [5936, 1312],
+      "id": "dd000001-0001-4000-8000-000000000001",
+      "name": "atualizar_dados_caso"
+    }
+  ],
+  "connections": {
+    "atualizar_dados_caso": {
+      "ai_tool": [[{ "node": "AI Agent1", "type": "ai_tool", "index": 0 }]]
+    }
+  },
+  "pinData": {},
+  "meta": {}
+}

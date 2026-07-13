@@ -1,0 +1,105 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "toolDescription": "Consulta em qual coluna do funil Kanban o cliente está no painel do escritório. Use no início da conversa, ao retomar um contato, ou ANTES de chamar mover_cliente_kanban. Retorna: coluna (nome legível), status (código), nome, CPF, benefício identificado, documentos recebidos e faltantes. Se encontrado=false, o cliente ainda não está no funil.",
+        "method": "POST",
+        "url": "https://hzfvciamevimjzuvidcp.supabase.co/functions/v1/kanban-consultar",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer COLE_SUA_SERVICE_ROLE_AQUI"
+            },
+            {
+              "name": "apikey",
+              "value": "COLE_SUA_SERVICE_ROLE_AQUI"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"telefone_cliente\": \"{{ $('mapear_dados').first().json.telefone }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [5408, 1328],
+      "id": "a1b2c3d4-consultar-kanban-0001",
+      "name": "consultar_cliente_kanban"
+    },
+    {
+      "parameters": {
+        "toolDescription": "Move o cliente para outra coluna do funil Kanban conforme a intenção identificada. Chame APENAS quando a intenção mudar ou ficar clara. Colunas (campo coluna): em_atendimento, consultar_processo, abertura_processo, aguardando_aprovacao, atendimento_humano, processo_finalizado. Antes de mover, use consultar_cliente_kanban se não souber onde o cliente está.",
+        "method": "POST",
+        "url": "https://hzfvciamevimjzuvidcp.supabase.co/functions/v1/kanban-mover",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer COLE_SUA_SERVICE_ROLE_AQUI"
+            },
+            {
+              "name": "apikey",
+              "value": "COLE_SUA_SERVICE_ROLE_AQUI"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"telefone_cliente\": \"{{ $('mapear_dados').first().json.telefone }}\",\n  \"coluna\": \"{{ $fromAI('coluna', 'Status: em_atendimento | consultar_processo | abertura_processo | aguardando_aprovacao | atendimento_humano | processo_finalizado', 'string') }}\",\n  \"motivo\": \"{{ $fromAI('motivo', 'Breve motivo da movimentação, 1 frase', 'string') }}\",\n  \"nome_cliente\": \"{{ $fromAI('nome_cliente', 'Nome do cliente se já informado', 'string') }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [5648, 1328],
+      "id": "a1b2c3d4-mover-kanban-0002",
+      "name": "mover_cliente_kanban"
+    },
+    {
+      "parameters": {
+        "toolDescription": "Use quando o cliente enviar foto ou PDF e você identificar qual documento é (RG, CPF, certidão, laudo, etc.). Envia a URL da mídia já salva, o nome e uma descrição. Atualiza o que já foi recebido e o que ainda falta. Chame assim que identificar — não espere o fim da triagem.",
+        "method": "POST",
+        "url": "https://hzfvciamevimjzuvidcp.supabase.co/functions/v1/documento-cliente-registrar",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer COLE_SUA_SERVICE_ROLE_AQUI"
+            },
+            {
+              "name": "apikey",
+              "value": "COLE_SUA_SERVICE_ROLE_AQUI"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"nome_documento\": \"{{ $fromAI('nome_documento', 'Nome do documento identificado, ex: RG, CPF, Certidão de óbito', 'string') }}\",\n  \"descricao\": \"{{ $fromAI('descricao', 'Descrição curta do que foi enviado', 'string') }}\",\n  \"url_media\": \"{{ $fromAI('url_media', 'URL pública da mídia (conteudo_media do ingest)', 'string') }}\",\n  \"telefone_cliente\": \"{{ $('mapear_dados').first().json.telefone }}\",\n  \"nome_cliente\": \"{{ $fromAI('nome_cliente', 'Nome do cliente se já informado', 'string') }}\",\n  \"cpf\": \"{{ $fromAI('cpf', 'CPF do cliente se já informado, senão vazio', 'string') }}\",\n  \"mensagem_id\": \"{{ $('mapear_dados').first().json.id_message }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [5888, 1328],
+      "id": "f6e5e55b-d9c0-48a2-a27b-146af0f2d3a5",
+      "name": "registrar_documento_cliente"
+    }
+  ],
+  "connections": {
+    "consultar_cliente_kanban": {
+      "ai_tool": [[]]
+    },
+    "mover_cliente_kanban": {
+      "ai_tool": [[]]
+    },
+    "registrar_documento_cliente": {
+      "ai_tool": [[]]
+    }
+  },
+  "meta": {
+    "instanceId": "688d61688263a07d8d87a56bbb8159215dbed00272c8687eecf23282135c1a34"
+  }
+}

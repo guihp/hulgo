@@ -1,0 +1,142 @@
+{
+  "name": "Controle IA (pausar/despausar) — sistema",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "controle-ia",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "id": "cc000001-0001-4000-8000-000000000001",
+      "name": "Webhook Controle IA",
+      "webhookId": "controle-ia"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "cc000001-0010-4000-8000-000000000010",
+                    "leftValue": "={{ $json.body.acao }}",
+                    "rightValue": "pausar",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "pausar"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "cc000001-0011-4000-8000-000000000011",
+                    "leftValue": "={{ $json.body.acao }}",
+                    "rightValue": "despausar",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "despausar"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [220, 0],
+      "id": "cc000001-0002-4000-8000-000000000002",
+      "name": "Switch ação"
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "key": "={{ $('Webhook Controle IA').first().json.body.telefone }}_block_{{ $('Webhook Controle IA').first().json.body.instancia }}",
+        "value": "true",
+        "keyType": "string"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [440, -100],
+      "id": "cc000001-0003-4000-8000-000000000003",
+      "name": "SET block (pausar)",
+      "credentials": {
+        "redis": {
+          "id": "mbBgHh1YCbX2Ks5l",
+          "name": "Redis IAFE"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "key": "={{ $('Webhook Controle IA').first().json.body.telefone }}_block_{{ $('Webhook Controle IA').first().json.body.instancia }}"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [440, 100],
+      "id": "cc000001-0004-4000-8000-000000000004",
+      "name": "DEL block (despausar)",
+      "credentials": {
+        "redis": {
+          "id": "mbBgHh1YCbX2Ks5l",
+          "name": "Redis IAFE"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"ok\": true, \"acao\": $('Webhook Controle IA').first().json.body.acao, \"telefone\": $('Webhook Controle IA').first().json.body.telefone } }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [660, 0],
+      "id": "cc000001-0005-4000-8000-000000000005",
+      "name": "Responder 200"
+    }
+  ],
+  "connections": {
+    "Webhook Controle IA": {
+      "main": [[{ "node": "Switch ação", "type": "main", "index": 0 }]]
+    },
+    "Switch ação": {
+      "main": [
+        [{ "node": "SET block (pausar)", "type": "main", "index": 0 }],
+        [{ "node": "DEL block (despausar)", "type": "main", "index": 0 }]
+      ]
+    },
+    "SET block (pausar)": {
+      "main": [[{ "node": "Responder 200", "type": "main", "index": 0 }]]
+    },
+    "DEL block (despausar)": {
+      "main": [[{ "node": "Responder 200", "type": "main", "index": 0 }]]
+    }
+  },
+  "pinData": {},
+  "settings": { "executionOrder": "v1" }
+}

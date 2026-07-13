@@ -1,0 +1,41 @@
+# dependencies
+node_modules
+.pnp
+.pnp.*
+
+# build
+.next
+out
+build
+
+# env & secrets
+.env
+.env.*
+!.env.example
+
+# git & IDE
+.git
+.gitignore
+.cursor
+.vscode
+.idea
+
+# docs & misc (não necessários na imagem)
+docs
+CHECKLIST.md
+*.md
+!README.md
+
+# supabase (migrations/functions rodam fora do container)
+supabase
+
+# vercel
+.vercel
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+*.pem
+coverage
