@@ -246,6 +246,10 @@ function isQrNotReadyError(message: string): boolean {
   return /no qr code available/i.test(message);
 }
 
+function isClientDisconnectedError(message: string): boolean {
+  return /client disconnected/i.test(message);
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -287,6 +291,11 @@ async function evogoRequest<T = unknown>(
       if (path === "/instance/qr" && isQrNotReadyError(message)) {
         return { qrNotReady: true } as T;
       }
+      // Sem sessão ativa (após logout/restart da EvoGo) o status responde
+      // 400 "client disconnected" — é um estado normal, não um erro
+      if (path === "/instance/status" && isClientDisconnectedError(message)) {
+        return { clientDisconnected: true } as T;
+      }
       const hint =
         res.status === 401
           ? " O envio exige o token da instância (resolvido via /instance/all ou EVOGO_INSTANCE_TOKEN)."
@@ -309,6 +318,14 @@ async function evogoFetch<T = unknown>(
 
 export async function getInstanceStatus(): Promise<EvoGoInstanceStatus> {
   const data = await evogoRequest("GET", "/instance/status");
+  if (
+    data &&
+    typeof data === "object" &&
+    "clientDisconnected" in data &&
+    (data as { clientDisconnected?: boolean }).clientDisconnected
+  ) {
+    return { connected: false, loggedIn: false, name: "" };
+  }
   return parseInstanceStatus(data);
 }
 
@@ -404,7 +421,13 @@ export async function disconnectInstance(): Promise<void> {
  * botão "Desconectar número" precisa chamar — depois só reconecta lendo QR.
  */
 export async function logoutInstance(): Promise<void> {
-  await evogoRequest("DELETE", "/instance/logout");
+  try {
+    await evogoRequest("DELETE", "/instance/logout");
+  } catch (err) {
+    // Sessão já derrubada — não há o que desvincular
+    if (err instanceof Error && isClientDisconnectedError(err.message)) return;
+    throw err;
+  }
 }
 
 export async function sendText(number: string, text: string): Promise<string> {
