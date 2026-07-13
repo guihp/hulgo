@@ -350,7 +350,8 @@ export async function ensureInstanceQrCode(options?: {
   const attempts = options?.attempts ?? 8;
   const delayMs = options?.delayMs ?? 1500;
 
-  await connectInstance({ immediate: true });
+  let { jid } = await connectInstance({ immediate: true });
+  let jaResetou = false;
 
   let status = await getInstanceStatus();
   if (status.loggedIn) {
@@ -367,6 +368,17 @@ export async function ensureInstanceQrCode(options?: {
     if (qrCode) {
       return { status, qrCode };
     }
+
+    // Sessão morta: há credencial gravada (jid) mas o cliente cai na hora
+    // (connected=false) e o QR nunca nasce — acontece quando o número foi
+    // desconectado pelo celular ("logged out from another device"). O
+    // connect fica retomando a sessão revogada para sempre; a saída é
+    // recriar a instância (mesmo nome/token) e reconectar do zero.
+    if (!jaResetou && jid && !status.connected && !status.loggedIn && i >= 2) {
+      jaResetou = true;
+      await resetInstance();
+      ({ jid } = await connectInstance({ immediate: true }));
+    }
   }
 
   status = await getInstanceStatus();
@@ -376,7 +388,7 @@ export async function ensureInstanceQrCode(options?: {
 export async function connectInstance(options?: {
   immediate?: boolean;
   phone?: string;
-}): Promise<void> {
+}): Promise<{ jid: string }> {
   const body: Record<string, unknown> = {};
   if (options?.immediate) body.immediate = true;
   if (options?.phone?.trim()) body.phone = options.phone.trim();
@@ -384,7 +396,7 @@ export async function connectInstance(options?: {
     body.webhookUrl = EVOGO_WEBHOOK_URL;
     body.subscribe = EVOGO_WEBHOOK_EVENTS;
   }
-  await evogoRequest("POST", "/instance/connect", body);
+  const data = await evogoRequest("POST", "/instance/connect", body);
 
   // Grupos precisam continuar chegando no webhook (ignoreGroups=false).
   try {
@@ -392,6 +404,62 @@ export async function connectInstance(options?: {
   } catch {
     // Não bloqueia a conexão se a leitura/ajuste de settings falhar.
   }
+
+  // jid preenchido = a EvoGo tem credencial de sessão gravada
+  return { jid: readString(unwrapEvoGoData(data).jid) };
+}
+
+/**
+ * Recria a instância na EvoGo com o mesmo nome e token. Necessário quando a
+ * sessão gravada foi revogada pelo WhatsApp ("logged out from another
+ * device"): o connect fica tentando retomá-la para sempre e nunca gera QR.
+ */
+async function resetInstance(): Promise<void> {
+  if (EVOGO_INSTANCE_ID) {
+    throw new Error(
+      "Sessão da instância inválida e EVOGO_INSTANCE_ID está fixo no .env — " +
+        "recrie a instância na EvoGo e atualize EVOGO_INSTANCE_ID/EVOGO_INSTANCE_TOKEN"
+    );
+  }
+
+  const apikey = requireGlobalApiKey();
+  const name = await resolveWhatsAppInstanceName();
+  const { instanceId, instanceToken } = await resolveInstanceAuth();
+
+  const del = await fetch(`${EVOGO_API_URL}/instance/delete/${instanceId}`, {
+    method: "DELETE",
+    headers: { apikey },
+    cache: "no-store",
+  });
+  if (!del.ok) {
+    throw new Error(`EvoGo instance/delete falhou (${del.status})`);
+  }
+
+  const create = await fetch(`${EVOGO_API_URL}/instance/create`, {
+    method: "POST",
+    headers: { apikey, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name,
+      token: instanceToken,
+      advancedSettings: {
+        alwaysOnline: true,
+        ignoreGroups: false,
+        ignoreStatus: false,
+        readMessages: false,
+        rejectCall: false,
+        msgRejectCall: "",
+      },
+    }),
+    cache: "no-store",
+  });
+  if (!create.ok) {
+    throw new Error(`EvoGo instance/create falhou (${create.status})`);
+  }
+
+  // id mudou — força novo lookup em /instance/all
+  cachedAuth = null;
+  cachedAuthName = "";
+  cacheExpiry = 0;
 }
 
 async function ensureGroupsNotIgnored(): Promise<void> {
