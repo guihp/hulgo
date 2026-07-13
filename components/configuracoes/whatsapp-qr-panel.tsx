@@ -58,8 +58,12 @@ export function WhatsAppQrPanel() {
   const [disconnectOpen, setDisconnectOpen] = useState(false);
   const ignoreLoggedInUntilRef = useRef(0);
 
-  const loadConnection = useCallback(async (silent = false) => {
-    const result = await getWhatsAppConnection({ light: silent });
+  const loadConnection = useCallback(async (options?: {
+    silent?: boolean;
+    light?: boolean;
+  }) => {
+    const { silent = false, light = false } = options ?? {};
+    const result = await getWhatsAppConnection({ light });
     if (!result.ok) {
       if (!silent) {
         setError(result.error);
@@ -144,7 +148,7 @@ export function WhatsAppQrPanel() {
         setError(result.error);
         toast.error(result.error);
         // Volta o status real se a desconexão falhou
-        await loadConnection();
+        await loadConnection({ light: true });
         return;
       }
       setError(null);
@@ -160,14 +164,20 @@ export function WhatsAppQrPanel() {
 
     (async () => {
       setLoading(true);
-      await loadConnection();
-      if (active) setLoading(false);
+      // Consulta leve primeiro (status+QR, ~1s) para a tela aparecer logo;
+      // a geração do QR (connect + espera na EvoGo) roda em background
+      const data = await loadConnection({ light: true });
+      if (!active) return;
+      setLoading(false);
+      if (data && !data.status.loggedIn && !data.qrCode?.base64) {
+        refreshQr(true);
+      }
     })();
 
     return () => {
       active = false;
     };
-  }, [loadConnection]);
+  }, [loadConnection, refreshQr]);
 
   // Deps primitivas: o poll de status troca o objeto `state` a cada ciclo e,
   // se os intervals dependessem dele, seriam recriados a cada 3s — o timer de
@@ -178,7 +188,7 @@ export function WhatsAppQrPanel() {
   useEffect(() => {
     if (!hasState || loggedIn) return;
     const id = setInterval(() => {
-      void loadConnection(true);
+      void loadConnection({ silent: true, light: true });
     }, STATUS_POLL_MS);
     return () => clearInterval(id);
   }, [hasState, loggedIn, loadConnection]);
@@ -236,7 +246,7 @@ export function WhatsAppQrPanel() {
                 variant="outline"
                 size="sm"
                 disabled={pending}
-                onClick={() => void loadConnection()}
+                onClick={() => void loadConnection({ light: true })}
               >
                 <RefreshCw className="mr-2 h-4 w-4" />
                 Tentar novamente
