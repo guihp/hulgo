@@ -34,9 +34,14 @@ export async function updateSession(request: NextRequest) {
     request.nextUrl.pathname.startsWith("/esqueci-senha") ||
     request.nextUrl.pathname.startsWith("/redefinir-senha");
 
-  const isIntegracaoApi = request.nextUrl.pathname.startsWith("/api/integracao");
+  // Rotas sem sessão de usuário: integração/cron têm token próprio
+  // (x-integracao-token / x-cron-secret) e o healthcheck do Docker é público
+  const isPublicApi =
+    request.nextUrl.pathname.startsWith("/api/integracao") ||
+    request.nextUrl.pathname.startsWith("/api/cron") ||
+    request.nextUrl.pathname === "/api/health";
 
-  if (!user && !isAuthRoute && !isIntegracaoApi) {
+  if (!user && !isAuthRoute && !isPublicApi) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
