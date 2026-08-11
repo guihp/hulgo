@@ -16,7 +16,7 @@ export default async function ClientesPage({
     supabase
       .from("casos_novos")
       .select("*")
-      .in("status", ["abertura_processo", "aguardando_advogado", "em_analise"])
+      .in("status", ["abertura_processo", "aguardando_analise", "aguardando_advogado", "em_analise"])
       .order("created_at", { ascending: false }),
   ]);
 

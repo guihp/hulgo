@@ -34,7 +34,7 @@ async function getDashboardData() {
     supabase.from("processos_clientes").select("id, ativo"),
     supabase.from("mensagens").select("contact_norm, created_at").order("created_at", { ascending: false }),
     supabase.from("casos_novos").select("id, nome, status, created_at, beneficio_identificado")
-      .in("status", ["em_atendimento", "consultar_processo", "abertura_processo", "aguardando_aprovacao", "atendimento_humano"])
+      .in("status", ["em_atendimento", "consultar_processo", "abertura_processo", "aguardando_analise", "aguardando_aprovacao", "atendimento_humano"])
       .order("created_at", { ascending: true })
       .limit(10),
     supabase.from("aprovacoes_pendentes").select("id, nome_cliente, status, created_at")

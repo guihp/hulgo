@@ -23,7 +23,6 @@ import {
 } from "@/lib/utils/dates";
 import { formatPhone } from "@/lib/utils/phone";
 import { ChatComposer } from "@/components/atendimentos/chat-composer";
-import { EmptyState } from "@/components/shared/empty-state";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -277,12 +276,14 @@ function ConversationList({
   search,
   onSearchChange,
   onSelect,
+  inboxEmpty,
 }: {
   conversations: Conversation[];
   selectedContact: string | null;
   search: string;
   onSearchChange: (v: string) => void;
   onSelect: (contact: string) => void;
+  inboxEmpty?: boolean;
 }) {
   const filtered = conversations.filter((c) => {
     const q = search.toLowerCase();
@@ -306,9 +307,17 @@ function ConversationList({
       <div className="min-h-0 flex-1 overflow-hidden">
         <ScrollArea className="h-full">
         {filtered.length === 0 ? (
-          <p className="p-4 text-center text-sm text-muted-foreground">
-            Nenhuma conversa encontrada
-          </p>
+          <div className="flex flex-col items-center justify-center px-4 py-10 text-center">
+            <MessageSquare className="mb-2 h-8 w-8 text-muted-foreground/40" />
+            <p className="text-sm text-muted-foreground">
+              {inboxEmpty ? "Nenhuma conversa" : "Nenhuma conversa encontrada"}
+            </p>
+            {inboxEmpty ? (
+              <p className="mt-1 max-w-[240px] text-xs text-muted-foreground/80">
+                As mensagens do WhatsApp aparecerão aqui.
+              </p>
+            ) : null}
+          </div>
         ) : (
           <ul>
             {filtered.map((c) => (
@@ -544,11 +553,20 @@ function ConversationThread({
   );
 }
 
-function EmptyThread() {
+function EmptyThread({ inboxEmpty = false }: { inboxEmpty?: boolean }) {
   return (
     <div className="hidden h-full flex-col items-center justify-center bg-muted/20 lg:flex">
       <MessageSquare className="mb-3 h-12 w-12 text-muted-foreground/40" />
-      <p className="text-muted-foreground">Selecione uma conversa para ver as mensagens</p>
+      {inboxEmpty ? (
+        <>
+          <p className="font-medium text-muted-foreground">Aguardando mensagens</p>
+          <p className="mt-1 max-w-sm px-6 text-center text-sm text-muted-foreground/80">
+            As mensagens do WhatsApp aparecerão aqui.
+          </p>
+        </>
+      ) : (
+        <p className="text-muted-foreground">Selecione uma conversa para ver as mensagens</p>
+      )}
     </div>
   );
 }
@@ -658,15 +676,7 @@ export function AtendimentosPanel({
     [messages, selectedContact]
   );
 
-  if (conversations.length === 0) {
-    return (
-      <EmptyState
-        icon={MessageSquare}
-        title="Nenhuma conversa"
-        description="As mensagens do WhatsApp aparecerão aqui quando o n8n gravar na tabela mensagens."
-      />
-    );
-  }
+  const inboxEmpty = conversations.length === 0;
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border bg-card shadow-sm">
@@ -683,6 +693,7 @@ export function AtendimentosPanel({
             search={search}
             onSearchChange={setSearch}
             onSelect={handleSelect}
+            inboxEmpty={inboxEmpty}
           />
         </div>
 
@@ -705,7 +716,7 @@ export function AtendimentosPanel({
               whatsappInstancia={whatsappInstancia}
             />
           ) : (
-            <EmptyThread />
+            <EmptyThread inboxEmpty={inboxEmpty} />
           )}
         </div>
       </div>

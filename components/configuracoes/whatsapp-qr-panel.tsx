@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import Image from "next/image";
-import { LogOut, RefreshCw, Smartphone, Wifi, WifiOff } from "lucide-react";
+import { LogOut, QrCode, RefreshCw, Smartphone, Wifi, WifiOff } from "lucide-react";
 import { toast } from "sonner";
 import {
   disconnectWhatsApp,
@@ -56,6 +56,7 @@ export function WhatsAppQrPanel() {
   const [loading, setLoading] = useState(true);
   const [pending, startTransition] = useTransition();
   const [disconnectOpen, setDisconnectOpen] = useState(false);
+  const [qrVisible, setQrVisible] = useState(false);
   const ignoreLoggedInUntilRef = useRef(0);
 
   const loadConnection = useCallback(async (options?: {
@@ -123,9 +124,15 @@ export function WhatsAppQrPanel() {
     [startTransition]
   );
 
+  const handleShowQr = useCallback(() => {
+    setQrVisible(true);
+    refreshQr(false);
+  }, [refreshQr]);
+
   const handleDisconnect = useCallback(() => {
     // Fecha o popup na hora e mostra a tela de reconexão
     setDisconnectOpen(false);
+    setQrVisible(false);
     ignoreLoggedInUntilRef.current = Date.now() + 20_000;
     setState((prev) =>
       prev
@@ -152,9 +159,9 @@ export function WhatsAppQrPanel() {
         return;
       }
       setError(null);
-      setState(result.data);
+      setState({ ...result.data, qrCode: null });
       toast.success(
-        "WhatsApp desconectado. Escaneie o QR Code para reconectar."
+        "WhatsApp desconectado. Clique em Mostrar QR Code para reconectar."
       );
     });
   }, [loadConnection, startTransition]);
@@ -164,44 +171,42 @@ export function WhatsAppQrPanel() {
 
     (async () => {
       setLoading(true);
-      // Consulta leve primeiro (status+QR, ~1s) para a tela aparecer logo;
-      // a geração do QR (connect + espera na EvoGo) roda em background
-      const data = await loadConnection({ light: true });
+      // Consulta leve (só status) — QR só após clique do usuário
+      await loadConnection({ light: true });
       if (!active) return;
       setLoading(false);
-      if (data && !data.status.loggedIn && !data.qrCode?.base64) {
-        refreshQr(true);
-      }
     })();
 
     return () => {
       active = false;
     };
-  }, [loadConnection, refreshQr]);
+  }, [loadConnection]);
 
   // Deps primitivas: o poll de status troca o objeto `state` a cada ciclo e,
   // se os intervals dependessem dele, seriam recriados a cada 3s — o timer de
   // renovação do QR (25s) nunca chegaria a disparar.
   const hasState = state !== null;
   const loggedIn = state?.status.loggedIn ?? false;
+  const polling = qrVisible && hasState && !loggedIn;
 
   useEffect(() => {
-    if (!hasState || loggedIn) return;
+    if (!polling) return;
     const id = setInterval(() => {
       void loadConnection({ silent: true, light: true });
     }, STATUS_POLL_MS);
     return () => clearInterval(id);
-  }, [hasState, loggedIn, loadConnection]);
+  }, [polling, loadConnection]);
 
   useEffect(() => {
-    if (!hasState || loggedIn) return;
+    if (!polling) return;
     const id = setInterval(() => {
       refreshQr(true);
     }, QR_REFRESH_MS);
     return () => clearInterval(id);
-  }, [hasState, loggedIn, refreshQr]);
+  }, [polling, refreshQr]);
 
-  const qrSrc = state?.qrCode?.base64
+  const qrSrc =
+    qrVisible && state?.qrCode?.base64
     ? state.qrCode.base64.startsWith("data:")
       ? state.qrCode.base64
       : `data:image/png;base64,${state.qrCode.base64}`
@@ -236,7 +241,7 @@ export function WhatsAppQrPanel() {
         {loading ? (
           <div className="space-y-3">
             <Skeleton className="h-4 w-48" />
-            <Skeleton className="mx-auto h-64 w-64" />
+            <Skeleton className="h-4 w-32" />
           </div>
         ) : error && !state ? (
           <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
@@ -313,7 +318,7 @@ export function WhatsAppQrPanel() {
                   </AlertDialogContent>
                 </AlertDialog>
               </div>
-            ) : (
+            ) : qrVisible ? (
               <div className="space-y-4">
                 <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
                   <p className="font-medium text-foreground">Como conectar</p>
@@ -368,6 +373,20 @@ export function WhatsAppQrPanel() {
 
                 {error && (
                   <p className="text-center text-sm text-destructive">{error}</p>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="rounded-lg border bg-muted/40 p-4 text-sm text-muted-foreground">
+                  WhatsApp desconectado. Clique no botão abaixo para gerar o QR
+                  Code e vincular um número a esta instância.
+                </div>
+                <Button disabled={pending} onClick={handleShowQr}>
+                  <QrCode className="mr-2 h-4 w-4" />
+                  {pending ? "Gerando QR Code…" : "Mostrar QR Code"}
+                </Button>
+                {error && (
+                  <p className="text-sm text-destructive">{error}</p>
                 )}
               </div>
             )}

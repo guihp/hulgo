@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { verifyIntegracaoToken } from "@/lib/config/app-config";
+import { enviarEncaminhamentoAnaliseSePendente } from "@/lib/casos/encaminhamento-analise";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { CasoStatus } from "@/types/database";
 
@@ -7,6 +8,7 @@ const ALLOWED_STATUS: CasoStatus[] = [
   "em_atendimento",
   "consultar_processo",
   "abertura_processo",
+  "aguardando_analise",
   "aguardando_aprovacao",
   "atendimento_humano",
   "processo_finalizado",
@@ -77,10 +79,25 @@ export async function POST(req: Request) {
 
   const row = Array.isArray(data) ? data[0] : data;
 
+  let encaminhamento: { enviada: boolean; warning?: string } | undefined;
+  if (status.trim() === "aguardando_analise" && row?.caso_id != null) {
+    encaminhamento = await enviarEncaminhamentoAnaliseSePendente([
+      Number(row.caso_id),
+    ]);
+  }
+
   return json({
     caso_id: row?.caso_id,
     status: row?.status,
     telefone: row?.telefone,
     message: "Cliente movido no funil com sucesso",
+    ...(encaminhamento
+      ? {
+          mensagem_encaminhamento_enviada: encaminhamento.enviada,
+          ...(encaminhamento.warning
+            ? { mensagem_encaminhamento_warning: encaminhamento.warning }
+            : {}),
+        }
+      : {}),
   });
 }

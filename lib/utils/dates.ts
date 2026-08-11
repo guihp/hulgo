@@ -1,4 +1,4 @@
-import { formatDistanceToNow, format, differenceInHours, differenceInDays, isSameDay, subDays, isValid } from "date-fns";
+import { formatDistanceToNow, format, differenceInHours, differenceInDays, subDays, isValid } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
 function isRealCalendarDate(year: number, month: number, day: number): boolean {
@@ -14,10 +14,13 @@ function isRealCalendarDate(year: number, month: number, day: number): boolean {
  * Converte string em Date com tolerância a formatos fora do padrão
  * (ex.: DataJud às vezes retorna "yyyyMMddHHmmss"). Retorna null se inválida.
  */
+const BRAZIL_TZ = "America/Sao_Paulo";
+
 function parseDate(date: string | null | undefined): Date | null {
   if (!date) return null;
 
-  const isoDateOnly = date.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  // Only date-only strings (no time) get noon — full timestamps must keep HH:mm.
+  const isoDateOnly = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (isoDateOnly) {
     const year = Number(isoDateOnly[1]);
     const month = Number(isoDateOnly[2]);
@@ -105,17 +108,46 @@ export function isActiveConversation(date: string | null | undefined): boolean {
   return differenceInHours(new Date(), d) < 24;
 }
 
+function brazilCalendarParts(d: Date): { year: number; month: number; day: number } {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: BRAZIL_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(d);
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((p) => p.type === type)?.value ?? 0);
+  return { year: get("year"), month: get("month"), day: get("day") };
+}
+
+function isSameBrazilDay(a: Date, b: Date): boolean {
+  const pa = brazilCalendarParts(a);
+  const pb = brazilCalendarParts(b);
+  return pa.year === pb.year && pa.month === pb.month && pa.day === pb.day;
+}
+
 export function formatChatTime(date: string | null | undefined): string {
   const d = parseDate(date);
   if (!d) return "";
-  return format(d, "HH:mm", { locale: ptBR });
+  return d.toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: BRAZIL_TZ,
+  });
 }
 
 export function formatChatDateSeparator(date: string | null | undefined): string {
   const d = parseDate(date);
   if (!d) return "";
   const today = new Date();
-  if (isSameDay(d, today)) return "Hoje";
-  if (isSameDay(d, subDays(today, 1))) return "Ontem";
-  return format(d, "dd/MM/yyyy", { locale: ptBR });
+  if (isSameBrazilDay(d, today)) return "Hoje";
+  const yesterday = subDays(today, 1);
+  if (isSameBrazilDay(d, yesterday)) return "Ontem";
+  return new Intl.DateTimeFormat("pt-BR", {
+    timeZone: BRAZIL_TZ,
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(d);
 }

@@ -142,21 +142,17 @@ export async function disconnectWhatsApp(): Promise<
     // POST /instance/disconnect só fecha o websocket — com alwaysOnline (ou o
     // connect logo abaixo) a sessão religava sozinha e o botão "não funcionava".
     await logoutInstance();
-    // EvoGo precisa de um instante após o logout para gerar QR novo
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    const data = await buildConnectionState(true);
-    // Após logout explícito, força UI de reconexão (status da EvoGo
-    // às vezes ainda vem stale com LoggedIn=true por alguns segundos).
+    const data = await peekConnectionState();
     return {
       ok: true,
       data: {
         instanceName: data.instanceName,
         status: {
-          connected: data.status.connected,
+          connected: false,
           loggedIn: false,
           name: "",
         },
-        qrCode: data.qrCode,
+        qrCode: null,
       },
     };
   } catch (error) {

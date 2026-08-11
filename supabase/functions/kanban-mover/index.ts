@@ -13,6 +13,7 @@ const ALLOWED_STATUS = [
   "em_atendimento",
   "consultar_processo",
   "abertura_processo",
+  "aguardando_analise",
   "aguardando_aprovacao",
   "atendimento_humano",
   "processo_finalizado",

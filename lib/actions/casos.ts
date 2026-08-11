@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import type { AprovacaoStatus, CasoStatus, Json } from "@/types/database";
+import { enviarEncaminhamentoAnaliseSePendente } from "@/lib/casos/encaminhamento-analise";
 import { normalizeCpf } from "@/lib/utils/cpf";
 import { brazilianDateToIso } from "@/lib/utils/dates";
 import { normalizePhoneBrStorage } from "@/lib/utils/phone";
@@ -56,11 +57,16 @@ export async function updateCasoStatusCliente(ids: number[], status: CasoStatus)
     aprovacaoCriada = await criarPendenciaSeFaltar(ids[0]);
   }
 
+  let encaminhamento: { enviada: boolean; warning?: string } | undefined;
+  if (status === "aguardando_analise") {
+    encaminhamento = await enviarEncaminhamentoAnaliseSePendente(ids);
+  }
+
   revalidatePath("/kanban");
   revalidatePath("/aprovacoes");
   revalidatePath("/clientes");
   revalidatePath("/");
-  return { success: true, aprovacaoCriada };
+  return { success: true, aprovacaoCriada, encaminhamento };
 }
 
 /** Garante pendência em aprovacoes_pendentes para o cliente do caso. */

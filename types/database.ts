@@ -245,6 +245,7 @@ export type Database = {
           ja_negou_inss: boolean | null;
           ja_recebe_beneficio: string | null;
           ja_tem_processo: boolean | null;
+          mensagem_encaminhamento_enviada_em: string | null;
           motivo_negativa: string | null;
           nome: string | null;
           pontos_analise_juridica: string | null;
@@ -272,6 +273,7 @@ export type Database = {
           ja_negou_inss?: boolean | null;
           ja_recebe_beneficio?: string | null;
           ja_tem_processo?: boolean | null;
+          mensagem_encaminhamento_enviada_em?: string | null;
           motivo_negativa?: string | null;
           nome?: string | null;
           pontos_analise_juridica?: string | null;
@@ -299,6 +301,7 @@ export type Database = {
           ja_negou_inss?: boolean | null;
           ja_recebe_beneficio?: string | null;
           ja_tem_processo?: boolean | null;
+          mensagem_encaminhamento_enviada_em?: string | null;
           motivo_negativa?: string | null;
           nome?: string | null;
           pontos_analise_juridica?: string | null;
@@ -534,6 +537,7 @@ export type CasoStatus =
   | "em_atendimento"
   | "consultar_processo"
   | "abertura_processo"
+  | "aguardando_analise"
   | "aguardando_aprovacao"
   | "atendimento_humano"
   | "processo_finalizado";

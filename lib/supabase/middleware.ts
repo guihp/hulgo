@@ -1,7 +1,45 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import {
+  applyClearSupabaseAuthCookies,
+  getSupabaseAuthCookieNames,
+  shouldClearSupabaseAuthCookies,
+  stripSupabaseAuthCookiesFromRequest,
+} from "@/lib/supabase/cookie-sanitize";
 
 export async function updateSession(request: NextRequest) {
+  const incomingCookies = request.cookies.getAll();
+  const authCookieNames = getSupabaseAuthCookieNames(incomingCookies);
+
+  const isAuthRoute =
+    request.nextUrl.pathname.startsWith("/login") ||
+    request.nextUrl.pathname.startsWith("/esqueci-senha") ||
+    request.nextUrl.pathname.startsWith("/redefinir-senha");
+
+  const isPublicApi =
+    request.nextUrl.pathname.startsWith("/api/integracao") ||
+    request.nextUrl.pathname.startsWith("/api/cron") ||
+    request.nextUrl.pathname === "/api/health";
+
+  if (
+    authCookieNames.length > 0 &&
+    shouldClearSupabaseAuthCookies(incomingCookies)
+  ) {
+    stripSupabaseAuthCookiesFromRequest(request, authCookieNames);
+
+    if (isAuthRoute) {
+      const response = NextResponse.next({ request });
+      applyClearSupabaseAuthCookies(response, authCookieNames);
+      return response;
+    }
+
+    const url = request.nextUrl.clone();
+    url.pathname = "/login";
+    const response = NextResponse.redirect(url);
+    applyClearSupabaseAuthCookies(response, authCookieNames);
+    return response;
+  }
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -12,7 +50,7 @@ export async function updateSession(request: NextRequest) {
         getAll() {
           return request.cookies.getAll();
         },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet, cacheHeaders) {
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value)
           );
@@ -20,6 +58,11 @@ export async function updateSession(request: NextRequest) {
           cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options)
           );
+          if (cacheHeaders) {
+            for (const [key, value] of Object.entries(cacheHeaders)) {
+              supabaseResponse.headers.set(key, value);
+            }
+          }
         },
       },
     }
@@ -28,18 +71,6 @@ export async function updateSession(request: NextRequest) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
-  const isAuthRoute =
-    request.nextUrl.pathname.startsWith("/login") ||
-    request.nextUrl.pathname.startsWith("/esqueci-senha") ||
-    request.nextUrl.pathname.startsWith("/redefinir-senha");
-
-  // Rotas sem sessão de usuário: integração/cron têm token próprio
-  // (x-integracao-token / x-cron-secret) e o healthcheck do Docker é público
-  const isPublicApi =
-    request.nextUrl.pathname.startsWith("/api/integracao") ||
-    request.nextUrl.pathname.startsWith("/api/cron") ||
-    request.nextUrl.pathname === "/api/health";
 
   if (!user && !isAuthRoute && !isPublicApi) {
     const url = request.nextUrl.clone();

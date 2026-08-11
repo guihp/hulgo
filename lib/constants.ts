@@ -6,6 +6,7 @@ export const CASO_STATUS: { value: CasoStatus; label: string }[] = [
   { value: "em_atendimento", label: "Em atendimento" },
   { value: "consultar_processo", label: "Consultar processo" },
   { value: "abertura_processo", label: "Abertura de processo" },
+  { value: "aguardando_analise", label: "Aguardando análise" },
   { value: "aguardando_aprovacao", label: "Aguardando aprovação" },
   { value: "atendimento_humano", label: "Solicitou atendimento humano" },
   { value: "processo_finalizado", label: "Processo finalizado" },

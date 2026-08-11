@@ -84,7 +84,9 @@ function CasoCard({
     aprovacaoPorContato
   );
   const statusNormalizado = normalizeCasoStatus(caso.status);
-  const mostrarCliente = statusNormalizado === "abertura_processo";
+  const mostrarCliente =
+    statusNormalizado === "abertura_processo" ||
+    statusNormalizado === "aguardando_analise";
   const mostrarAprovacao = statusNormalizado === "aguardando_aprovacao";
 
   return (

@@ -32,8 +32,7 @@ export default async function ConfiguracoesPage() {
         <CardHeader>
           <CardTitle>Parâmetros do sistema</CardTitle>
           <CardDescription>
-            Valores gravados em <code>app_config</code>. Credenciais EvoGo ficam
-            apenas no servidor (<code>EVOGO_*</code>).
+            Nome do escritório e instância WhatsApp.
           </CardDescription>
         </CardHeader>
         <CardContent>

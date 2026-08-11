@@ -3,13 +3,14 @@
 import { useMemo, useState } from "react";
 import {
   ArrowLeft,
-  ExternalLink,
+  Eye,
   FileText,
   FolderOpen,
   ImageIcon,
   Search,
   User,
 } from "lucide-react";
+import { ArquivoVisualizarDialog } from "@/components/arquivos/arquivo-visualizar-dialog";
 import type {
   ClienteArquivosGrupo,
   DocumentoComCaso,
@@ -35,100 +36,124 @@ import { formatDateTime } from "@/lib/utils/dates";
 import { formatPhone } from "@/lib/utils/phone";
 import { resolveMediaDisplayKind } from "@/lib/utils/messages";
 
-function mediaIcon(url: string, type: string | null) {
-  const kind = resolveMediaDisplayKind(url, type);
+function mediaIcon(type: string | null, url: string) {
+  const kind = resolveMediaDisplayKind(type, url);
   if (kind === "image") return ImageIcon;
   return FileText;
 }
 
 function DocumentoCard({ doc }: { doc: DocumentoComCaso }) {
-  const Icon = mediaIcon(doc.url_media, null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const Icon = mediaIcon(null, doc.url_media);
 
   return (
-    <Card className="overflow-hidden">
-      <CardContent className="p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex min-w-0 gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted">
-              <Icon className="h-5 w-5 text-muted-foreground" />
-            </div>
-            <div className="min-w-0">
-              <p className="font-medium">{doc.nome_documento}</p>
-              {doc.descricao ? (
-                <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">
-                  {doc.descricao}
+    <>
+      <Card className="overflow-hidden">
+        <CardContent className="p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex min-w-0 gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted">
+                <Icon className="h-5 w-5 text-muted-foreground" />
+              </div>
+              <div className="min-w-0">
+                <p className="font-medium">{doc.nome_documento}</p>
+                {doc.descricao ? (
+                  <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">
+                    {doc.descricao}
+                  </p>
+                ) : null}
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  {formatDateTime(doc.created_at)}
                 </p>
-              ) : null}
-              <p className="mt-1 text-[10px] text-muted-foreground">
-                {formatDateTime(doc.created_at)}
-              </p>
-              {doc.caso?.beneficio_identificado ? (
-                <Badge variant="outline" className="mt-2 text-[10px]">
-                  {doc.caso.beneficio_identificado}
-                </Badge>
-              ) : null}
+                {doc.caso?.beneficio_identificado ? (
+                  <Badge variant="outline" className="mt-2 text-[10px]">
+                    {doc.caso.beneficio_identificado}
+                  </Badge>
+                ) : null}
+              </div>
             </div>
+            <button
+              type="button"
+              onClick={() => setPreviewOpen(true)}
+              className="inline-flex shrink-0 items-center gap-1 text-xs text-primary underline"
+            >
+              <Eye className="h-3.5 w-3.5" />
+              Abrir
+            </button>
           </div>
-          <a
-            href={doc.url_media}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex shrink-0 items-center gap-1 text-xs text-primary underline"
-          >
-            <ExternalLink className="h-3.5 w-3.5" />
-            Abrir
-          </a>
-        </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+      <ArquivoVisualizarDialog
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        title={doc.nome_documento}
+        description={doc.descricao}
+        arquivos={[{ url: doc.url_media, label: doc.nome_documento }]}
+      />
+    </>
   );
 }
 
 function MidiaChatCard({ midia }: { midia: MidiaChat }) {
-  const Icon = mediaIcon(midia.url, midia.mensage_type);
-  const kind = resolveMediaDisplayKind(midia.url, midia.mensage_type);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const Icon = mediaIcon(midia.mensage_type, midia.url);
+  const kind = resolveMediaDisplayKind(midia.mensage_type, midia.url);
 
   return (
-    <Card className="overflow-hidden">
-      <CardContent className="p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex min-w-0 gap-3">
-            {kind === "image" ? (
-              <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border bg-muted">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={midia.url}
-                  alt=""
-                  className="h-full w-full object-cover"
-                />
+    <>
+      <Card className="overflow-hidden">
+        <CardContent className="p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex min-w-0 gap-3">
+              {kind === "image" ? (
+                <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border bg-muted">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={midia.url}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                </div>
+              ) : (
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted">
+                  <Icon className="h-5 w-5 text-muted-foreground" />
+                </div>
+              )}
+              <div className="min-w-0">
+                <p className="font-medium">Mídia do chat</p>
+                <p className="mt-0.5 text-xs text-muted-foreground capitalize">
+                  {midia.mensage_type ?? "arquivo"}
+                </p>
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  {formatDateTime(midia.created_at)}
+                </p>
               </div>
-            ) : (
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted">
-                <Icon className="h-5 w-5 text-muted-foreground" />
-              </div>
-            )}
-            <div className="min-w-0">
-              <p className="font-medium">Mídia do chat</p>
-              <p className="mt-0.5 text-xs text-muted-foreground capitalize">
-                {midia.mensage_type ?? "arquivo"}
-              </p>
-              <p className="mt-1 text-[10px] text-muted-foreground">
-                {formatDateTime(midia.created_at)}
-              </p>
             </div>
+            <button
+              type="button"
+              onClick={() => setPreviewOpen(true)}
+              className="inline-flex shrink-0 items-center gap-1 text-xs text-primary underline"
+            >
+              <Eye className="h-3.5 w-3.5" />
+              Abrir
+            </button>
           </div>
-          <a
-            href={midia.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex shrink-0 items-center gap-1 text-xs text-primary underline"
-          >
-            <ExternalLink className="h-3.5 w-3.5" />
-            Abrir
-          </a>
-        </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+      <ArquivoVisualizarDialog
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        title="Mídia do chat"
+        description={midia.text}
+        arquivos={[
+          {
+            url: midia.url,
+            label: midia.mensage_type ?? "Mídia do chat",
+            mensageType: midia.mensage_type,
+          },
+        ]}
+      />
+    </>
   );
 }
 

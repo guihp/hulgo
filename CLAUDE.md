@@ -49,3 +49,8 @@
   `N8N_WEBHOOK_CONTROLE_IA` (fallback `N8N_WEBHOOK_APROVACAO`). Fluxo: `docs/n8n-controle-ia.json`.
   Chave block padrão: `{telefone_digitos}_block_{instancia}` — nós de entrada do fluxo principal
   (Verifica Atendimento Humano1 / PARAR a IA2) precisavam de correção (RecipientAlt vazio).
+- **IA organizadora (fase 1)**: coluna Kanban `aguardando_analise` ("Aguardando análise") = caixa
+  de pendências após organização WhatsApp (CPF + demanda + checklist). Mensagem fixa ao entrar
+  (`lib/casos/encaminhamento-analise.ts` + flag `casos_novos.mensagem_encaminhamento_enviada_em`);
+  painel e `POST /api/integracao/kanban-mover`. Prompt: `docs/PROMPT-AGENTE-IA.md`. Migration:
+  `20260806180000_aguardando_analise_encaminhamento.sql`.
