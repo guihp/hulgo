@@ -83,22 +83,14 @@ async function buildConnectionState(
   };
 }
 
-/** Só lê status/QR — não força connect (para polling leve). */
+/** Só lê status — sem QR (poll leve; evita Server Action gigante com base64). */
 async function peekConnectionState(): Promise<WhatsAppConnectionState> {
   const config = await getAppConfig();
   const status = await getInstanceStatus();
-  if (status.loggedIn) {
-    return {
-      instanceName: config.whatsapp_instancia,
-      status,
-      qrCode: null,
-    };
-  }
-  const qrCode = await getInstanceQrCode();
   return {
     instanceName: config.whatsapp_instancia,
     status,
-    qrCode,
+    qrCode: null,
   };
 }
 

@@ -74,7 +74,7 @@ export function WhatsAppQrPanel() {
       },
       body: JSON.stringify({
         sessionId: "a9d94c",
-        runId: "prod-qr",
+        runId: "post-fix",
         hypothesisId: "A",
         location: "whatsapp-qr-panel.tsx:loadConnection:start",
         message: "loadConnection start",
@@ -99,7 +99,7 @@ export function WhatsAppQrPanel() {
         },
         body: JSON.stringify({
           sessionId: "a9d94c",
-          runId: "prod-qr",
+          runId: "post-fix",
           hypothesisId: "A",
           location: "whatsapp-qr-panel.tsx:loadConnection:result",
           message: "loadConnection result",
@@ -110,6 +110,8 @@ export function WhatsAppQrPanel() {
             loggedIn: result.ok ? result.data.status.loggedIn : null,
             hasQr: result.ok ? Boolean(result.data.qrCode?.base64) : null,
             instanceLen: result.ok ? result.data.instanceName.length : null,
+            light,
+            runIdTag: "post-fix",
           },
           timestamp: Date.now(),
         }),
@@ -137,11 +139,19 @@ export function WhatsAppQrPanel() {
             loggedIn: false,
             name: "",
           },
+          // light não traz QR — preserva o atual
+          qrCode: light ? null : data.qrCode,
         });
         return data;
       }
 
-      setState(data);
+      // Poll leve (light) só atualiza status; não zera o QR já exibido
+      setState((prev) => {
+        if (light && prev?.qrCode && !data.qrCode) {
+          return { ...data, qrCode: prev.qrCode };
+        }
+        return data;
+      });
       return data;
     } catch (err) {
       // #region agent log
