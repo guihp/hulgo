@@ -11,7 +11,6 @@ import {
   FolderOpen,
   FolderPlus,
   Gavel,
-  ImageIcon,
   MessageCircle,
   Upload,
 } from "lucide-react";
@@ -197,11 +196,7 @@ function MidiaTile({ midia }: { midia: MidiaChat }) {
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-2 px-3">
               <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-background/80 ring-1 ring-foreground/10">
-                {kind === "image" ? (
-                  <ImageIcon className="h-6 w-6 text-muted-foreground" />
-                ) : (
-                  <FileText className="h-6 w-6 text-muted-foreground" />
-                )}
+                <FileText className="h-6 w-6 text-muted-foreground" />
               </div>
               <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                 {fileKindLabel(midia.url, midia.mensage_type)}
