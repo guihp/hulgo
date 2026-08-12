@@ -35,7 +35,7 @@ function attachCasos(
   const casoMap = new Map(casos.map((c) => [c.id, c]));
   return docs.map((doc) => ({
     ...doc,
-    caso: casoMap.get(doc.caso_id) ?? null,
+    caso: doc.caso_id != null ? (casoMap.get(doc.caso_id) ?? null) : null,
   }));
 }
 
@@ -48,11 +48,17 @@ export async function fetchAllDocumentos(): Promise<DocumentoComCaso[]> {
 
   if (!docs?.length) return [];
 
-  const casoIds = [...new Set(docs.map((d) => d.caso_id))];
-  const { data: casos } = await supabase
-    .from("casos_novos")
-    .select("id, nome, telefone, cpf, beneficio_identificado")
-    .in("id", casoIds);
+  const casoIds = [
+    ...new Set(docs.map((d) => d.caso_id).filter((id): id is number => id != null)),
+  ];
+  const casos = casoIds.length
+    ? (
+        await supabase
+          .from("casos_novos")
+          .select("id, nome, telefone, cpf, beneficio_identificado")
+          .in("id", casoIds)
+      ).data
+    : [];
 
   return attachCasos(docs, casos ?? []);
 }
@@ -156,3 +162,59 @@ export function groupDocumentosPorCliente(
     (b.lastAt ?? "").localeCompare(a.lastAt ?? "")
   );
 }
+
+export async function fetchFichaArquivos(opts: {
+  cpf?: string | null;
+  contactNorms: string[];
+  casoIds: number[];
+}): Promise<{
+  documentos: Tables<"documentos_cliente">[];
+  pastas: Tables<"documentos_pastas">[];
+  midiasChat: MidiaChat[];
+}> {
+  const supabase = await createClient();
+  const contacts = [...new Set(opts.contactNorms.filter(Boolean))];
+  const cpf = opts.cpf?.replace(/\D/g, "") || null;
+
+  const docParts: string[] = [];
+  if (cpf) docParts.push(`cpf.eq.${cpf}`);
+  for (const c of contacts) docParts.push(`contact_norm.eq.${c}`);
+  for (const id of opts.casoIds) docParts.push(`caso_id.eq.${id}`);
+
+  const pastaParts: string[] = [];
+  if (cpf) pastaParts.push(`cpf.eq.${cpf}`);
+  for (const c of contacts) pastaParts.push(`contact_norm.eq.${c}`);
+
+  const [docsRes, pastasRes, midiasList] = await Promise.all([
+    docParts.length
+      ? supabase
+          .from("documentos_cliente")
+          .select("*")
+          .or(docParts.join(","))
+          .order("created_at", { ascending: false })
+      : Promise.resolve({ data: [] as Tables<"documentos_cliente">[] }),
+    pastaParts.length
+      ? supabase
+          .from("documentos_pastas")
+          .select("*")
+          .or(pastaParts.join(","))
+          .order("created_at", { ascending: true })
+      : Promise.resolve({ data: [] as Tables<"documentos_pastas">[] }),
+    Promise.all(contacts.map((c) => fetchMidiasChatByContact(c))),
+  ]);
+
+  const documentos = docsRes.data ?? [];
+  const urlsRegistradas = new Set(
+    documentos.map((d) => d.url_media).filter(Boolean)
+  );
+  const midiasChat = midiasList
+    .flat()
+    .filter((m) => !urlsRegistradas.has(m.url));
+
+  return {
+    documentos,
+    pastas: pastasRes.data ?? [],
+    midiasChat,
+  };
+}
+

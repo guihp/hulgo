@@ -146,6 +146,41 @@ Preenche a ficha do caso incrementalmente (CPF, benefício, docs faltantes, etc.
 
 ---
 
+## Tool 9 — `checklist_beneficios`
+
+**Quando usar:** ao identificar a demanda/benefício, **antes** de listar documentos ao cliente. Fonte de verdade = Configurações → Tipos de caso (não hardcode do prompt).
+
+Auth **igual** a `atualizar_dados_caso`: Edge Function + service role (não use `x-integracao-token`).
+
+| Campo | Valor |
+|-------|--------|
+| **Name** | `checklist_beneficios` |
+| **Type** | HTTP Request Tool |
+| **Method** | GET |
+| **URL** | `https://hzfvciamevimjzuvidcp.supabase.co/functions/v1/checklist-beneficios` |
+| **Headers** | `Authorization: Bearer SEU_SUPABASE_SERVICE_ROLE_KEY` + `apikey: SEU_SUPABASE_SERVICE_ROLE_KEY` (mesma key de `caso-atualizar`) |
+| **JSON importável** | [`n8n-tool-checklist-beneficios.json`](./n8n-tool-checklist-beneficios.json) |
+
+**Description (cole no nó):**
+```
+Consulta no painel do escritório quais documentos cobrar do cliente conforme o tipo de benefício/caso. Chame SEMPRE ao identificar a demanda ou o benefício desejado, e ANTES de listar documentos ao cliente — não invente lista fixa do prompt. Com beneficio preenchido (ex.: auxílio-doença, BPC, aposentadoria rural), retorna o melhor match (chave, label, aliases, documentos na ordem). Sem beneficio (vazio), retorna todos os tipos ativos com suas listas. Use match.documentos (ou tipos[].documentos) para informar o cliente e gravar documentos_faltantes via atualizar_dados_caso.
+```
+
+**Query (modo expressão):**
+```
+beneficio = {{ $fromAI('beneficio', 'Texto do benefício ou demanda identificado na conversa (ex.: auxílio por incapacidade, BPC, aposentadoria rural). Deixe vazio para listar todos os tipos ativos.', 'string') }}
+```
+
+Exemplos de URL:
+- Todos: `GET https://hzfvciamevimjzuvidcp.supabase.co/functions/v1/checklist-beneficios`
+- Match: `GET .../checklist-beneficios?beneficio=auxílio%20por%20incapacidade`
+
+Alternativa (painel): `GET /api/integracao/checklist-beneficios` com `x-integracao-token`.
+
+Detalhes da API: [CHECKLIST-BENEFICIOS-API.md](./CHECKLIST-BENEFICIOS-API.md).
+
+---
+
 # Blocos de prompt (resumo)
 
 Cole o systemMessage completo de **[PROMPT-AGENTE-IA.md](./PROMPT-AGENTE-IA.md)**. Trechos-chave:
@@ -159,11 +194,11 @@ Cole o systemMessage completo de **[PROMPT-AGENTE-IA.md](./PROMPT-AGENTE-IA.md)*
 </funil-kanban>
 ```
 
-Checklist de documentos: espelhar `lib/utils/beneficios.ts` (bloco `<checklist-documentos>` no prompt).
+Checklist de documentos: chame a tool `checklist_beneficios` (Edge Supabase, mesma auth de `atualizar_dados_caso`). O bloco `<checklist-documentos>` no prompt é só fallback se a tool falhar.
 
 Fluxo fase 1:
 
-- **Organização:** saudação → CPF → demanda → checklist → `atualizar_dados_caso` / `registrar_documento_cliente` → `registrar_caso_para_advogado` → `mover_cliente_kanban` `aguardando_analise`
+- **Organização:** saudação → CPF → demanda → `checklist_beneficios` → listar docs → `atualizar_dados_caso` / `registrar_documento_cliente` → `registrar_caso_para_advogado` → `mover_cliente_kanban` `aguardando_analise`
 - **Falar com advogado:** `atendimento_humano`
 - **Não usar nesta fase:** DataJud, `enviar_para_aprovacao_advogado`, `aguardando_aprovacao`
 
@@ -175,8 +210,9 @@ Fluxo fase 1:
 - [ ] `mover_cliente_kanban` ligada ao AI Agent
 - [ ] `registrar_documento_cliente` ligada ao AI Agent
 - [ ] `atualizar_dados_caso` ligada ao AI Agent
+- [ ] `checklist_beneficios` ligada ao AI Agent
 - [ ] `registrar_caso_para_advogado` ligada ao AI Agent
 - [ ] `buscar_processos_por_cpf` ligada (só localizar cadastro)
 - [ ] DataJud / aprovação desconectadas do Agent (fase 1)
-- [ ] Header `x-integracao-token` nas HTTP tools do painel
+- [ ] Header `x-integracao-token` nas HTTP tools do **painel** (Next); Edge tools (`caso-atualizar`, `checklist-beneficios`, …) usam service role Bearer + apikey
 - [ ] systemMessage = [PROMPT-AGENTE-IA.md](./PROMPT-AGENTE-IA.md)

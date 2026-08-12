@@ -54,3 +54,9 @@
   (`lib/casos/encaminhamento-analise.ts` + flag `casos_novos.mensagem_encaminhamento_enviada_em`);
   painel e `POST /api/integracao/kanban-mover`. Prompt: `docs/PROMPT-AGENTE-IA.md`. Migration:
   `20260806180000_aguardando_analise_encaminhamento.sql`.
+- **Pastas na ficha** (2026-08-12): arquivos saíram do menu. Hub é a ficha (`/clientes/[cpf]`
+  ou `/clientes/contato/[fone]`). `documentos_cliente` ganhou `cpf`, `contact_norm`,
+  `processo_id`, `pasta` (`geral` | `caso:{id}` | `processo:{id}` | `custom:{nome}`);
+  `caso_id` nullable; tabela `documentos_pastas`. Upload na ficha:
+  `uploadArquivoCliente` / `criarPastaCliente`. `/arquivos` redireciona. Migration:
+  `20260812120000_documentos_pastas_ficha.sql`.

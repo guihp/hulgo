@@ -1,7 +1,9 @@
 import { redirect } from "next/navigation";
 import { getAppUser } from "@/lib/actions/auth";
 import { getAppConfig } from "@/lib/config/app-config";
+import { listTiposCaso } from "@/lib/data/tipos-caso";
 import { WhatsAppQrPanel } from "@/components/configuracoes/whatsapp-qr-panel";
+import { TiposCasoPanel } from "@/components/configuracoes/tipos-caso-panel";
 import {
   Card,
   CardContent,
@@ -15,18 +17,23 @@ export default async function ConfiguracoesPage() {
   if (!user) redirect("/login");
   if (user.papel !== "advogado") redirect("/");
 
-  const config = await getAppConfig();
+  const [config, tipos] = await Promise.all([
+    getAppConfig(),
+    listTiposCaso({ includeInactive: true }),
+  ]);
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="mx-auto max-w-5xl space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Configurações</h1>
         <p className="text-sm text-muted-foreground">
-          Conexão WhatsApp e parâmetros do escritório
+          Conexão WhatsApp, tipos de caso e parâmetros do escritório
         </p>
       </div>
 
       <WhatsAppQrPanel />
+
+      <TiposCasoPanel initialTipos={tipos} />
 
       <Card>
         <CardHeader>

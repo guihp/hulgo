@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getAppUser } from "@/lib/actions/auth";
 import { CasoDetail } from "@/components/kanban/caso-detail";
+import { checklistDoBeneficio } from "@/lib/data/tipos-caso";
 
 export default async function CasoDetailPage({
   params,
@@ -29,7 +30,15 @@ export default async function CasoDetailPage({
 
   if (!caso) notFound();
 
+  const checklist = await checklistDoBeneficio(caso.beneficio_identificado);
+
   return (
-    <CasoDetail caso={caso} notas={notas ?? []} documentos={documentos ?? []} user={user} />
+    <CasoDetail
+      caso={caso}
+      notas={notas ?? []}
+      documentos={documentos ?? []}
+      user={user}
+      checklist={checklist}
+    />
   );
 }

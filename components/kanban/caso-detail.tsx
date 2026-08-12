@@ -8,6 +8,7 @@ import {
   CalendarClock,
   ExternalLink,
   FileText,
+  FolderOpen,
   ListChecks,
 } from "lucide-react";
 import {
@@ -53,14 +54,13 @@ import { CASO_STATUS } from "@/lib/constants";
 import { parseDocumentList } from "@/lib/utils/messages";
 import { formatDate, formatDateTime } from "@/lib/utils/dates";
 import { formatNumeroProcesso } from "@/lib/utils/processo";
-import {
-  avaliarRequisitoEtario,
-  chaveDoBeneficio,
-  CHECKLIST_POR_BENEFICIO,
-} from "@/lib/utils/beneficios";
+import { avaliarRequisitoEtario } from "@/lib/utils/beneficios";
 import { NovoPrazoDialog } from "@/components/prazos/prazos-ui";
 import { EditarCasoDialog } from "@/components/kanban/editar-caso";
 import { DocsAdvogado } from "@/components/kanban/docs-advogado";
+import { fichaPessoaHref } from "@/lib/utils/ficha";
+import { normalizeCpf } from "@/lib/utils/cpf";
+import { phoneToContactNorm } from "@/lib/utils/phone";
 import Link from "next/link";
 
 function statusLabel(status: string | null | undefined) {
@@ -76,11 +76,13 @@ export function CasoDetail({
   notas,
   documentos,
   user,
+  checklist,
 }: {
   caso: Caso;
   notas: Nota[];
   documentos: DocumentoCliente[];
   user: AppUser;
+  checklist: { chave: string; label: string; docs: string[] };
 }) {
   const router = useRouter();
   const [nota, setNota] = useState("");
@@ -98,8 +100,6 @@ export function CasoDetail({
     caso.data_nascimento,
     caso.beneficio_identificado
   );
-  const checklistTemplate =
-    CHECKLIST_POR_BENEFICIO[chaveDoBeneficio(caso.beneficio_identificado)];
 
   async function aplicarChecklist() {
     const jaListados = new Set(
@@ -107,9 +107,7 @@ export function CasoDetail({
         (d) => d.toLowerCase()
       )
     );
-    const novos = checklistTemplate.docs.filter(
-      (d) => !jaListados.has(d.toLowerCase())
-    );
+    const novos = checklist.docs.filter((d) => !jaListados.has(d.toLowerCase()));
     if (novos.length === 0) {
       toast.info("Checklist já aplicado — nenhum documento novo");
       return;
@@ -280,6 +278,20 @@ export function CasoDetail({
 
         <EditarCasoDialog caso={caso} />
 
+        {(caso.cpf || caso.telefone) && (
+          <LinkButton
+            href={fichaPessoaHref({
+              cpf: caso.cpf ? normalizeCpf(caso.cpf) : null,
+              contactNorm: phoneToContactNorm(caso.telefone),
+              hash: "arquivos",
+            })}
+            variant="outline"
+          >
+            <FolderOpen className="mr-2 h-4 w-4" />
+            Arquivos na ficha
+          </LinkButton>
+        )}
+
         <NovoPrazoDialog
           cpf={caso.cpf}
           casoId={caso.id}
@@ -340,7 +352,7 @@ export function CasoDetail({
               onClick={aplicarChecklist}
             >
               <ListChecks className="h-4 w-4" />
-              Aplicar checklist ({checklistTemplate.label})
+              Aplicar checklist ({checklist.label})
             </Button>
           </CardHeader>
           <CardContent className="space-y-4">

@@ -7,6 +7,11 @@ import { sendMedia, type EvoGoMediaType } from "@/lib/evogo/client";
 import { getWhatsAppInstancia } from "@/lib/config/app-config";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import { normalizeCpf } from "@/lib/utils/cpf";
+import {
+  pastaCustomKey,
+  storagePastaSegment,
+} from "@/lib/utils/ficha";
 import { parseDocumentList } from "@/lib/utils/messages";
 import { phoneToContactNorm } from "@/lib/utils/phone";
 import type { Json } from "@/types/database";
@@ -32,10 +37,30 @@ function base64ToBuffer(base64: string): Buffer {
   return Buffer.from(cleaned, "base64");
 }
 
-function revalidateDocs(casoId: number, cpf?: string | null) {
-  revalidatePath(`/kanban/${casoId}`);
-  if (cpf) revalidatePath(`/clientes/${cpf}`);
-  revalidatePath("/arquivos");
+function revalidateDocs(opts: {
+  casoId?: number | null;
+  cpf?: string | null;
+  contactNorm?: string | null;
+}) {
+  if (opts.casoId) revalidatePath(`/kanban/${opts.casoId}`);
+  if (opts.cpf) revalidatePath(`/clientes/${opts.cpf}`);
+  if (opts.contactNorm) {
+    revalidatePath(`/clientes/contato/${opts.contactNorm}`);
+  }
+  revalidatePath("/clientes");
+}
+
+function assertPasta(pasta: string): string {
+  const value = pasta.trim();
+  if (
+    value === "geral" ||
+    value.startsWith("caso:") ||
+    value.startsWith("processo:") ||
+    value.startsWith("custom:")
+  ) {
+    return value;
+  }
+  throw new Error("Pasta inválida");
 }
 
 /** Upload de documento feito pelo ESCRITÓRIO (contrato, procuração, petição…). */
@@ -70,6 +95,14 @@ export async function uploadDocumentoAdvogado(input: {
     .from("mensagens-media")
     .getPublicUrl(storagePath);
 
+  const { data: caso } = await service
+    .from("casos_novos")
+    .select("id, cpf, telefone")
+    .eq("id", input.casoId)
+    .maybeSingle();
+  const cpf = caso?.cpf ? normalizeCpf(caso.cpf) : null;
+  const contactNorm = phoneToContactNorm(caso?.telefone) || null;
+
   const { data: doc, error } = await service
     .from("documentos_cliente")
     .insert({
@@ -79,6 +112,9 @@ export async function uploadDocumentoAdvogado(input: {
       url_media: pub.publicUrl,
       origem: "advogado",
       requer_assinatura: input.requerAssinatura,
+      pasta: `caso:${input.casoId}`,
+      cpf,
+      contact_norm: contactNorm,
     })
     .select("id")
     .single();
@@ -90,8 +126,226 @@ export async function uploadDocumentoAdvogado(input: {
     requer_assinatura: input.requerAssinatura,
   });
 
-  revalidateDocs(input.casoId);
+  revalidateDocs({ casoId: input.casoId, cpf, contactNorm });
   return { success: true, docId: doc.id };
+}
+
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+
+type ArquivoRegistroInput = {
+  urlMedia: string;
+  nomeDocumento?: string;
+  descricao?: string;
+};
+
+/** Registra um ou mais arquivos já no Storage — 1 insert batch + 1 revalidate. */
+export async function registrarArquivosCliente(input: {
+  cpf?: string | null;
+  contactNorm: string;
+  pasta: string;
+  casoId?: number | null;
+  processoId?: number | null;
+  arquivos: ArquivoRegistroInput[];
+}) {
+  const user = await getAppUser();
+  if (!user) throw new Error("Não autenticado");
+
+  const contactNorm = phoneToContactNorm(input.contactNorm);
+  const cpf = input.cpf ? normalizeCpf(input.cpf) : null;
+  if (!contactNorm && !cpf) {
+    throw new Error("Informe o CPF ou o telefone da pessoa");
+  }
+  if (!input.arquivos.length) throw new Error("Nenhum arquivo para registrar");
+
+  const pasta = assertPasta(input.pasta);
+  let casoId = input.casoId ?? null;
+  let processoId = input.processoId ?? null;
+  if (pasta.startsWith("caso:")) {
+    const parsed = Number(pasta.slice("caso:".length));
+    if (Number.isInteger(parsed)) casoId = parsed;
+  }
+  if (pasta.startsWith("processo:")) {
+    const parsed = Number(pasta.slice("processo:".length));
+    if (Number.isInteger(parsed)) processoId = parsed;
+  }
+
+  const rows = input.arquivos.map((a) => {
+    const url = a.urlMedia.trim();
+    if (!url) throw new Error("URL do arquivo ausente");
+    return {
+      caso_id: casoId,
+      processo_id: processoId,
+      nome_documento: a.nomeDocumento?.trim() || "Arquivo",
+      descricao: a.descricao?.trim() || null,
+      url_media: url,
+      origem: "advogado" as const,
+      pasta,
+      cpf,
+      contact_norm: contactNorm || null,
+    };
+  });
+
+  const supabase = await createClient();
+  const { data: docs, error } = await supabase
+    .from("documentos_cliente")
+    .insert(rows)
+    .select("id");
+
+  if (error) throw new Error(error.message);
+
+  const ids = (docs ?? []).map((d) => d.id);
+  if (ids[0]) {
+    await logEvent(ids[0], "upload_ficha", {
+      pasta,
+      caso_id: casoId,
+      processo_id: processoId,
+      count: ids.length,
+      doc_ids: ids,
+    });
+  }
+  revalidateDocs({ casoId, cpf, contactNorm });
+
+  return { success: true, docIds: ids };
+}
+
+/** Um arquivo — delega ao batch. */
+export async function registrarArquivoCliente(input: {
+  cpf?: string | null;
+  contactNorm: string;
+  pasta: string;
+  casoId?: number | null;
+  processoId?: number | null;
+  nomeDocumento?: string;
+  descricao?: string;
+  urlMedia: string;
+}) {
+  const result = await registrarArquivosCliente({
+    cpf: input.cpf,
+    contactNorm: input.contactNorm,
+    pasta: input.pasta,
+    casoId: input.casoId,
+    processoId: input.processoId,
+    arquivos: [
+      {
+        urlMedia: input.urlMedia,
+        nomeDocumento: input.nomeDocumento,
+        descricao: input.descricao,
+      },
+    ],
+  });
+  return { success: true, docId: result.docIds[0] };
+}
+
+/** Upload na ficha via base64 (legado / fallback). Preferir upload direto + registrarArquivoCliente. */
+export async function uploadArquivoCliente(input: {
+  cpf?: string | null;
+  contactNorm: string;
+  pasta: string;
+  casoId?: number | null;
+  processoId?: number | null;
+  nomeDocumento?: string;
+  descricao?: string;
+  fileBase64: string;
+  fileName: string;
+  mimeType: string;
+}) {
+  const user = await getAppUser();
+  if (!user) throw new Error("Não autenticado");
+
+  const contactNorm = phoneToContactNorm(input.contactNorm);
+  const cpf = input.cpf ? normalizeCpf(input.cpf) : null;
+  if (!contactNorm && !cpf) {
+    throw new Error("Informe o CPF ou o telefone da pessoa");
+  }
+
+  const pasta = assertPasta(input.pasta);
+  const buffer = base64ToBuffer(input.fileBase64);
+  if (buffer.length > MAX_UPLOAD_BYTES) {
+    throw new Error("Arquivo maior que 25 MB");
+  }
+
+  let casoId = input.casoId ?? null;
+  let processoId = input.processoId ?? null;
+  if (pasta.startsWith("caso:")) {
+    const parsed = Number(pasta.slice("caso:".length));
+    if (Number.isInteger(parsed)) casoId = parsed;
+  }
+  if (pasta.startsWith("processo:")) {
+    const parsed = Number(pasta.slice("processo:".length));
+    if (Number.isInteger(parsed)) processoId = parsed;
+  }
+
+  const supabase = await createClient();
+  const ext = input.fileName.includes(".")
+    ? input.fileName.split(".").pop()!.toLowerCase()
+    : "bin";
+  const personKey = cpf || contactNorm;
+  const storagePath = `clientes/${personKey}/${storagePastaSegment(pasta)}/${randomUUID()}.${ext}`;
+
+  const { error: upErr } = await supabase.storage
+    .from("mensagens-media")
+    .upload(storagePath, buffer, {
+      contentType: input.mimeType || "application/octet-stream",
+      upsert: false,
+    });
+  if (upErr) throw new Error(`Falha no upload: ${upErr.message}`);
+
+  const { data: pub } = supabase.storage
+    .from("mensagens-media")
+    .getPublicUrl(storagePath);
+
+  return registrarArquivoCliente({
+    cpf,
+    contactNorm,
+    pasta,
+    casoId,
+    processoId,
+    nomeDocumento:
+      input.nomeDocumento?.trim() ||
+      input.fileName.replace(/\.[^.]+$/, "") ||
+      "Arquivo",
+    descricao: input.descricao,
+    urlMedia: pub.publicUrl,
+  });
+}
+
+export async function criarPastaCliente(input: {
+  cpf?: string | null;
+  contactNorm: string;
+  nome: string;
+}) {
+  const user = await getAppUser();
+  if (!user) throw new Error("Não autenticado");
+
+  const nome = input.nome.trim().replace(/\s+/g, " ").slice(0, 80);
+  if (!nome) throw new Error("Informe o nome da pasta");
+
+  const contactNorm = phoneToContactNorm(input.contactNorm);
+  const cpf = input.cpf ? normalizeCpf(input.cpf) : null;
+  if (!contactNorm && !cpf) {
+    throw new Error("Informe o CPF ou o telefone da pessoa");
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("documentos_pastas")
+    .insert({
+      nome,
+      cpf,
+      contact_norm: contactNorm || null,
+    })
+    .select("id, nome")
+    .single();
+
+  if (error) {
+    if (error.code === "23505") {
+      throw new Error("Já existe uma pasta com esse nome");
+    }
+    throw new Error(error.message);
+  }
+
+  revalidateDocs({ cpf, contactNorm });
+  return { success: true, pastaId: data.id, pasta: pastaCustomKey(data.nome) };
 }
 
 /**
@@ -118,16 +372,27 @@ export async function enviarDocumentoCliente(input: {
     .single();
   if (docErr || !doc) throw new Error("Documento não encontrado");
 
-  const { data: caso, error: casoErr } = await service
-    .from("casos_novos")
-    .select("id, telefone, cpf, documentos_faltantes")
-    .eq("id", doc.caso_id)
-    .single();
-  if (casoErr || !caso?.telefone) {
-    throw new Error("Caso sem telefone — não é possível enviar");
+  let caso: {
+    id: number;
+    telefone: string | null;
+    cpf: string | null;
+    documentos_faltantes: string | null;
+  } | null = null;
+  if (doc.caso_id != null) {
+    const { data } = await service
+      .from("casos_novos")
+      .select("id, telefone, cpf, documentos_faltantes")
+      .eq("id", doc.caso_id)
+      .maybeSingle();
+    caso = data;
   }
 
-  const phoneDigits = phoneToContactNorm(caso.telefone);
+  const phoneDigits =
+    phoneToContactNorm(caso?.telefone) ||
+    phoneToContactNorm(doc.contact_norm);
+  if (!phoneDigits) {
+    throw new Error("Sem telefone — não é possível enviar");
+  }
   const instancia =
     (await getWhatsAppInstancia(phoneDigits)) || EVOGO_INSTANCE_FALLBACK;
 
@@ -158,7 +423,7 @@ export async function enviarDocumentoCliente(input: {
   });
 
   // 3) pendência de assinatura vira "documento faltante" (a IA cobra)
-  if (doc.requer_assinatura && !doc.assinado_em) {
+  if (caso && doc.requer_assinatura && !doc.assinado_em) {
     const pendente = `${doc.nome_documento} assinado`;
     const faltantes = parseDocumentList(caso.documentos_faltantes);
     if (!faltantes.some((f) => f.toLowerCase() === pendente.toLowerCase())) {
@@ -183,7 +448,11 @@ export async function enviarDocumentoCliente(input: {
     phone: phoneDigits,
   });
 
-  revalidateDocs(caso.id, caso.cpf);
+  revalidateDocs({
+    casoId: caso?.id ?? doc.caso_id,
+    cpf: caso?.cpf ?? doc.cpf,
+    contactNorm: phoneDigits,
+  });
   return { success: true, messageId };
 }
 
@@ -200,11 +469,14 @@ export async function marcarDocumentoAssinado(docId: number) {
     .single();
   if (docErr || !doc) throw new Error("Documento não encontrado");
 
-  const { data: caso } = await service
-    .from("casos_novos")
-    .select("id, cpf, documentos_recebidos, documentos_faltantes")
-    .eq("id", doc.caso_id)
-    .single();
+  const { data: caso } =
+    doc.caso_id != null
+      ? await service
+          .from("casos_novos")
+          .select("id, cpf, documentos_recebidos, documentos_faltantes")
+          .eq("id", doc.caso_id)
+          .maybeSingle()
+      : { data: null };
 
   await service
     .from("documentos_cliente")
@@ -231,7 +503,7 @@ export async function marcarDocumentoAssinado(docId: number) {
   }
 
   await logEvent(docId, "assinado", {});
-  revalidateDocs(doc.caso_id, caso?.cpf);
+  revalidateDocs({ casoId: doc.caso_id, cpf: caso?.cpf });
   return { success: true };
 }
 
@@ -245,7 +517,7 @@ export async function excluirDocumento(docId: number) {
   const service = createServiceClient();
   const { data: doc } = await service
     .from("documentos_cliente")
-    .select("id, caso_id, url_media")
+    .select("id, caso_id, cpf, contact_norm, url_media")
     .eq("id", docId)
     .single();
   if (!doc) throw new Error("Documento não encontrado");
@@ -264,6 +536,10 @@ export async function excluirDocumento(docId: number) {
   if (error) throw new Error(error.message);
 
   await logEvent(docId, "excluido", {});
-  revalidateDocs(doc.caso_id);
+  revalidateDocs({
+    casoId: doc.caso_id,
+    cpf: doc.cpf,
+    contactNorm: doc.contact_norm,
+  });
   return { success: true };
 }

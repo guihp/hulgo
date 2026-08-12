@@ -14,7 +14,7 @@ import {
 import { useDroppable } from "@dnd-kit/core";
 import { useDraggable } from "@dnd-kit/core";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle, Kanban, MessageSquare, User } from "lucide-react";
+import { AlertTriangle, CheckCircle, FolderOpen, Kanban, MessageSquare, User } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { updateCasoStatusCliente } from "@/lib/actions/casos";
 import { CASO_STATUS } from "@/lib/constants";
@@ -33,6 +33,8 @@ import {
 } from "@/components/ui/select";
 import { caseAgeLabel } from "@/lib/utils/dates";
 import { normalizeCpf } from "@/lib/utils/cpf";
+import { fichaPessoaHref } from "@/lib/utils/ficha";
+import { phoneToContactNorm } from "@/lib/utils/phone";
 import {
   findAprovacaoIdForCaso,
   buildAprovacaoPorContato,
@@ -124,6 +126,21 @@ function CasoCard({
           >
             <MessageSquare className="mr-1 h-3 w-3" />
             Chat
+          </LinkButton>
+        ) : null}
+        {cpfCliente || contactDigits ? (
+          <LinkButton
+            href={fichaPessoaHref({
+              cpf: cpfCliente || null,
+              contactNorm: phoneToContactNorm(caso.telefone) || contactDigits,
+              hash: "arquivos",
+            })}
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+          >
+            <FolderOpen className="mr-1 h-3 w-3" />
+            Arquivos
           </LinkButton>
         ) : null}
         {mostrarCliente ? (

@@ -468,7 +468,7 @@ function ConversationThread({
           </button>
         )}
         <Link
-          href={`/arquivos/${contactNorm}`}
+          href={`/clientes/contato/${encodeURIComponent(contactNorm)}#arquivos`}
           className="flex min-w-0 flex-1 items-center gap-3 rounded-lg p-1 transition-colors hover:bg-muted/60"
           title="Ver arquivos do cliente"
         >

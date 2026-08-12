@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Pencil, Plus, Users } from "lucide-react";
-import { deleteProcesso, upsertProcesso } from "@/lib/actions/casos";
+import { upsertProcesso } from "@/lib/actions/casos";
 import type { AppUser } from "@/lib/actions/auth";
 import type { Tables } from "@/types/database";
 import { CpfDisplay } from "@/components/shared/cpf-display";
@@ -15,6 +15,9 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { FichaArquivos } from "@/components/clientes/ficha-arquivos";
+import type { MidiaChat } from "@/lib/data/arquivos";
+import type { PessoaListaItem } from "@/lib/data/pessoas";
 import {
   Dialog,
   DialogContent,
@@ -304,19 +307,17 @@ function ProcessoDialog({
 export function ClientesList({
   processos,
   casosAbertura = [],
+  pessoas,
   abrirCaso = null,
-  user,
 }: {
   processos: Processo[];
   casosAbertura?: Tables<"casos_novos">[];
+  pessoas: PessoaListaItem[];
   abrirCaso?: Tables<"casos_novos"> | null;
-  user: AppUser;
+  user?: AppUser;
 }) {
-  const router = useRouter();
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
-  const [editingProcesso, setEditingProcesso] = useState<Processo | null>(null);
-  // Chegando de /clientes?caso=ID, o diálogo já abre preenchido
   const [abrindoCaso, setAbrindoCaso] = useState<Tables<"casos_novos"> | null>(
     abrirCaso
   );
@@ -341,37 +342,23 @@ export function ClientesList({
     });
   })();
 
-  const filtered = processos.filter((p) => {
+  const filtered = pessoas.filter((p) => {
     const q = search.toLowerCase();
     const qDigits = q.replace(/\D/g, "");
     return (
       !q ||
       p.nome.toLowerCase().includes(q) ||
-      p.cpf.includes(qDigits) ||
-      p.numero_processo.includes(qDigits) ||
-      formatNumeroProcesso(p.numero_processo).toLowerCase().includes(q)
+      (p.cpf && p.cpf.includes(qDigits)) ||
+      (p.telefone && p.telefone.replace(/\D/g, "").includes(qDigits)) ||
+      (p.beneficio?.toLowerCase().includes(q) ?? false)
     );
   });
-
-  async function handleDelete(id: number) {
-    if (user.papel !== "advogado") {
-      toast.error("Apenas advogados podem excluir processos");
-      return;
-    }
-    try {
-      await deleteProcesso(id);
-      toast.success("Processo removido");
-      router.refresh();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao remover");
-    }
-  }
 
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <Input
-          placeholder="Buscar por nome, CPF ou processo..."
+          placeholder="Buscar por nome, CPF ou telefone..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="sm:max-w-sm"
@@ -386,14 +373,6 @@ export function ClientesList({
               Novo processo
             </DialogTrigger>
           }
-        />
-        <ProcessoDialog
-          processo={editingProcesso}
-          open={editingProcesso !== null}
-          onOpenChange={(next) => {
-            if (!next) setEditingProcesso(null);
-          }}
-          title="Editar processo"
         />
         <ProcessoDialog
           open={abrindoCaso !== null}
@@ -467,8 +446,8 @@ export function ClientesList({
       {filtered.length === 0 ? (
         <EmptyState
           icon={Users}
-          title="Nenhum processo cadastrado"
-          description="Cadastre clientes com processo para alimentar a consulta por CPF da IA."
+          title="Nenhuma pessoa encontrada"
+          description="Pessoas com processo judicial ou atendimento no WhatsApp aparecem aqui."
         />
       ) : (
         <Card>
@@ -477,49 +456,44 @@ export function ClientesList({
               <TableHeader>
                 <TableRow>
                   <TableHead>Nome</TableHead>
-                  <TableHead>CPF</TableHead>
-                  <TableHead className="hidden md:table-cell">Processo</TableHead>
-                  <TableHead className="hidden sm:table-cell">Status</TableHead>
+                  <TableHead>Documento</TableHead>
+                  <TableHead className="hidden md:table-cell">WhatsApp</TableHead>
+                  <TableHead className="hidden sm:table-cell">Vínculos</TableHead>
                   <TableHead />
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filtered.map((p) => (
-                  <TableRow key={p.id}>
+                  <TableRow key={p.key}>
                     <TableCell className="font-medium">{p.nome}</TableCell>
                     <TableCell>
-                      <CpfDisplay value={p.cpf} />
+                      {p.cpf ? (
+                        <CpfDisplay value={p.cpf} />
+                      ) : (
+                        <span className="text-muted-foreground">Sem CPF</span>
+                      )}
                     </TableCell>
-                    <TableCell className="hidden md:table-cell font-mono text-xs">
-                      {formatNumeroProcesso(p.numero_processo)}
+                    <TableCell className="hidden md:table-cell text-muted-foreground">
+                      {p.telefone ? maskPhoneBrInput(p.telefone) : "—"}
                     </TableCell>
                     <TableCell className="hidden sm:table-cell">
-                      <Badge variant={p.ativo ? "default" : "secondary"}>
-                        {p.ativo ? "Ativo" : "Inativo"}
-                      </Badge>
+                      <div className="flex flex-wrap gap-1">
+                        {p.nProcessos > 0 ? (
+                          <Badge variant="default">
+                            {p.nProcessos} processo{p.nProcessos === 1 ? "" : "s"}
+                          </Badge>
+                        ) : null}
+                        {p.nCasos > 0 ? (
+                          <Badge variant="secondary">
+                            {p.nCasos} caso{p.nCasos === 1 ? "" : "s"}
+                          </Badge>
+                        ) : null}
+                      </div>
                     </TableCell>
                     <TableCell className="text-right">
-                      <LinkButton href={`/clientes/${normalizeCpf(p.cpf)}`} size="sm" variant="outline">
-                        Ver 360°
+                      <LinkButton href={p.href} size="sm" variant="outline">
+                        Ver ficha
                       </LinkButton>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setEditingProcesso(p)}
-                      >
-                        <Pencil className="mr-1 h-3.5 w-3.5" />
-                        Editar
-                      </Button>
-                      {user.papel === "advogado" && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="text-destructive"
-                          onClick={() => handleDelete(p.id)}
-                        >
-                          Excluir
-                        </Button>
-                      )}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -534,20 +508,28 @@ export function ClientesList({
 
 export function Cliente360({
   cpf,
+  contactNorm: contactNormProp,
   processos,
   casos,
   mensagens,
+  documentos = [],
+  pastas = [],
+  midiasChat = [],
 }: {
-  cpf: string;
+  cpf: string | null;
+  contactNorm?: string;
   processos: Processo[];
   casos: Tables<"casos_novos">[];
   mensagens: Tables<"mensagens">[];
+  documentos?: Tables<"documentos_cliente">[];
+  pastas?: Tables<"documentos_pastas">[];
+  midiasChat?: MidiaChat[];
 }) {
   const [editingProcesso, setEditingProcesso] = useState<Processo | null>(null);
   const nome = processos[0]?.nome ?? casos[0]?.nome ?? "Cliente";
-  const contactNorm = phoneToContactNorm(
-    processos[0]?.telefone ?? casos[0]?.telefone
-  );
+  const contactNorm =
+    contactNormProp ||
+    phoneToContactNorm(processos[0]?.telefone ?? casos[0]?.telefone);
 
   return (
     <div className="space-y-6">
@@ -555,7 +537,19 @@ export function Cliente360({
         <div>
           <h1 className="text-2xl font-bold">{nome}</h1>
           <p className="text-muted-foreground">
-            CPF: <CpfDisplay value={cpf} />
+            {cpf ? (
+              <>
+                CPF: <CpfDisplay value={cpf} />
+              </>
+            ) : (
+              "Sem CPF cadastrado"
+            )}
+            {contactNorm ? (
+              <>
+                {" · "}
+                {maskPhoneBrInput(contactNorm)}
+              </>
+            ) : null}
           </p>
         </div>
         {processos[0] ? (
@@ -633,6 +627,16 @@ export function Cliente360({
         )}
       </section>
 
+      <FichaArquivos
+        cpf={cpf}
+        contactNorm={contactNorm}
+        casos={casos}
+        processos={processos}
+        documentos={documentos}
+        pastas={pastas}
+        midiasChat={midiasChat}
+      />
+
       <section>
         <h2 className="mb-3 text-lg font-semibold">
           Conversas WhatsApp ({mensagens.length})
@@ -641,7 +645,7 @@ export function Cliente360({
           <p className="text-sm text-muted-foreground">Nenhuma mensagem</p>
         ) : (
           <LinkButton
-            href={`/atendimentos?contact=${encodeURIComponent(contactNorm || cpf)}`}
+            href={`/atendimentos?contact=${encodeURIComponent(contactNorm || cpf || "")}`}
             variant="outline"
           >
             Ver conversa

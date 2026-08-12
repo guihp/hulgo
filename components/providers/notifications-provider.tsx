@@ -283,16 +283,25 @@ export function NotificationsProvider({
         { event: "INSERT", schema: "public", table: "documentos_cliente" },
         (payload) => {
           const doc = payload.new as {
-            caso_id: number;
+            caso_id: number | null;
+            cpf: string | null;
+            contact_norm: string | null;
             nome_documento: string;
             origem: string;
           };
           if (doc.origem === "advogado") return; // upload nosso
+          const href = doc.caso_id
+            ? `/kanban/${doc.caso_id}`
+            : doc.cpf
+              ? `/clientes/${doc.cpf}#arquivos`
+              : doc.contact_norm
+                ? `/clientes/contato/${doc.contact_norm}#arquivos`
+                : "/clientes";
           push({
             kind: "documento",
             title: "📎 Documento recebido",
             body: doc.nome_documento,
-            href: `/kanban/${doc.caso_id}`,
+            href,
           });
         }
       )

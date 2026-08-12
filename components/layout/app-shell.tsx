@@ -10,7 +10,6 @@ import {
   Users,
   MessageSquare,
   FileBarChart,
-  FolderOpen,
   CalendarClock,
   Menu,
   LogOut,
@@ -37,7 +36,6 @@ const icons = {
   Users,
   MessageSquare,
   FileBarChart,
-  FolderOpen,
   CalendarClock,
   Settings,
 } as const;
@@ -49,7 +47,6 @@ const navItems = [
   { href: "/prazos", label: "Prazos", icon: "CalendarClock" as const, badge: "prazos" as const },
   { href: "/clientes", label: "Clientes", icon: "Users" as const },
   { href: "/atendimentos", label: "Atendimentos", icon: "MessageSquare" as const },
-  { href: "/arquivos", label: "Arquivos", icon: "FolderOpen" as const },
   { href: "/relatorios", label: "Relatórios", icon: "FileBarChart" as const },
   { href: "/configuracoes", label: "Configurações", icon: "Settings" as const, advogadoOnly: true },
 ];

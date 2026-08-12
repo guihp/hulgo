@@ -1,23 +1,27 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { Cliente360 } from "@/components/clientes/clientes-ui";
 import { DataJudPanel } from "@/components/clientes/datajud-panel";
 import { NovoPrazoDialog, PrazosList } from "@/components/prazos/prazos-ui";
 import { LinkButton } from "@/components/ui/link-button";
 import { loadFichaPessoa } from "@/lib/data/ficha";
-import { normalizeCpf } from "@/lib/utils/cpf";
+import { fichaPessoaHref } from "@/lib/utils/ficha";
+import { phoneToContactNorm } from "@/lib/utils/phone";
 
-export default async function Cliente360Page({
+export default async function ClienteContatoPage({
   params,
 }: {
-  params: Promise<{ cpf: string }>;
+  params: Promise<{ contact: string }>;
 }) {
-  const { cpf: cpfParam } = await params;
-  const cpf = normalizeCpf(cpfParam);
-  const ficha = await loadFichaPessoa({ cpf });
+  const { contact: contactParam } = await params;
+  const contactNorm = phoneToContactNorm(contactParam);
+  if (!contactNorm) notFound();
 
-  if (!ficha || (!ficha.processos.length && !ficha.casos.length)) {
-    notFound();
+  const ficha = await loadFichaPessoa({ contactNorm });
+  if (!ficha) notFound();
+
+  if (ficha.cpf) {
+    redirect(`${fichaPessoaHref({ cpf: ficha.cpf })}#arquivos`);
   }
 
   return (
@@ -26,7 +30,7 @@ export default async function Cliente360Page({
         <ArrowLeft className="h-4 w-4" />
       </LinkButton>
       <Cliente360
-        cpf={ficha.cpf}
+        cpf={null}
         contactNorm={ficha.contactNorm}
         processos={ficha.processos}
         casos={ficha.casos}
@@ -50,8 +54,7 @@ export default async function Cliente360Page({
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Prazos deste cliente</h2>
           <NovoPrazoDialog
-            cpf={ficha.cpf}
-            processoId={ficha.processos[0]?.id}
+            casoId={ficha.casos[0]?.id}
             triggerLabel="Novo prazo"
             triggerVariant="outline"
           />

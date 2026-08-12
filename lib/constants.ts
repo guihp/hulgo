@@ -25,6 +25,5 @@ export const NAV_ITEMS = [
   { href: "/aprovacoes", label: "Aprovações", icon: "CheckCircle" },
   { href: "/clientes", label: "Clientes", icon: "Users" },
   { href: "/atendimentos", label: "Atendimentos", icon: "MessageSquare" },
-  { href: "/arquivos", label: "Arquivos", icon: "FolderOpen" },
   { href: "/relatorios", label: "Relatórios", icon: "FileBarChart" },
 ] as const;

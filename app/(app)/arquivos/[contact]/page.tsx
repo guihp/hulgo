@@ -1,9 +1,8 @@
-import { notFound } from "next/navigation";
-import { fetchArquivosByContact } from "@/lib/data/arquivos";
-import { getContactNameMap } from "@/lib/data/contact-names";
+import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { fichaPessoaHref } from "@/lib/utils/ficha";
+import { normalizeCpf } from "@/lib/utils/cpf";
 import { phoneToContactNorm } from "@/lib/utils/phone";
-import { ArquivosContatoPanel } from "@/components/arquivos/arquivos-ui";
 
 export default async function ArquivosContatoPage({
   params,
@@ -12,39 +11,24 @@ export default async function ArquivosContatoPage({
 }) {
   const { contact: contactParam } = await params;
   const contactNorm = phoneToContactNorm(contactParam);
-
   if (!contactNorm) notFound();
 
   const supabase = await createClient();
-  const [arquivos, contactNames] = await Promise.all([
-    fetchArquivosByContact(contactNorm),
-    getContactNameMap(supabase),
+  const [{ data: casos }, { data: processos }] = await Promise.all([
+    supabase.from("casos_novos").select("cpf, telefone"),
+    supabase.from("processos_clientes").select("cpf, telefone"),
   ]);
 
-  const { documentos, midiasChat, casos } = arquivos;
+  const cpfDoContato =
+    [...(casos ?? []), ...(processos ?? [])].find(
+      (row) =>
+        phoneToContactNorm(row.telefone) === contactNorm && row.cpf
+    )?.cpf ?? null;
 
-  if (documentos.length === 0 && midiasChat.length === 0) {
-    const { count } = await supabase
-      .from("mensagens")
-      .select("id", { count: "exact", head: true })
-      .eq("contact_norm", contactNorm);
-
-    if (!count) notFound();
-  }
-
-  const casoPrincipal = casos[0] ?? null;
-  const displayName = contactNames[contactNorm] ?? casoPrincipal?.nome ?? null;
-  const phone = casoPrincipal?.telefone ?? contactNorm;
-  const cpf = casoPrincipal?.cpf ?? casos.find((c) => c.cpf)?.cpf ?? null;
-
-  return (
-    <ArquivosContatoPanel
-      contactNorm={contactNorm}
-      phone={phone}
-      displayName={displayName}
-      documentos={documentos}
-      midiasChat={midiasChat}
-      cpf={cpf}
-    />
-  );
+  const href = fichaPessoaHref({
+    cpf: cpfDoContato ? normalizeCpf(cpfDoContato) : null,
+    contactNorm,
+    hash: "arquivos",
+  });
+  redirect(href);
 }

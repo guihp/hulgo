@@ -1,0 +1,46 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "toolDescription": "Consulta no painel do escritório quais documentos cobrar do cliente conforme o tipo de benefício/caso. Chame SEMPRE ao identificar a demanda ou o benefício desejado, e ANTES de listar documentos ao cliente — não invente lista fixa do prompt. Com beneficio preenchido (ex.: auxílio-doença, BPC, aposentadoria rural), retorna o melhor match (chave, label, aliases, documentos na ordem). Sem beneficio (vazio), retorna todos os tipos ativos com suas listas. Use match.documentos (ou tipos[].documentos) para informar o cliente e gravar documentos_faltantes via atualizar_dados_caso.",
+        "method": "GET",
+        "url": "https://hzfvciamevimjzuvidcp.supabase.co/functions/v1/checklist-beneficios",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "beneficio",
+              "value": "={{ $fromAI('beneficio', 'Texto do benefício ou demanda identificado na conversa (ex.: auxílio por incapacidade, BPC, aposentadoria rural). Deixe vazio para listar todos os tipos ativos.', 'string') }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer SEU_SUPABASE_SERVICE_ROLE_KEY"
+            },
+            {
+              "name": "apikey",
+              "value": "SEU_SUPABASE_SERVICE_ROLE_KEY"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [5936, 1480],
+      "id": "dd000002-0002-4000-8000-000000000002",
+      "name": "checklist_beneficios"
+    }
+  ],
+  "connections": {
+    "checklist_beneficios": {
+      "ai_tool": [[{ "node": "AI Agent1", "type": "ai_tool", "index": 0 }]]
+    }
+  },
+  "pinData": {},
+  "meta": {}
+}

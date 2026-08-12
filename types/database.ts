@@ -228,6 +228,42 @@ export type Database = {
         };
         Relationships: [];
       };
+      app_tipos_caso: {
+        Row: {
+          id: string;
+          chave: string;
+          label: string;
+          aliases: string[];
+          documentos: string[];
+          ativo: boolean;
+          ordem: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          chave: string;
+          label: string;
+          aliases?: string[];
+          documentos?: string[];
+          ativo?: boolean;
+          ordem?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          chave?: string;
+          label?: string;
+          aliases?: string[];
+          documentos?: string[];
+          ativo?: boolean;
+          ordem?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       casos_novos: {
         Row: {
           area: string | null;
@@ -318,7 +354,9 @@ export type Database = {
       documentos_cliente: {
         Row: {
           assinado_em: string | null;
-          caso_id: number;
+          caso_id: number | null;
+          contact_norm: string | null;
+          cpf: string | null;
           created_at: string;
           descricao: string | null;
           enviado_cliente_em: string | null;
@@ -327,12 +365,16 @@ export type Database = {
           mensagem_row_id: number | null;
           nome_documento: string;
           origem: string;
+          pasta: string;
+          processo_id: number | null;
           requer_assinatura: boolean;
           url_media: string;
         };
         Insert: {
           assinado_em?: string | null;
-          caso_id: number;
+          caso_id?: number | null;
+          contact_norm?: string | null;
+          cpf?: string | null;
           created_at?: string;
           descricao?: string | null;
           enviado_cliente_em?: string | null;
@@ -341,12 +383,16 @@ export type Database = {
           mensagem_row_id?: number | null;
           nome_documento: string;
           origem?: string;
+          pasta?: string;
+          processo_id?: number | null;
           requer_assinatura?: boolean;
           url_media: string;
         };
         Update: {
           assinado_em?: string | null;
-          caso_id?: number;
+          caso_id?: number | null;
+          contact_norm?: string | null;
+          cpf?: string | null;
           created_at?: string;
           descricao?: string | null;
           enviado_cliente_em?: string | null;
@@ -355,8 +401,34 @@ export type Database = {
           mensagem_row_id?: number | null;
           nome_documento?: string;
           origem?: string;
+          pasta?: string;
+          processo_id?: number | null;
           requer_assinatura?: boolean;
           url_media?: string;
+        };
+        Relationships: [];
+      };
+      documentos_pastas: {
+        Row: {
+          contact_norm: string | null;
+          cpf: string | null;
+          created_at: string;
+          id: number;
+          nome: string;
+        };
+        Insert: {
+          contact_norm?: string | null;
+          cpf?: string | null;
+          created_at?: string;
+          id?: never;
+          nome: string;
+        };
+        Update: {
+          contact_norm?: string | null;
+          cpf?: string | null;
+          created_at?: string;
+          id?: never;
+          nome?: string;
         };
         Relationships: [];
       };

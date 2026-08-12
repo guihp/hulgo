@@ -1,6 +1,7 @@
-import { createClient } from "@/lib/supabase/server";
 import { getAppUser } from "@/lib/actions/auth";
 import { ClientesList } from "@/components/clientes/clientes-ui";
+import { agruparPessoas } from "@/lib/data/pessoas";
+import { createClient } from "@/lib/supabase/server";
 
 export default async function ClientesPage({
   searchParams,
@@ -10,21 +11,26 @@ export default async function ClientesPage({
   const supabase = await createClient();
   const user = await getAppUser();
   const { caso: casoParam } = await searchParams;
-  const [{ data: processos }, { data: casosAbertura }] = await Promise.all([
+  const [{ data: processos }, { data: casos }] = await Promise.all([
     supabase.from("processos_clientes").select("*").order("nome"),
-    // status legado do n8n (aguardando_advogado/em_analise) = abertura_processo
-    supabase
-      .from("casos_novos")
-      .select("*")
-      .in("status", ["abertura_processo", "aguardando_analise", "aguardando_advogado", "em_analise"])
-      .order("created_at", { ascending: false }),
+    supabase.from("casos_novos").select("*").order("created_at", { ascending: false }),
   ]);
 
-  // /clientes?caso=ID (botão "Criar processo" do Kanban) abre o cadastro
-  // pré-preenchido com os dados do caso
+  const casosAbertura = (casos ?? []).filter((c) =>
+    [
+      "abertura_processo",
+      "aguardando_analise",
+      "aguardando_advogado",
+      "em_analise",
+    ].includes(c.status ?? "")
+  );
+
+  const pessoas = agruparPessoas(processos ?? [], casos ?? []);
+
   const casoId = Number(casoParam);
   const abrirCaso = Number.isInteger(casoId)
-    ? (
+    ? (casos ?? []).find((c) => c.id === casoId) ??
+      (
         await supabase
           .from("casos_novos")
           .select("*")
@@ -36,14 +42,15 @@ export default async function ClientesPage({
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Clientes e processos</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Clientes</h1>
         <p className="text-muted-foreground">
-          Cadastro de clientes com processo — base da consulta por CPF da IA
+          Pessoas com processo judicial ou atendimento no WhatsApp
         </p>
       </div>
       <ClientesList
         processos={processos ?? []}
-        casosAbertura={casosAbertura ?? []}
+        casosAbertura={casosAbertura}
+        pessoas={pessoas}
         abrirCaso={abrirCaso}
         user={user!}
       />

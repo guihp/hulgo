@@ -9,7 +9,7 @@ export const PRAZO_TIPOS: { value: PrazoTipo; label: string }[] = [
   { value: "outro", label: "Outro" },
 ];
 
-/* ---------------- Checklist de documentos por benefício ---------------- */
+/* ---------------- Checklist de documentos por benefício (fallback) ---------------- */
 
 export type BeneficioChave =
   | "rural_idade"
@@ -98,26 +98,86 @@ export const CHECKLIST_POR_BENEFICIO: Record<
   },
 };
 
-/** Mapeia o texto livre `beneficio_identificado` para a chave do checklist. */
+/** Seed em memória (mesma ordem/aliases da migration) — usado se a tabela estiver vazia. */
+export const FALLBACK_TIPOS_CASO: {
+  chave: BeneficioChave;
+  label: string;
+  aliases: string[];
+  documentos: string[];
+  ordem: number;
+}[] = [
+  {
+    chave: "bpc_loas",
+    label: CHECKLIST_POR_BENEFICIO.bpc_loas.label,
+    aliases: ["bpc", "loas"],
+    documentos: CHECKLIST_POR_BENEFICIO.bpc_loas.docs,
+    ordem: 10,
+  },
+  {
+    chave: "pensao_morte",
+    label: CHECKLIST_POR_BENEFICIO.pensao_morte.label,
+    aliases: ["pensão", "pensao", "morte"],
+    documentos: CHECKLIST_POR_BENEFICIO.pensao_morte.docs,
+    ordem: 20,
+  },
+  {
+    chave: "salario_maternidade",
+    label: CHECKLIST_POR_BENEFICIO.salario_maternidade.label,
+    aliases: ["maternidade"],
+    documentos: CHECKLIST_POR_BENEFICIO.salario_maternidade.docs,
+    ordem: 30,
+  },
+  {
+    chave: "incapacidade",
+    label: CHECKLIST_POR_BENEFICIO.incapacidade.label,
+    aliases: [
+      "incapacidade",
+      "auxílio-doença",
+      "auxilio-doenca",
+      "doença",
+      "doenca",
+      "invalidez",
+    ],
+    documentos: CHECKLIST_POR_BENEFICIO.incapacidade.docs,
+    ordem: 40,
+  },
+  {
+    chave: "rural_idade",
+    label: CHECKLIST_POR_BENEFICIO.rural_idade.label,
+    aliases: ["rural"],
+    documentos: CHECKLIST_POR_BENEFICIO.rural_idade.docs,
+    ordem: 50,
+  },
+  {
+    chave: "urbana_idade",
+    label: CHECKLIST_POR_BENEFICIO.urbana_idade.label,
+    aliases: ["aposentadoria", "idade", "urbana"],
+    documentos: CHECKLIST_POR_BENEFICIO.urbana_idade.docs,
+    ordem: 60,
+  },
+  {
+    chave: "outro",
+    label: CHECKLIST_POR_BENEFICIO.outro.label,
+    aliases: ["outro"],
+    documentos: CHECKLIST_POR_BENEFICIO.outro.docs,
+    ordem: 90,
+  },
+];
+
+/**
+ * Mapeia o texto livre `beneficio_identificado` para a chave do checklist.
+ * Sync — usa seed em memória (mesmo algoritmo do match no DB).
+ * Para lista viva do banco, use `findTipoCasoByBeneficio` / `checklistDoBeneficio`.
+ */
 export function chaveDoBeneficio(beneficio: string | null | undefined): BeneficioChave {
   const b = (beneficio ?? "").toLowerCase();
   if (!b) return "outro";
-  if (b.includes("bpc") || b.includes("loas")) return "bpc_loas";
-  if (b.includes("pensão") || b.includes("pensao") || b.includes("morte"))
-    return "pensao_morte";
-  if (b.includes("maternidade")) return "salario_maternidade";
-  if (
-    b.includes("incapacidade") ||
-    b.includes("auxílio-doença") ||
-    b.includes("auxilio-doenca") ||
-    b.includes("doença") ||
-    b.includes("doenca") ||
-    b.includes("invalidez")
-  )
-    return "incapacidade";
-  if (b.includes("rural")) return "rural_idade";
-  if (b.includes("aposentadoria") || b.includes("idade") || b.includes("urbana"))
-    return "urbana_idade";
+  for (const tipo of FALLBACK_TIPOS_CASO) {
+    if (tipo.chave === "outro") continue;
+    for (const alias of tipo.aliases) {
+      if (b.includes(alias.toLowerCase())) return tipo.chave;
+    }
+  }
   return "outro";
 }
 
