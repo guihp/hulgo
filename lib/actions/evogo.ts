@@ -105,15 +105,66 @@ async function peekConnectionState(): Promise<WhatsAppConnectionState> {
 export async function getWhatsAppConnection(options?: {
   light?: boolean;
 }): Promise<ActionResult<WhatsAppConnectionState>> {
-  const auth = await requireAdvogado();
-  if (!auth.ok) return auth;
-
+  // #region agent log
+  const t0 = Date.now();
+  const dbg = (message: string, hypothesisId: string, data: Record<string, unknown>) => {
+    fetch("http://127.0.0.1:7337/ingest/4caa6043-74da-4518-bebb-88b5757877da", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "a9d94c",
+      },
+      body: JSON.stringify({
+        sessionId: "a9d94c",
+        runId: "prod-qr",
+        hypothesisId,
+        location: "evogo.ts:getWhatsAppConnection",
+        message,
+        data: { ...data, ms: Date.now() - t0 },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    console.info("[debug-a9d94c]", message, data);
+  };
+  // #endregion
   try {
+    const auth = await requireAdvogado();
+    if (!auth.ok) {
+      // #region agent log
+      dbg("auth failed", "C", { error: auth.error });
+      // #endregion
+      return auth;
+    }
+
+    // #region agent log
+    dbg("auth ok, calling evogo", "D", {
+      light: Boolean(options?.light),
+      hasEvoUrl: Boolean(process.env.EVOGO_API_URL?.trim()),
+      hasEvoKey: Boolean(process.env.EVOGO_GLOBAL_API_KEY?.trim()),
+      hasInstanceEnv: Boolean(process.env.EVOGO_INSTANCE_NAME?.trim()),
+      evoKeyLen: (process.env.EVOGO_GLOBAL_API_KEY ?? "").trim().length,
+    });
+    // #endregion
+
     const data = options?.light
       ? await peekConnectionState()
       : await buildConnectionState(false);
+    // #region agent log
+    dbg("evogo ok", "D", {
+      loggedIn: data.status.loggedIn,
+      connected: data.status.connected,
+      hasQr: Boolean(data.qrCode?.base64),
+      instanceLen: data.instanceName.length,
+    });
+    // #endregion
     return { ok: true, data };
   } catch (error) {
+    // #region agent log
+    dbg("evogo catch", "D", {
+      errMsg:
+        error instanceof Error ? error.message.slice(0, 300) : String(error).slice(0, 300),
+    });
+    // #endregion
     return { ok: false, error: formatEvoGoError(error) };
   }
 }

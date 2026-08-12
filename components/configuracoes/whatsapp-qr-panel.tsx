@@ -64,35 +64,121 @@ export function WhatsAppQrPanel() {
     light?: boolean;
   }) => {
     const { silent = false, light = false } = options ?? {};
-    const result = await getWhatsAppConnection({ light });
-    if (!result.ok) {
+    // #region agent log
+    const t0 = Date.now();
+    fetch("http://127.0.0.1:7337/ingest/4caa6043-74da-4518-bebb-88b5757877da", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "a9d94c",
+      },
+      body: JSON.stringify({
+        sessionId: "a9d94c",
+        runId: "prod-qr",
+        hypothesisId: "A",
+        location: "whatsapp-qr-panel.tsx:loadConnection:start",
+        message: "loadConnection start",
+        data: {
+          light,
+          silent,
+          host:
+            typeof window !== "undefined" ? window.location.host : "ssr",
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+    try {
+      const result = await getWhatsAppConnection({ light });
+      // #region agent log
+      fetch("http://127.0.0.1:7337/ingest/4caa6043-74da-4518-bebb-88b5757877da", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Debug-Session-Id": "a9d94c",
+        },
+        body: JSON.stringify({
+          sessionId: "a9d94c",
+          runId: "prod-qr",
+          hypothesisId: "A",
+          location: "whatsapp-qr-panel.tsx:loadConnection:result",
+          message: "loadConnection result",
+          data: {
+            ms: Date.now() - t0,
+            ok: result.ok,
+            error: result.ok ? null : result.error.slice(0, 200),
+            loggedIn: result.ok ? result.data.status.loggedIn : null,
+            hasQr: result.ok ? Boolean(result.data.qrCode?.base64) : null,
+            instanceLen: result.ok ? result.data.instanceName.length : null,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      if (!result.ok) {
+        if (!silent) {
+          setError(result.error);
+          toast.error(result.error);
+        }
+        return null;
+      }
+      setError(null);
+
+      const data = result.data;
+      // Evita a UI voltar para "conectado" com status stale logo após desconectar
+      if (
+        data.status.loggedIn &&
+        Date.now() < ignoreLoggedInUntilRef.current
+      ) {
+        setState({
+          ...data,
+          status: {
+            connected: data.status.connected,
+            loggedIn: false,
+            name: "",
+          },
+        });
+        return data;
+      }
+
+      setState(data);
+      return data;
+    } catch (err) {
+      // #region agent log
+      fetch("http://127.0.0.1:7337/ingest/4caa6043-74da-4518-bebb-88b5757877da", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Debug-Session-Id": "a9d94c",
+        },
+        body: JSON.stringify({
+          sessionId: "a9d94c",
+          runId: "prod-qr",
+          hypothesisId: "A",
+          location: "whatsapp-qr-panel.tsx:loadConnection:throw",
+          message: "loadConnection threw",
+          data: {
+            ms: Date.now() - t0,
+            errName: err instanceof Error ? err.name : typeof err,
+            errMsg:
+              err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300),
+            digest:
+              err && typeof err === "object" && "digest" in err
+                ? String((err as { digest?: unknown }).digest)
+                : null,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       if (!silent) {
-        setError(result.error);
-        toast.error(result.error);
+        const msg =
+          err instanceof Error ? err.message : "Falha ao consultar WhatsApp";
+        setError(msg);
+        toast.error(msg);
       }
       return null;
     }
-    setError(null);
-
-    const data = result.data;
-    // Evita a UI voltar para "conectado" com status stale logo após desconectar
-    if (
-      data.status.loggedIn &&
-      Date.now() < ignoreLoggedInUntilRef.current
-    ) {
-      setState({
-        ...data,
-        status: {
-          connected: data.status.connected,
-          loggedIn: false,
-          name: "",
-        },
-      });
-      return data;
-    }
-
-    setState(data);
-    return data;
   }, []);
 
   const refreshQr = useCallback(
@@ -171,10 +257,31 @@ export function WhatsAppQrPanel() {
 
     (async () => {
       setLoading(true);
-      // Consulta leve (só status) — QR só após clique do usuário
-      await loadConnection({ light: true });
-      if (!active) return;
-      setLoading(false);
+      try {
+        // Consulta leve (só status) — QR só após clique do usuário
+        await loadConnection({ light: true });
+      } finally {
+        // #region agent log
+        fetch("http://127.0.0.1:7337/ingest/4caa6043-74da-4518-bebb-88b5757877da", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Debug-Session-Id": "a9d94c",
+          },
+          body: JSON.stringify({
+            sessionId: "a9d94c",
+            runId: "prod-qr",
+            hypothesisId: "B",
+            location: "whatsapp-qr-panel.tsx:mount:finally",
+            message: "initial load finished (finally)",
+            data: { active },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
+        if (!active) return;
+        setLoading(false);
+      }
     })();
 
     return () => {
