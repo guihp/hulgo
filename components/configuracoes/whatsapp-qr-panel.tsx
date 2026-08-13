@@ -5,11 +5,6 @@ import Image from "next/image";
 import { LogOut, QrCode, RefreshCw, Smartphone, Wifi, WifiOff } from "lucide-react";
 import { toast } from "sonner";
 import {
-  disconnectWhatsApp,
-  getWhatsAppConnection,
-  type WhatsAppConnectionState,
-} from "@/lib/actions/evogo";
-import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -35,6 +30,20 @@ import { cn } from "@/lib/utils";
 const QR_REFRESH_MS = 25_000;
 const STATUS_POLL_MS = 3_000;
 
+type WhatsAppConnectionState = {
+  instanceName: string;
+  status: {
+    connected: boolean;
+    loggedIn: boolean;
+    name: string;
+  };
+  qrCode: { base64: string; code: string | null } | null;
+};
+
+type ApiResult =
+  | { ok: true; data: WhatsAppConnectionState }
+  | { ok: false; error: string };
+
 function connectionLabel(status: WhatsAppConnectionState["status"]) {
   if (status.loggedIn) return "Conectado";
   if (status.connected) return "Aguardando leitura do QR";
@@ -49,6 +58,27 @@ function connectionVariant(
   return "destructive";
 }
 
+async function fetchWhatsApp(path: string, init?: RequestInit): Promise<ApiResult> {
+  const res = await fetch(path, {
+    credentials: "same-origin",
+    cache: "no-store",
+    ...init,
+  });
+  let json: ApiResult | null = null;
+  try {
+    json = (await res.json()) as ApiResult;
+  } catch {
+    return {
+      ok: false,
+      error: `Falha HTTP ${res.status} ao consultar WhatsApp`,
+    };
+  }
+  if (!json || typeof json !== "object" || !("ok" in json)) {
+    return { ok: false, error: `Resposta inválida (${res.status})` };
+  }
+  return json;
+}
+
 export function WhatsAppQrPanel() {
   const [state, setState] = useState<WhatsAppConnectionState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -60,36 +90,22 @@ export function WhatsAppQrPanel() {
 
   const loadConnection = useCallback(async (options?: {
     silent?: boolean;
-    light?: boolean;
   }) => {
-    const { silent = false, light = false } = options ?? {};
+    const { silent = false } = options ?? {};
     // #region agent log
     const t0 = Date.now();
-    fetch("http://127.0.0.1:7337/ingest/4caa6043-74da-4518-bebb-88b5757877da", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "a9d94c",
-      },
-      body: JSON.stringify({
-        sessionId: "a9d94c",
-        runId: "post-fix",
-        hypothesisId: "A",
-        location: "whatsapp-qr-panel.tsx:loadConnection:start",
-        message: "loadConnection start",
-        data: {
-          light,
-          silent,
-          host:
-            typeof window !== "undefined" ? window.location.host : "ssr",
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
+    const host =
+      typeof window !== "undefined" ? window.location.host : "ssr";
     // #endregion
     try {
-      const result = await getWhatsAppConnection({ light });
+      const result = await fetchWhatsApp("/api/whatsapp/qr");
       // #region agent log
+      console.info("[debug-a9d94c] loadConnection", {
+        host,
+        ms: Date.now() - t0,
+        ok: result.ok,
+        error: result.ok ? null : result.error.slice(0, 200),
+      });
       fetch("http://127.0.0.1:7337/ingest/4caa6043-74da-4518-bebb-88b5757877da", {
         method: "POST",
         headers: {
@@ -98,19 +114,16 @@ export function WhatsAppQrPanel() {
         },
         body: JSON.stringify({
           sessionId: "a9d94c",
-          runId: "post-fix",
-          hypothesisId: "A",
-          location: "whatsapp-qr-panel.tsx:loadConnection:result",
-          message: "loadConnection result",
+          runId: "api-only",
+          hypothesisId: "G",
+          location: "whatsapp-qr-panel.tsx:loadConnection",
+          message: "status via API",
           data: {
+            host,
             ms: Date.now() - t0,
             ok: result.ok,
             error: result.ok ? null : result.error.slice(0, 200),
             loggedIn: result.ok ? result.data.status.loggedIn : null,
-            hasQr: result.ok ? Boolean(result.data.qrCode?.base64) : null,
-            instanceLen: result.ok ? result.data.instanceName.length : null,
-            light,
-            runIdTag: "post-fix",
           },
           timestamp: Date.now(),
         }),
@@ -124,9 +137,7 @@ export function WhatsAppQrPanel() {
         return null;
       }
       setError(null);
-
       const data = result.data;
-      // Evita a UI voltar para "conectado" com status stale logo após desconectar
       if (
         data.status.loggedIn &&
         Date.now() < ignoreLoggedInUntilRef.current
@@ -138,22 +149,24 @@ export function WhatsAppQrPanel() {
             loggedIn: false,
             name: "",
           },
-          // light não traz QR — preserva o atual
-          qrCode: light ? null : data.qrCode,
+          qrCode: null,
         });
         return data;
       }
-
-      // Poll leve (light) só atualiza status; não zera o QR já exibido
       setState((prev) => {
-        if (light && prev?.qrCode && !data.qrCode) {
+        if (prev?.qrCode && !data.qrCode) {
           return { ...data, qrCode: prev.qrCode };
         }
         return data;
       });
       return data;
     } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : "Falha ao consultar WhatsApp";
       // #region agent log
+      console.info("[debug-a9d94c] loadConnection throw", {
+        msg: msg.slice(0, 300),
+      });
       fetch("http://127.0.0.1:7337/ingest/4caa6043-74da-4518-bebb-88b5757877da", {
         method: "POST",
         headers: {
@@ -162,27 +175,16 @@ export function WhatsAppQrPanel() {
         },
         body: JSON.stringify({
           sessionId: "a9d94c",
-          runId: "prod-qr",
-          hypothesisId: "A",
+          runId: "api-only",
+          hypothesisId: "G",
           location: "whatsapp-qr-panel.tsx:loadConnection:throw",
           message: "loadConnection threw",
-          data: {
-            ms: Date.now() - t0,
-            errName: err instanceof Error ? err.name : typeof err,
-            errMsg:
-              err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300),
-            digest:
-              err && typeof err === "object" && "digest" in err
-                ? String((err as { digest?: unknown }).digest)
-                : null,
-          },
+          data: { errMsg: msg.slice(0, 300) },
           timestamp: Date.now(),
         }),
       }).catch(() => {});
       // #endregion
       if (!silent) {
-        const msg =
-          err instanceof Error ? err.message : "Falha ao consultar WhatsApp";
         setError(msg);
         toast.error(msg);
       }
@@ -195,38 +197,17 @@ export function WhatsAppQrPanel() {
       startTransition(async () => {
         // #region agent log
         const t0 = Date.now();
-        fetch("http://127.0.0.1:7337/ingest/4caa6043-74da-4518-bebb-88b5757877da", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Debug-Session-Id": "a9d94c",
-          },
-          body: JSON.stringify({
-            sessionId: "a9d94c",
-            runId: "post-fix-qr-api",
-            hypothesisId: "F",
-            location: "whatsapp-qr-panel.tsx:refreshQr:start",
-            message: "refreshQr via API route",
-            data: {
-              silent,
-              host:
-                typeof window !== "undefined" ? window.location.host : "ssr",
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
         // #endregion
         try {
-          const res = await fetch("/api/whatsapp/qr?ensure=1", {
-            method: "GET",
-            credentials: "same-origin",
-            cache: "no-store",
-          });
-          const json = (await res.json()) as
-            | { ok: true; data: WhatsAppConnectionState }
-            | { ok: false; error: string };
-
+          const json = await fetchWhatsApp("/api/whatsapp/qr?ensure=1");
           // #region agent log
+          console.info("[debug-a9d94c] refreshQr", {
+            ms: Date.now() - t0,
+            ok: json.ok,
+            hasQr: json.ok ? Boolean(json.data.qrCode?.base64) : false,
+            qrLen: json.ok ? (json.data.qrCode?.base64?.length ?? 0) : 0,
+            error: json.ok ? null : json.error.slice(0, 200),
+          });
           fetch("http://127.0.0.1:7337/ingest/4caa6043-74da-4518-bebb-88b5757877da", {
             method: "POST",
             headers: {
@@ -235,13 +216,12 @@ export function WhatsAppQrPanel() {
             },
             body: JSON.stringify({
               sessionId: "a9d94c",
-              runId: "post-fix-qr-api",
-              hypothesisId: "F",
-              location: "whatsapp-qr-panel.tsx:refreshQr:result",
-              message: "refreshQr API result",
+              runId: "api-only",
+              hypothesisId: "G",
+              location: "whatsapp-qr-panel.tsx:refreshQr",
+              message: "QR via API",
               data: {
                 ms: Date.now() - t0,
-                httpStatus: res.status,
                 ok: json.ok,
                 hasQr: json.ok ? Boolean(json.data.qrCode?.base64) : false,
                 qrLen: json.ok ? (json.data.qrCode?.base64?.length ?? 0) : 0,
@@ -251,7 +231,6 @@ export function WhatsAppQrPanel() {
             }),
           }).catch(() => {});
           // #endregion
-
           if (!json.ok) {
             if (!silent) {
               setError(json.error);
@@ -273,33 +252,9 @@ export function WhatsAppQrPanel() {
             );
           }
         } catch (err) {
-          // #region agent log
-          fetch("http://127.0.0.1:7337/ingest/4caa6043-74da-4518-bebb-88b5757877da", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Debug-Session-Id": "a9d94c",
-            },
-            body: JSON.stringify({
-              sessionId: "a9d94c",
-              runId: "post-fix-qr-api",
-              hypothesisId: "F",
-              location: "whatsapp-qr-panel.tsx:refreshQr:throw",
-              message: "refreshQr threw",
-              data: {
-                ms: Date.now() - t0,
-                errMsg:
-                  err instanceof Error
-                    ? err.message.slice(0, 300)
-                    : String(err).slice(0, 300),
-              },
-              timestamp: Date.now(),
-            }),
-          }).catch(() => {});
-          // #endregion
+          const msg =
+            err instanceof Error ? err.message : "Falha ao gerar QR Code";
           if (!silent) {
-            const msg =
-              err instanceof Error ? err.message : "Falha ao gerar QR Code";
             setError(msg);
             toast.error(msg);
           }
@@ -315,7 +270,6 @@ export function WhatsAppQrPanel() {
   }, [refreshQr]);
 
   const handleDisconnect = useCallback(() => {
-    // Fecha o popup na hora e mostra a tela de reconexão
     setDisconnectOpen(false);
     setQrVisible(false);
     ignoreLoggedInUntilRef.current = Date.now() + 20_000;
@@ -334,13 +288,14 @@ export function WhatsAppQrPanel() {
     );
 
     startTransition(async () => {
-      const result = await disconnectWhatsApp();
+      const result = await fetchWhatsApp("/api/whatsapp/qr", {
+        method: "DELETE",
+      });
       if (!result.ok) {
         ignoreLoggedInUntilRef.current = 0;
         setError(result.error);
         toast.error(result.error);
-        // Volta o status real se a desconexão falhou
-        await loadConnection({ light: true });
+        await loadConnection({ silent: true });
         return;
       }
       setError(null);
@@ -353,44 +308,19 @@ export function WhatsAppQrPanel() {
 
   useEffect(() => {
     let active = true;
-
     (async () => {
       setLoading(true);
       try {
-        // Consulta leve (só status) — QR só após clique do usuário
-        await loadConnection({ light: true });
+        await loadConnection();
       } finally {
-        // #region agent log
-        fetch("http://127.0.0.1:7337/ingest/4caa6043-74da-4518-bebb-88b5757877da", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Debug-Session-Id": "a9d94c",
-          },
-          body: JSON.stringify({
-            sessionId: "a9d94c",
-            runId: "prod-qr",
-            hypothesisId: "B",
-            location: "whatsapp-qr-panel.tsx:mount:finally",
-            message: "initial load finished (finally)",
-            data: { active },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
-        if (!active) return;
-        setLoading(false);
+        if (active) setLoading(false);
       }
     })();
-
     return () => {
       active = false;
     };
   }, [loadConnection]);
 
-  // Deps primitivas: o poll de status troca o objeto `state` a cada ciclo e,
-  // se os intervals dependessem dele, seriam recriados a cada 3s — o timer de
-  // renovação do QR (25s) nunca chegaria a disparar.
   const hasState = state !== null;
   const loggedIn = state?.status.loggedIn ?? false;
   const polling = qrVisible && hasState && !loggedIn;
@@ -398,7 +328,7 @@ export function WhatsAppQrPanel() {
   useEffect(() => {
     if (!polling) return;
     const id = setInterval(() => {
-      void loadConnection({ silent: true, light: true });
+      void loadConnection({ silent: true });
     }, STATUS_POLL_MS);
     return () => clearInterval(id);
   }, [polling, loadConnection]);
@@ -413,10 +343,10 @@ export function WhatsAppQrPanel() {
 
   const qrSrc =
     qrVisible && state?.qrCode?.base64
-    ? state.qrCode.base64.startsWith("data:")
-      ? state.qrCode.base64
-      : `data:image/png;base64,${state.qrCode.base64}`
-    : null;
+      ? state.qrCode.base64.startsWith("data:")
+        ? state.qrCode.base64
+        : `data:image/png;base64,${state.qrCode.base64}`
+      : null;
 
   return (
     <Card>
@@ -457,7 +387,7 @@ export function WhatsAppQrPanel() {
                 variant="outline"
                 size="sm"
                 disabled={pending}
-                onClick={() => void loadConnection({ light: true })}
+                onClick={() => void loadConnection()}
               >
                 <RefreshCw className="mr-2 h-4 w-4" />
                 Tentar novamente
@@ -557,39 +487,39 @@ export function WhatsAppQrPanel() {
                       <RefreshCw
                         className={`h-5 w-5 ${pending ? "animate-spin" : ""}`}
                       />
-                      <span>
-                        {pending
-                          ? "Gerando QR Code…"
-                          : "QR Code ainda não disponível. Clique em Gerar novo QR Code."}
-                      </span>
+                      {pending
+                        ? "Gerando QR Code…"
+                        : "QR ainda não disponível"}
                     </div>
                   )}
-
                   <Button
+                    type="button"
                     variant="outline"
+                    size="sm"
                     disabled={pending}
                     onClick={() => refreshQr(false)}
                   >
-                    <RefreshCw
-                      className={`mr-2 h-4 w-4 ${pending ? "animate-spin" : ""}`}
-                    />
-                    Gerar novo QR Code
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Atualizar QR
                   </Button>
                 </div>
-
                 {error && (
                   <p className="text-center text-sm text-destructive">{error}</p>
                 )}
               </div>
             ) : (
-              <div className="space-y-4">
-                <div className="rounded-lg border bg-muted/40 p-4 text-sm text-muted-foreground">
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
                   WhatsApp desconectado. Clique no botão abaixo para gerar o QR
-                  Code e vincular um número a esta instância.
-                </div>
-                <Button disabled={pending} onClick={handleShowQr}>
+                  Code e conectar o número.
+                </p>
+                <Button
+                  type="button"
+                  disabled={pending}
+                  onClick={handleShowQr}
+                >
                   <QrCode className="mr-2 h-4 w-4" />
-                  {pending ? "Gerando QR Code…" : "Mostrar QR Code"}
+                  {pending ? "Gerando…" : "Gerar novo QR Code"}
                 </Button>
                 {error && (
                   <p className="text-sm text-destructive">{error}</p>
@@ -597,7 +527,11 @@ export function WhatsAppQrPanel() {
               </div>
             )}
           </>
-        ) : null}
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Não foi possível carregar o status do WhatsApp.
+          </p>
+        )}
       </CardContent>
     </Card>
   );
