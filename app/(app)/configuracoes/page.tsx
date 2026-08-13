@@ -31,16 +31,8 @@ export default async function ConfiguracoesPage() {
     ]);
     config = cfg;
     tipos = list;
-    // #region agent log
-    console.info("[debug-a9d94c] configuracoes page ok", {
-      tiposCount: tipos.length,
-      hasInstancia: Boolean(config.whatsapp_instancia),
-    });
-    // #endregion
-  } catch (error) {
-    // #region agent log
-    console.error("[debug-a9d94c] configuracoes page partial fail", error);
-    // #endregion
+  } catch {
+    // Mantém fallbacks: painel WhatsApp e tipos ainda renderizam.
   }
 
   return (

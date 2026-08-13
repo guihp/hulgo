@@ -70,16 +70,6 @@ function formatEvoGoError(error: unknown): string {
  * GET ?ensure=1 → connect + QR; sem ensure → só status.
  */
 export async function GET(req: Request) {
-  // #region agent log
-  const t0 = Date.now();
-  const log = (message: string, data: Record<string, unknown>) => {
-    console.info("[debug-a9d94c] whatsapp-qr GET", message, {
-      ...data,
-      ms: Date.now() - t0,
-    });
-  };
-  // #endregion
-
   try {
     const auth = await requireAdvogado();
     if (!auth.ok) {
@@ -91,22 +81,11 @@ export async function GET(req: Request) {
 
     const url = new URL(req.url);
     const ensure = url.searchParams.get("ensure") === "1";
-    // #region agent log
-    log("start", {
-      ensure,
-      hasEvoUrl: Boolean(process.env.EVOGO_API_URL?.trim()),
-      hasEvoKey: Boolean(process.env.EVOGO_GLOBAL_API_KEY?.trim()),
-      hasInstance: Boolean(process.env.EVOGO_INSTANCE_NAME?.trim()),
-    });
-    // #endregion
 
     const config = await getAppConfig();
     const status = await getInstanceStatus();
 
     if (status.loggedIn) {
-      // #region agent log
-      log("logged in", {});
-      // #endregion
       const body: QrApiOk = {
         ok: true,
         data: {
@@ -120,13 +99,6 @@ export async function GET(req: Request) {
 
     if (ensure) {
       const ensured = await ensureInstanceQrCode();
-      // #region agent log
-      log("ensure done", {
-        loggedIn: ensured.status.loggedIn,
-        hasQr: Boolean(ensured.qrCode?.base64),
-        qrLen: ensured.qrCode?.base64?.length ?? 0,
-      });
-      // #endregion
       const body: QrApiOk = {
         ok: true,
         data: {
@@ -138,12 +110,6 @@ export async function GET(req: Request) {
       return NextResponse.json(body);
     }
 
-    // #region agent log
-    log("status only", {
-      loggedIn: status.loggedIn,
-      connected: status.connected,
-    });
-    // #endregion
     const body: QrApiOk = {
       ok: true,
       data: {
@@ -155,9 +121,6 @@ export async function GET(req: Request) {
     return NextResponse.json(body);
   } catch (error) {
     const msg = formatEvoGoError(error);
-    // #region agent log
-    log("error", { errMsg: msg.slice(0, 300) });
-    // #endregion
     return NextResponse.json(
       { ok: false, error: msg } satisfies QrApiErr,
       { status: 500 }
@@ -167,10 +130,6 @@ export async function GET(req: Request) {
 
 /** Desconecta o número (logout EvoGo). */
 export async function DELETE() {
-  // #region agent log
-  const t0 = Date.now();
-  console.info("[debug-a9d94c] whatsapp-qr DELETE start");
-  // #endregion
   try {
     const auth = await requireAdvogado();
     if (!auth.ok) {
@@ -182,11 +141,6 @@ export async function DELETE() {
 
     await logoutInstance();
     const config = await getAppConfig();
-    // #region agent log
-    console.info("[debug-a9d94c] whatsapp-qr DELETE ok", {
-      ms: Date.now() - t0,
-    });
-    // #endregion
     const body: QrApiOk = {
       ok: true,
       data: {
@@ -198,12 +152,6 @@ export async function DELETE() {
     return NextResponse.json(body);
   } catch (error) {
     const msg = formatEvoGoError(error);
-    // #region agent log
-    console.info("[debug-a9d94c] whatsapp-qr DELETE error", {
-      errMsg: msg.slice(0, 300),
-      ms: Date.now() - t0,
-    });
-    // #endregion
     return NextResponse.json(
       { ok: false, error: msg } satisfies QrApiErr,
       { status: 500 }

@@ -92,43 +92,8 @@ export function WhatsAppQrPanel() {
     silent?: boolean;
   }) => {
     const { silent = false } = options ?? {};
-    // #region agent log
-    const t0 = Date.now();
-    const host =
-      typeof window !== "undefined" ? window.location.host : "ssr";
-    // #endregion
     try {
       const result = await fetchWhatsApp("/api/whatsapp/qr");
-      // #region agent log
-      console.info("[debug-a9d94c] loadConnection", {
-        host,
-        ms: Date.now() - t0,
-        ok: result.ok,
-        error: result.ok ? null : result.error.slice(0, 200),
-      });
-      fetch("http://127.0.0.1:7337/ingest/4caa6043-74da-4518-bebb-88b5757877da", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Debug-Session-Id": "a9d94c",
-        },
-        body: JSON.stringify({
-          sessionId: "a9d94c",
-          runId: "api-only",
-          hypothesisId: "G",
-          location: "whatsapp-qr-panel.tsx:loadConnection",
-          message: "status via API",
-          data: {
-            host,
-            ms: Date.now() - t0,
-            ok: result.ok,
-            error: result.ok ? null : result.error.slice(0, 200),
-            loggedIn: result.ok ? result.data.status.loggedIn : null,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       if (!result.ok) {
         if (!silent) {
           setError(result.error);
@@ -163,27 +128,6 @@ export function WhatsAppQrPanel() {
     } catch (err) {
       const msg =
         err instanceof Error ? err.message : "Falha ao consultar WhatsApp";
-      // #region agent log
-      console.info("[debug-a9d94c] loadConnection throw", {
-        msg: msg.slice(0, 300),
-      });
-      fetch("http://127.0.0.1:7337/ingest/4caa6043-74da-4518-bebb-88b5757877da", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Debug-Session-Id": "a9d94c",
-        },
-        body: JSON.stringify({
-          sessionId: "a9d94c",
-          runId: "api-only",
-          hypothesisId: "G",
-          location: "whatsapp-qr-panel.tsx:loadConnection:throw",
-          message: "loadConnection threw",
-          data: { errMsg: msg.slice(0, 300) },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       if (!silent) {
         setError(msg);
         toast.error(msg);
@@ -195,42 +139,8 @@ export function WhatsAppQrPanel() {
   const refreshQr = useCallback(
     (silent = false) => {
       startTransition(async () => {
-        // #region agent log
-        const t0 = Date.now();
-        // #endregion
         try {
           const json = await fetchWhatsApp("/api/whatsapp/qr?ensure=1");
-          // #region agent log
-          console.info("[debug-a9d94c] refreshQr", {
-            ms: Date.now() - t0,
-            ok: json.ok,
-            hasQr: json.ok ? Boolean(json.data.qrCode?.base64) : false,
-            qrLen: json.ok ? (json.data.qrCode?.base64?.length ?? 0) : 0,
-            error: json.ok ? null : json.error.slice(0, 200),
-          });
-          fetch("http://127.0.0.1:7337/ingest/4caa6043-74da-4518-bebb-88b5757877da", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Debug-Session-Id": "a9d94c",
-            },
-            body: JSON.stringify({
-              sessionId: "a9d94c",
-              runId: "api-only",
-              hypothesisId: "G",
-              location: "whatsapp-qr-panel.tsx:refreshQr",
-              message: "QR via API",
-              data: {
-                ms: Date.now() - t0,
-                ok: json.ok,
-                hasQr: json.ok ? Boolean(json.data.qrCode?.base64) : false,
-                qrLen: json.ok ? (json.data.qrCode?.base64?.length ?? 0) : 0,
-                error: json.ok ? null : json.error.slice(0, 200),
-              },
-              timestamp: Date.now(),
-            }),
-          }).catch(() => {});
-          // #endregion
           if (!json.ok) {
             if (!silent) {
               setError(json.error);
