@@ -4,7 +4,6 @@ import { getAppUser } from "@/lib/actions/auth";
 import { getAppConfig } from "@/lib/config/app-config";
 import {
   ensureInstanceQrCode,
-  getInstanceQrCode,
   getInstanceStatus,
   logoutInstance,
   type EvoGoInstanceStatus,
@@ -41,46 +40,6 @@ function formatEvoGoError(error: unknown): string {
     return error.message;
   }
   return "Erro ao consultar EvoGo";
-}
-
-async function buildConnectionState(
-  preferEnsure = false
-): Promise<WhatsAppConnectionState> {
-  const config = await getAppConfig();
-  const status = await getInstanceStatus();
-
-  if (status.loggedIn) {
-    return {
-      instanceName: config.whatsapp_instancia,
-      status,
-      qrCode: null,
-    };
-  }
-
-  if (preferEnsure) {
-    const ensured = await ensureInstanceQrCode();
-    return {
-      instanceName: config.whatsapp_instancia,
-      status: ensured.status,
-      qrCode: ensured.qrCode,
-    };
-  }
-
-  const qrCode = await getInstanceQrCode();
-  if (!qrCode) {
-    const ensured = await ensureInstanceQrCode();
-    return {
-      instanceName: config.whatsapp_instancia,
-      status: ensured.status,
-      qrCode: ensured.qrCode,
-    };
-  }
-
-  return {
-    instanceName: config.whatsapp_instancia,
-    status,
-    qrCode,
-  };
 }
 
 /** Só lê status — sem QR (poll leve; evita Server Action gigante com base64). */
@@ -138,15 +97,14 @@ export async function getWhatsAppConnection(options?: {
     });
     // #endregion
 
-    const data = options?.light
-      ? await peekConnectionState()
-      : await buildConnectionState(false);
+    const data = await peekConnectionState();
     // #region agent log
     dbg("evogo ok", "D", {
       loggedIn: data.status.loggedIn,
       connected: data.status.connected,
       hasQr: Boolean(data.qrCode?.base64),
       instanceLen: data.instanceName.length,
+      light: Boolean(options?.light),
     });
     // #endregion
     return { ok: true, data };
@@ -164,11 +122,47 @@ export async function getWhatsAppConnection(options?: {
 export async function refreshWhatsAppQrCode(): Promise<
   ActionResult<WhatsAppConnectionState>
 > {
+  // #region agent log
+  const t0 = Date.now();
+  // #endregion
   const auth = await requireAdvogado();
   if (!auth.ok) return auth;
 
   try {
-    return { ok: true, data: await buildConnectionState(true) };
+    // Só prepara a sessão na EvoGo — QR base64 vem de GET /api/whatsapp/qr
+    // (Server Action + base64 estourava timeout em produção).
+    const config = await getAppConfig();
+    const ensured = await ensureInstanceQrCode();
+    // #region agent log
+    fetch("http://127.0.0.1:7337/ingest/4caa6043-74da-4518-bebb-88b5757877da", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "a9d94c",
+      },
+      body: JSON.stringify({
+        sessionId: "a9d94c",
+        runId: "post-fix-qr-api",
+        hypothesisId: "F",
+        location: "evogo.ts:refreshWhatsAppQrCode",
+        message: "ensure without returning base64",
+        data: {
+          ms: Date.now() - t0,
+          loggedIn: ensured.status.loggedIn,
+          hasQrSkipped: true,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+    return {
+      ok: true,
+      data: {
+        instanceName: config.whatsapp_instancia,
+        status: ensured.status,
+        qrCode: null,
+      },
+    };
   } catch (error) {
     return { ok: false, error: formatEvoGoError(error) };
   }

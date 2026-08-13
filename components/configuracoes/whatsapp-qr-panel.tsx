@@ -7,7 +7,6 @@ import { toast } from "sonner";
 import {
   disconnectWhatsApp,
   getWhatsAppConnection,
-  refreshWhatsAppQrCode,
   type WhatsAppConnectionState,
 } from "@/lib/actions/evogo";
 import {
@@ -194,26 +193,116 @@ export function WhatsAppQrPanel() {
   const refreshQr = useCallback(
     (silent = false) => {
       startTransition(async () => {
-        const result = await refreshWhatsAppQrCode();
-        if (!result.ok) {
-          if (!silent) {
-            setError(result.error);
-            toast.error(result.error);
+        // #region agent log
+        const t0 = Date.now();
+        fetch("http://127.0.0.1:7337/ingest/4caa6043-74da-4518-bebb-88b5757877da", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Debug-Session-Id": "a9d94c",
+          },
+          body: JSON.stringify({
+            sessionId: "a9d94c",
+            runId: "post-fix-qr-api",
+            hypothesisId: "F",
+            location: "whatsapp-qr-panel.tsx:refreshQr:start",
+            message: "refreshQr via API route",
+            data: {
+              silent,
+              host:
+                typeof window !== "undefined" ? window.location.host : "ssr",
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
+        try {
+          const res = await fetch("/api/whatsapp/qr?ensure=1", {
+            method: "GET",
+            credentials: "same-origin",
+            cache: "no-store",
+          });
+          const json = (await res.json()) as
+            | { ok: true; data: WhatsAppConnectionState }
+            | { ok: false; error: string };
+
+          // #region agent log
+          fetch("http://127.0.0.1:7337/ingest/4caa6043-74da-4518-bebb-88b5757877da", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Debug-Session-Id": "a9d94c",
+            },
+            body: JSON.stringify({
+              sessionId: "a9d94c",
+              runId: "post-fix-qr-api",
+              hypothesisId: "F",
+              location: "whatsapp-qr-panel.tsx:refreshQr:result",
+              message: "refreshQr API result",
+              data: {
+                ms: Date.now() - t0,
+                httpStatus: res.status,
+                ok: json.ok,
+                hasQr: json.ok ? Boolean(json.data.qrCode?.base64) : false,
+                qrLen: json.ok ? (json.data.qrCode?.base64?.length ?? 0) : 0,
+                error: json.ok ? null : json.error.slice(0, 200),
+              },
+              timestamp: Date.now(),
+            }),
+          }).catch(() => {});
+          // #endregion
+
+          if (!json.ok) {
+            if (!silent) {
+              setError(json.error);
+              toast.error(json.error);
+            }
+            return;
           }
-          return;
-        }
-        setError(null);
-        setState(result.data);
-        if (!silent && result.data.qrCode) {
-          toast.success("QR Code atualizado");
-        } else if (
-          !silent &&
-          !result.data.qrCode &&
-          !result.data.status.loggedIn
-        ) {
-          toast.message(
-            "Aguardando QR Code na EvoGo… tente de novo em alguns segundos"
-          );
+          setError(null);
+          setState(json.data);
+          if (!silent && json.data.qrCode) {
+            toast.success("QR Code atualizado");
+          } else if (
+            !silent &&
+            !json.data.qrCode &&
+            !json.data.status.loggedIn
+          ) {
+            toast.message(
+              "Aguardando QR Code na EvoGo… tente de novo em alguns segundos"
+            );
+          }
+        } catch (err) {
+          // #region agent log
+          fetch("http://127.0.0.1:7337/ingest/4caa6043-74da-4518-bebb-88b5757877da", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Debug-Session-Id": "a9d94c",
+            },
+            body: JSON.stringify({
+              sessionId: "a9d94c",
+              runId: "post-fix-qr-api",
+              hypothesisId: "F",
+              location: "whatsapp-qr-panel.tsx:refreshQr:throw",
+              message: "refreshQr threw",
+              data: {
+                ms: Date.now() - t0,
+                errMsg:
+                  err instanceof Error
+                    ? err.message.slice(0, 300)
+                    : String(err).slice(0, 300),
+              },
+              timestamp: Date.now(),
+            }),
+          }).catch(() => {});
+          // #endregion
+          if (!silent) {
+            const msg =
+              err instanceof Error ? err.message : "Falha ao gerar QR Code";
+            setError(msg);
+            toast.error(msg);
+          }
         }
       });
     },
