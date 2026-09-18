@@ -3,13 +3,24 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Contact, FileText, ImageIcon, MapPin, MessageSquare, Mic, Video } from "lucide-react";
+import {
+  ArrowLeft,
+  Contact,
+  FileText,
+  ImageIcon,
+  MapPin,
+  MessageSquare,
+  Mic,
+} from "lucide-react";
+import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
-import { marcarConversaLida } from "@/lib/actions/conversas";
+import { marcarConversaLida, setControleIA } from "@/lib/actions/conversas";
 import type { Tables } from "@/types/database";
+import { CASO_STATUS } from "@/lib/constants";
 import {
   cleanMessageText,
   contactInitials,
+  isAgentMessage,
   isClientMessage,
   parseContactPayload,
   parseLocationPayload,
@@ -21,15 +32,29 @@ import {
   formatChatDateSeparator,
   isActiveConversation,
 } from "@/lib/utils/dates";
-import { formatPhone } from "@/lib/utils/phone";
+import { formatPhone, phoneToContactNorm } from "@/lib/utils/phone";
 import { ChatComposer } from "@/components/atendimentos/chat-composer";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 
 type Mensagem = Tables<"mensagens">;
+
+export type CasoMeta = {
+  status: string | null;
+  beneficio: string | null;
+  cpf: string | null;
+};
+
+export type CasoMetaMap = Record<string, CasoMeta>;
 
 type Conversation = {
   contact_norm: string;
@@ -40,11 +65,15 @@ type Conversation = {
   lastType: string | null;
   active: boolean;
   unread: number;
+  casoStatus: string | null;
+  beneficio: string | null;
+  cpf: string | null;
+  pedeHumano: boolean;
 };
 
-type ReadMap = Record<string, string>; // contact_norm -> lida_em (ISO)
-
+type ReadMap = Record<string, string>;
 type ContactNameMap = Record<string, string>;
+type FiltroPill = "ativas" | "humano" | "todas";
 
 function mergeMessageAsc(list: Mensagem[], msg: Mensagem): Mensagem[] {
   if (
@@ -74,10 +103,45 @@ function prependMessageDesc(list: Mensagem[], msg: Mensagem): Mensagem[] {
   return [msg, ...list];
 }
 
+function lookupCaso(meta: CasoMetaMap, contact: string): CasoMeta | undefined {
+  if (!contact) return undefined;
+  return (
+    meta[contact] ??
+    meta[phoneToContactNorm(contact)] ??
+    meta[contact.replace(/\D/g, "")]
+  );
+}
+
+function casoStatusLabel(status: string | null | undefined): string | null {
+  if (!status) return null;
+  return CASO_STATUS.find((s) => s.value === status)?.label ?? status;
+}
+
+function shortStatusLabel(status: string | null | undefined): string | null {
+  if (!status) return null;
+  if (status === "atendimento_humano") return "pede humano";
+  if (status === "em_atendimento") return "Em atendimento";
+  return casoStatusLabel(status);
+}
+
+function statusPillClasses(status: string | null | undefined) {
+  if (status === "atendimento_humano") {
+    return "border-rose-200 bg-rose-50 text-rose-700";
+  }
+  if (status === "em_atendimento") {
+    return "border-[#0b2148]/20 bg-[#0b2148]/8 text-[#0b2148]";
+  }
+  if (status === "aguardando_analise" || status === "aguardando_aprovacao") {
+    return "border-amber-200 bg-amber-50 text-amber-800";
+  }
+  return "border-slate-200 bg-slate-50 text-slate-600";
+}
+
 function groupConversations(
   messages: Mensagem[],
   nameMap: ContactNameMap,
-  readMap: ReadMap = {}
+  readMap: ReadMap = {},
+  casoMeta: CasoMetaMap = {}
 ): Conversation[] {
   const map = new Map<string, Conversation>();
   const unreadMap = new Map<string, number>();
@@ -86,8 +150,7 @@ function groupConversations(
     const key = msg.contact_norm ?? "";
     if (!key) continue;
 
-    // não lida = mensagem do cliente mais nova que a última leitura
-    if (msg.type !== "bot") {
+    if (msg.type !== "bot" && msg.type !== "ai") {
       const lidaEm = readMap[key];
       if (!lidaEm || new Date(msg.created_at) > new Date(lidaEm)) {
         unreadMap.set(key, (unreadMap.get(key) ?? 0) + 1);
@@ -108,15 +171,20 @@ function groupConversations(
       cleanMessageText(msg.text) ||
       (msg.conteudo_media ? mediaLabel : "");
     if (!existing || new Date(msg.created_at) > new Date(existing.lastAt)) {
+      const caso = lookupCaso(casoMeta, key);
       map.set(key, {
         contact_norm: key,
         phone: msg.phone ?? key,
-        displayName: nameMap[key] ?? null,
+        displayName: nameMap[key] ?? nameMap[phoneToContactNorm(key)] ?? null,
         lastMessage: text,
         lastAt: msg.created_at,
         lastType: msg.type,
         active: isActiveConversation(msg.created_at),
         unread: 0,
+        casoStatus: caso?.status ?? null,
+        beneficio: caso?.beneficio ?? null,
+        cpf: caso?.cpf ?? null,
+        pedeHumano: caso?.status === "atendimento_humano",
       });
     }
   }
@@ -143,9 +211,23 @@ function groupMessagesByDate(messages: Mensagem[]) {
   return groups;
 }
 
-function MediaPreview({ msg }: { msg: Mensagem }) {
+function fileNameFromUrl(url: string): string {
+  try {
+    const path = decodeURIComponent(new URL(url).pathname);
+    const name = path.split("/").filter(Boolean).pop();
+    return name || "Arquivo";
+  } catch {
+    return "Arquivo";
+  }
+}
+
+function MediaPreview({ msg, isClient }: { msg: Mensagem; isClient: boolean }) {
+  const [imageOpen, setImageOpen] = useState(false);
   const type = msg.mensage_type ?? "";
   const url = msg.conteudo_media;
+  const shell = isClient
+    ? "border-[#e2e8f0] bg-white/70"
+    : "border-[#0b2148]/15 bg-white/50";
 
   if (type === "location") {
     const location = parseLocationPayload(msg.text);
@@ -156,18 +238,20 @@ function MediaPreview({ msg }: { msg: Mensagem }) {
         href={mapsUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className="mb-1 block rounded-lg border border-black/10 bg-background/40 p-2 dark:border-white/10"
+        className={cn("mb-1 block rounded-lg border p-2", shell)}
       >
         <div className="flex items-start gap-2">
           <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />
           <div className="min-w-0">
-            <p className="font-medium">
+            <p className="font-medium text-[#0b2148]">
               {location.name?.trim() || "Localização"}
             </p>
             {location.address?.trim() ? (
-              <p className="text-xs opacity-80">{location.address}</p>
+              <p className="text-xs text-[#64748B]">{location.address}</p>
             ) : null}
-            <p className="mt-1 text-xs underline opacity-70">Abrir no Google Maps</p>
+            <p className="mt-1 text-xs text-[#0b2148] underline opacity-80">
+              Abrir no Google Maps
+            </p>
           </div>
         </div>
       </a>
@@ -178,14 +262,14 @@ function MediaPreview({ msg }: { msg: Mensagem }) {
     const contact = parseContactPayload(msg.text);
     if (!contact) return null;
     return (
-      <div className="mb-1 rounded-lg border border-black/10 bg-background/40 p-2 dark:border-white/10">
+      <div className={cn("mb-1 rounded-lg border p-2", shell)}>
         <div className="flex items-start gap-2">
-          <Contact className="mt-0.5 h-4 w-4 shrink-0 opacity-70" />
+          <Contact className="mt-0.5 h-4 w-4 shrink-0 text-[#64748B]" />
           <div className="min-w-0">
-            <p className="font-medium">{contact.fullName}</p>
-            <p className="text-xs opacity-80">{formatPhone(contact.phone)}</p>
+            <p className="font-medium text-[#0b2148]">{contact.fullName}</p>
+            <p className="text-xs text-[#64748B]">{formatPhone(contact.phone)}</p>
             {contact.organization?.trim() ? (
-              <p className="text-xs opacity-70">{contact.organization}</p>
+              <p className="text-xs text-[#94a3b8]">{contact.organization}</p>
             ) : null}
           </div>
         </div>
@@ -210,22 +294,60 @@ function MediaPreview({ msg }: { msg: Mensagem }) {
 
   if (mediaKind === "image") {
     return (
-      <a href={url} target="_blank" rel="noopener noreferrer" className="mb-1 block">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={url}
-          alt="Mídia"
-          className="max-h-48 max-w-full rounded-lg object-cover"
-        />
-      </a>
+      <>
+        <button
+          type="button"
+          onClick={() => setImageOpen(true)}
+          className="mb-1 block cursor-zoom-in rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-[#0b2148]/40"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={url}
+            alt="Mídia"
+            className="max-h-48 max-w-full rounded-lg object-cover"
+          />
+        </button>
+        <Dialog open={imageOpen} onOpenChange={setImageOpen}>
+          <DialogContent
+            showCloseButton
+            className="max-h-[min(92vh,920px)] w-auto max-w-[min(96vw,1100px)] border-[#e2e8f0] bg-white p-3 sm:max-w-[min(96vw,1100px)]"
+          >
+            <DialogTitle className="sr-only">Visualizar mídia</DialogTitle>
+            <DialogDescription className="sr-only">
+              Imagem ampliada da conversa. Feche com Esc, pelo botão ou clicando fora.
+            </DialogDescription>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={url}
+              alt="Mídia"
+              className="mx-auto max-h-[min(80vh,820px)] max-w-full rounded-lg object-contain"
+            />
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-1 block text-center text-xs font-medium text-[#0b2148] underline underline-offset-2 opacity-80 hover:opacity-100"
+            >
+              Abrir original
+            </a>
+          </DialogContent>
+        </Dialog>
+      </>
     );
   }
 
   if (mediaKind === "audio") {
     return (
-      <div className="mb-1 flex min-w-[220px] items-center gap-2">
-        <Mic className="h-4 w-4 shrink-0 opacity-70" />
-        <audio controls src={url} className="max-w-full" preload="metadata" />
+      <div
+        className={cn(
+          "mb-1 flex min-w-[220px] items-center gap-2 rounded-lg border px-2 py-1.5",
+          shell
+        )}
+      >
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[#0b2148] text-white">
+          <Mic className="h-3.5 w-3.5" />
+        </span>
+        <audio controls src={url} className="max-w-full flex-1" preload="metadata" />
       </div>
     );
   }
@@ -244,15 +366,29 @@ function MediaPreview({ msg }: { msg: Mensagem }) {
   }
 
   if (mediaKind === "document") {
+    const name = fileNameFromUrl(url);
+    const ext = name.includes(".")
+      ? name.split(".").pop()!.toUpperCase()
+      : "DOC";
     return (
       <a
         href={url}
         target="_blank"
         rel="noopener noreferrer"
-        className="mb-1 flex items-center gap-2 rounded-lg border border-black/10 bg-background/40 p-2 text-xs underline dark:border-white/10"
+        className={cn(
+          "mb-1 flex items-center gap-2.5 rounded-lg border p-2.5 transition hover:border-[#0b2148]/30",
+          shell
+        )}
       >
-        <FileText className="h-4 w-4 shrink-0 opacity-70" />
-        <span>Abrir documento</span>
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[#0b2148]/10 text-[#0b2148]">
+          <FileText className="h-4 w-4" />
+        </span>
+        <span className="min-w-0">
+          <span className="block truncate text-sm font-medium text-[#0b2148]">
+            {name}
+          </span>
+          <span className="text-[11px] text-[#64748B]">{ext}</span>
+        </span>
       </a>
     );
   }
@@ -262,7 +398,7 @@ function MediaPreview({ msg }: { msg: Mensagem }) {
       href={url}
       target="_blank"
       rel="noopener noreferrer"
-      className="mb-1 flex items-center gap-1 text-xs underline opacity-90"
+      className="mb-1 flex items-center gap-1 text-xs text-[#0b2148] underline opacity-90"
     >
       <ImageIcon className="h-3.5 w-3.5" />
       Ver mídia
@@ -296,80 +432,102 @@ function ConversationList({
   });
 
   return (
-    <div className="flex h-full min-h-0 flex-col border-r bg-card">
-      <div className="border-b p-3">
+    <div className="flex h-full min-h-0 flex-col border-r border-[#e2e8f0] bg-[#F8FAFC]">
+      <div className="border-b border-[#e2e8f0] bg-white p-3">
         <Input
           placeholder="Buscar conversa..."
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
+          className="h-10 border-[#e2e8f0] bg-white text-[#0b2148] placeholder:text-[#94a3b8] focus-visible:border-[#0b2148] focus-visible:ring-[#0b2148]/12"
         />
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">
         <ScrollArea className="h-full">
-        {filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center px-4 py-10 text-center">
-            <MessageSquare className="mb-2 h-8 w-8 text-muted-foreground/40" />
-            <p className="text-sm text-muted-foreground">
-              {inboxEmpty ? "Nenhuma conversa" : "Nenhuma conversa encontrada"}
-            </p>
-            {inboxEmpty ? (
-              <p className="mt-1 max-w-[240px] text-xs text-muted-foreground/80">
-                As mensagens do WhatsApp aparecerão aqui.
+          {filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center px-4 py-10 text-center">
+              <MessageSquare className="mb-2 h-8 w-8 text-[#94a3b8]/60" />
+              <p className="text-sm text-[#64748B]">
+                {inboxEmpty
+                  ? "Nenhuma conversa"
+                  : "Nenhuma conversa neste filtro"}
               </p>
-            ) : null}
-          </div>
-        ) : (
-          <ul>
-            {filtered.map((c) => (
-              <li key={c.contact_norm}>
-                <button
-                  type="button"
-                  onClick={() => onSelect(c.contact_norm)}
-                  className={cn(
-                    "flex w-full items-center gap-3 border-b px-3 py-3 text-left transition-colors hover:bg-muted/50",
-                    selectedContact === c.contact_norm && "bg-muted"
-                  )}
-                >
-                  <Avatar className="h-11 w-11 shrink-0">
-                    <AvatarFallback className="bg-primary/10 text-primary text-sm">
-                      {contactInitials(c.phone, c.displayName)}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="truncate font-medium">
-                        {c.displayName ?? formatPhone(c.phone)}
-                      </p>
-                      <span className="shrink-0 text-[11px] text-muted-foreground">
-                        {formatRelative(c.lastAt)}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <p
-                        className={cn(
-                          "truncate text-sm text-muted-foreground",
-                          c.unread > 0 && "font-medium text-foreground"
-                        )}
-                      >
-                        {c.lastMessage || "—"}
-                      </p>
-                      {c.unread > 0 && (
-                        <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500 px-1.5 text-[11px] font-bold text-white">
+              {inboxEmpty ? (
+                <p className="mt-1 max-w-[240px] text-xs text-[#94a3b8]">
+                  As mensagens do WhatsApp aparecerão aqui.
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <ul className="space-y-2 p-2">
+              {filtered.map((c) => {
+                const selected = selectedContact === c.contact_norm;
+                const statusText = shortStatusLabel(c.casoStatus);
+                return (
+                  <li key={c.contact_norm}>
+                    <button
+                      type="button"
+                      onClick={() => onSelect(c.contact_norm)}
+                      className={cn(
+                        "relative w-full rounded-xl border bg-white p-3 text-left shadow-sm transition hover:shadow-md",
+                        selected
+                          ? "border-2 border-[#0b2148] ring-1 ring-[#0b2148]/10"
+                          : "border-[#e2e8f0] hover:border-[#0b2148]/25"
+                      )}
+                    >
+                      {c.unread > 0 ? (
+                        <span className="absolute right-2.5 top-2.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-[#0b2148] px-1.5 text-[11px] font-bold text-white">
                           {c.unread > 99 ? "99+" : c.unread}
                         </span>
-                      )}
-                      {c.active && c.unread === 0 && (
-                        <Badge variant="default" className="h-5 shrink-0 px-1.5 text-[10px]">
-                          Ativa
-                        </Badge>
-                      )}
-                    </div>
-                  </div>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
+                      ) : null}
+                      <div className="flex gap-3">
+                        <Avatar className="h-11 w-11 shrink-0">
+                          <AvatarFallback className="bg-[#0b2148]/10 text-sm font-semibold text-[#0b2148]">
+                            {contactInitials(c.phone, c.displayName)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0 flex-1 pr-6">
+                          <div className="flex items-baseline justify-between gap-2">
+                            <p className="truncate font-semibold text-[#0b2148]">
+                              {c.displayName ?? formatPhone(c.phone)}
+                            </p>
+                            <span className="shrink-0 text-[11px] text-[#94a3b8]">
+                              {formatRelative(c.lastAt)}
+                            </span>
+                          </div>
+                          <p
+                            className={cn(
+                              "mt-0.5 truncate text-sm text-[#64748B]",
+                              c.unread > 0 && "font-medium text-[#334155]"
+                            )}
+                          >
+                            {c.lastMessage || "—"}
+                          </p>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {c.active && !c.pedeHumano ? (
+                              <span className="rounded-full border border-[#0b2148]/20 bg-[#0b2148]/8 px-2 py-0.5 text-[11px] font-medium text-[#0b2148]">
+                                Em atendimento
+                              </span>
+                            ) : null}
+                            {statusText &&
+                            !(c.active && c.casoStatus === "em_atendimento") ? (
+                              <span
+                                className={cn(
+                                  "rounded-full border px-2 py-0.5 text-[11px] font-medium",
+                                  statusPillClasses(c.casoStatus)
+                                )}
+                              >
+                                {statusText}
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </ScrollArea>
       </div>
     </div>
@@ -380,28 +538,39 @@ function ConversationThread({
   contactNorm,
   phone,
   displayName,
+  casoStatus,
+  beneficio,
+  cpf,
   initialMessages,
   onBack,
   showBack,
   onMessageSent,
   onListRefresh,
   whatsappInstancia,
+  agentOn,
+  onAgentChange,
 }: {
   contactNorm: string;
   phone: string;
   displayName: string | null;
+  casoStatus: string | null;
+  beneficio: string | null;
+  cpf: string | null;
   initialMessages: Mensagem[];
   onBack?: () => void;
   showBack?: boolean;
   onMessageSent?: (msg: Mensagem) => void;
   onListRefresh?: () => void;
   whatsappInstancia?: string;
+  agentOn: boolean;
+  onAgentChange: (on: boolean) => void;
 }) {
   const [messages, setMessages] = useState(
     [...initialMessages].sort(
       (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
     )
   );
+  const [agentBusy, setAgentBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     const supabase = createClient();
@@ -446,107 +615,197 @@ function ConversationThread({
   const groups = useMemo(() => groupMessagesByDate(messages), [messages]);
 
   const handleComposerSent = useCallback(
-    (msg: Mensagem) => {
+    (msg: Mensagem, iaPausada?: boolean) => {
       setMessages((prev) => mergeMessageAsc(prev, msg));
       onMessageSent?.(msg);
       onListRefresh?.();
+      if (iaPausada) onAgentChange(false);
     },
-    [onListRefresh, onMessageSent]
+    [onAgentChange, onListRefresh, onMessageSent]
   );
 
+  const toggleAgent = async () => {
+    if (agentBusy) return;
+    setAgentBusy(true);
+    const next = !agentOn;
+    try {
+      await setControleIA({
+        acao: next ? "despausar" : "pausar",
+        telefone: phone,
+        instancia: whatsappInstancia,
+      });
+      onAgentChange(next);
+      toast.success(next ? "Agente ligado" : "Agente pausado nesta conversa");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Falha ao controlar a IA");
+    } finally {
+      setAgentBusy(false);
+    }
+  };
+
+  const fichaHref = cpf
+    ? `/clientes/${cpf}`
+    : `/clientes/contato/${encodeURIComponent(contactNorm)}`;
+  const statusText = shortStatusLabel(casoStatus);
+  const benefitLabel = beneficio?.trim() || "Benefício não identificado";
+
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#efeae2] dark:bg-[#0b141a]">
-      <header className="flex shrink-0 items-center gap-3 border-b bg-card px-4 py-3">
+    <div className="flex h-full min-h-0 flex-col bg-[#F1F5F9]">
+      <header className="flex shrink-0 items-center gap-3 border-b border-[#e2e8f0] bg-white px-4 py-3">
         {showBack && onBack && (
           <button
             type="button"
             onClick={onBack}
-            className="rounded-lg p-1.5 hover:bg-muted lg:hidden"
+            className="rounded-lg p-1.5 text-[#0b2148] hover:bg-[#F1F5F9] lg:hidden"
             aria-label="Voltar"
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
         )}
-        <Link
-          href={`/clientes/contato/${encodeURIComponent(contactNorm)}#arquivos`}
-          className="flex min-w-0 flex-1 items-center gap-3 rounded-lg p-1 transition-colors hover:bg-muted/60"
-          title="Ver arquivos do cliente"
-        >
+        <div className="flex min-w-0 flex-1 items-center gap-3">
           <Avatar className="h-10 w-10">
-            <AvatarFallback className="bg-primary/10 text-primary">
+            <AvatarFallback className="bg-[#0b2148]/10 font-semibold text-[#0b2148]">
               {contactInitials(phone, displayName)}
             </AvatarFallback>
           </Avatar>
           <div className="min-w-0">
-            <p className="truncate font-semibold">
+            <p className="truncate font-semibold text-[#0b2148]">
               {displayName ?? formatPhone(phone)}
             </p>
-            <p className="truncate text-xs text-muted-foreground">{formatPhone(phone)}</p>
+            <p className="truncate text-xs text-[#64748B]">
+              {formatPhone(phone)}
+              <span className="mx-1.5 text-[#cbd5e1]">·</span>
+              {benefitLabel}
+            </p>
           </div>
-        </Link>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          {statusText ? (
+            <span
+              className={cn(
+                "hidden rounded-full border px-2.5 py-1 text-xs font-medium sm:inline-flex",
+                statusPillClasses(casoStatus)
+              )}
+            >
+              {statusText}
+            </span>
+          ) : (
+            <span className="hidden rounded-full border border-[#0b2148]/20 bg-[#0b2148]/8 px-2.5 py-1 text-xs font-medium text-[#0b2148] sm:inline-flex">
+              Em atendimento
+            </span>
+          )}
+          <Button
+            type="button"
+            size="sm"
+            disabled={agentBusy}
+            onClick={() => void toggleAgent()}
+            className={cn(
+              "h-8 rounded-full px-3 text-xs font-medium",
+              agentOn
+                ? "bg-[#0b2148] text-white hover:bg-[#163a7a]"
+                : "border border-[#e2e8f0] bg-white text-[#64748B] hover:border-[#0b2148]/30 hover:text-[#0b2148]"
+            )}
+            variant={agentOn ? "default" : "outline"}
+          >
+            {agentOn ? "Agente ligado" : "Agente desligado"}
+          </Button>
+          <Link
+            href={fichaHref}
+            className={cn(
+              buttonVariants({ variant: "outline", size: "sm" }),
+              "h-8 rounded-full border-[#e2e8f0] px-3 text-xs font-medium text-[#0b2148] hover:border-[#0b2148]/30 hover:bg-[#0b2148]/5"
+            )}
+          >
+            Ver ficha
+          </Link>
+        </div>
       </header>
 
       <div className="min-h-0 flex-1 overflow-hidden">
-        <ScrollArea className="h-full bg-[url('data:image/svg+xml,%3Csvg width=%2260%22 height=%2260%22 viewBox=%220 0 60 60%22 xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cg fill=%22none%22 fill-rule=%22evenodd%22%3E%3Cg fill=%22%23000000%22 fill-opacity=%220.03%22%3E%3Cpath d=%22M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z%22/%3E%3C/g%3E%3C/g%3E%3C/svg%3E')] dark:bg-[url('data:image/svg+xml,%3Csvg width=%2260%22 height=%2260%22 viewBox=%220 0 60 60%22 xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cg fill=%22none%22 fill-rule=%22evenodd%22%3E%3Cg fill=%22%23ffffff%22 fill-opacity=%220.04%22%3E%3Cpath d=%22M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z%22/%3E%3C/g%3E%3C/g%3E%3C/svg%3E')]">
+        <ScrollArea className="h-full">
           <div className="space-y-4 p-4">
-          {groups.map((group) => (
-            <div key={group.dateLabel}>
-              <div className="mb-3 flex justify-center">
-                <span className="rounded-lg bg-card/90 px-3 py-1 text-xs text-muted-foreground shadow-sm">
-                  {group.dateLabel}
-                </span>
-              </div>
-              <div className="space-y-1">
-                {group.messages.map((msg) => {
-                  const isClient = isClientMessage(msg.type);
-                  const messageType = msg.mensage_type ?? "";
-                  const location = messageType === "location" ? parseLocationPayload(msg.text) : null;
-                  const contact = messageType === "contact" ? parseContactPayload(msg.text) : null;
-                  const text =
-                    messageType === "location" || messageType === "contact"
-                      ? ""
-                      : cleanMessageText(msg.text);
-                  const hasContent = Boolean(
-                    text || msg.conteudo_media || location || contact
-                  );
-                  return (
-                    <div
-                      key={msg.id}
-                      className={cn("flex", isClient ? "justify-start" : "justify-end")}
-                    >
+            {groups.map((group) => (
+              <div key={group.dateLabel}>
+                <div className="mb-3 flex justify-center">
+                  <span className="rounded-full border border-[#e2e8f0] bg-white px-3 py-1 text-xs text-[#64748B] shadow-sm">
+                    {group.dateLabel}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {group.messages.map((msg) => {
+                    const isClient = isClientMessage(msg.type);
+                    const isAgent = isAgentMessage(msg.type);
+                    const messageType = msg.mensage_type ?? "";
+                    const location =
+                      messageType === "location"
+                        ? parseLocationPayload(msg.text)
+                        : null;
+                    const contact =
+                      messageType === "contact"
+                        ? parseContactPayload(msg.text)
+                        : null;
+                    const text =
+                      messageType === "location" || messageType === "contact"
+                        ? ""
+                        : cleanMessageText(msg.text);
+                    const hasContent = Boolean(
+                      text || msg.conteudo_media || location || contact
+                    );
+                    return (
                       <div
+                        key={msg.id}
                         className={cn(
-                          "relative max-w-[75%] rounded-lg px-3 py-1.5 text-sm shadow-sm",
-                          isClient
-                            ? "rounded-tl-none bg-[#f0f2f5] text-foreground dark:bg-[#2a3942] dark:text-[#e9edef]"
-                            : "rounded-tr-none bg-[#d9fdd3] text-foreground dark:bg-[#005c4b] dark:text-[#e9edef]"
+                          "flex",
+                          isClient ? "justify-start" : "justify-end"
                         )}
                       >
-                        <MediaPreview msg={msg} />
-                        {text ? <p className="whitespace-pre-wrap break-words">{text}</p> : null}
-                        {!hasContent && (
-                          <p className="italic opacity-70">—</p>
-                        )}
-                        <p className="mt-0.5 text-right text-[10px] opacity-60">
-                          {formatChatTime(msg.created_at)}
-                        </p>
+                        <div
+                          className={cn(
+                            "relative max-w-[75%] rounded-2xl px-3.5 py-2 text-sm shadow-sm",
+                            isClient
+                              ? "rounded-tl-md border border-[#e2e8f0] bg-white text-[#0f172a]"
+                              : "rounded-tr-md border border-[#0b2148]/10 bg-[#0b2148]/8 text-[#0b2148]"
+                          )}
+                        >
+                          {isAgent ? (
+                            <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.08em] text-[#0b2148]/70">
+                              Agente de IA
+                            </p>
+                          ) : null}
+                          <MediaPreview msg={msg} isClient={isClient} />
+                          {text ? (
+                            <p className="whitespace-pre-wrap break-words">
+                              {text}
+                            </p>
+                          ) : null}
+                          {!hasContent && (
+                            <p className="italic text-[#94a3b8]">—</p>
+                          )}
+                          <p
+                            className={cn(
+                              "mt-1 text-right text-[10px]",
+                              isClient ? "text-[#94a3b8]" : "text-[#0b2148]/50"
+                            )}
+                          >
+                            {formatChatTime(msg.created_at)}
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
           </div>
         </ScrollArea>
       </div>
 
       <div className="shrink-0">
         <ChatComposer
-        phone={phone}
-        contactNorm={contactNorm}
-        instancia={whatsappInstancia ?? ""}
-        onSent={handleComposerSent}
+          phone={phone}
+          contactNorm={contactNorm}
+          instancia={whatsappInstancia ?? ""}
+          onSent={handleComposerSent}
         />
       </div>
     </div>
@@ -555,17 +814,19 @@ function ConversationThread({
 
 function EmptyThread({ inboxEmpty = false }: { inboxEmpty?: boolean }) {
   return (
-    <div className="hidden h-full flex-col items-center justify-center bg-muted/20 lg:flex">
-      <MessageSquare className="mb-3 h-12 w-12 text-muted-foreground/40" />
+    <div className="hidden h-full flex-col items-center justify-center bg-[#F1F5F9] lg:flex">
+      <MessageSquare className="mb-3 h-12 w-12 text-[#94a3b8]/50" />
       {inboxEmpty ? (
         <>
-          <p className="font-medium text-muted-foreground">Aguardando mensagens</p>
-          <p className="mt-1 max-w-sm px-6 text-center text-sm text-muted-foreground/80">
+          <p className="font-medium text-[#64748B]">Aguardando mensagens</p>
+          <p className="mt-1 max-w-sm px-6 text-center text-sm text-[#94a3b8]">
             As mensagens do WhatsApp aparecerão aqui.
           </p>
         </>
       ) : (
-        <p className="text-muted-foreground">Selecione uma conversa para ver as mensagens</p>
+        <p className="text-[#64748B]">
+          Selecione uma conversa para ver as mensagens
+        </p>
       )}
     </div>
   );
@@ -576,22 +837,27 @@ export function AtendimentosPanel({
   initialContact,
   contactNames = {},
   whatsappInstancia,
+  casoMeta = {},
 }: {
   initialMessages: Mensagem[];
   initialContact?: string | null;
   contactNames?: ContactNameMap;
   whatsappInstancia?: string;
+  casoMeta?: CasoMetaMap;
 }) {
   const router = useRouter();
   const [messages, setMessages] = useState(initialMessages);
   const [search, setSearch] = useState("");
+  const [filtro, setFiltro] = useState<FiltroPill>("todas");
   const [selectedContact, setSelectedContact] = useState<string | null>(
     initialContact ?? null
   );
   const [mobileShowThread, setMobileShowThread] = useState(!!initialContact);
   const [readMap, setReadMap] = useState<ReadMap>({});
+  const [agentByContact, setAgentByContact] = useState<Record<string, boolean>>(
+    {}
+  );
 
-  // carrega as marcações de leitura do usuário (badge estilo WhatsApp)
   useEffect(() => {
     const supabase = createClient();
     supabase
@@ -605,7 +871,6 @@ export function AtendimentosPanel({
       });
   }, []);
 
-  // conversa aberta continua lida mesmo com mensagem nova chegando
   useEffect(() => {
     if (!selectedContact) return;
     const agora = new Date().toISOString();
@@ -614,9 +879,26 @@ export function AtendimentosPanel({
   }, [selectedContact, messages]);
 
   const conversations = useMemo(
-    () => groupConversations(messages, contactNames, readMap),
-    [messages, contactNames, readMap]
+    () => groupConversations(messages, contactNames, readMap, casoMeta),
+    [messages, contactNames, readMap, casoMeta]
   );
+
+  const counts = useMemo(() => {
+    const ativas = conversations.filter((c) => c.active).length;
+    const humano = conversations.filter((c) => c.pedeHumano).length;
+    return { ativas, humano, todas: conversations.length };
+  }, [conversations]);
+
+  const filteredConversations = useMemo(() => {
+    switch (filtro) {
+      case "ativas":
+        return conversations.filter((c) => c.active);
+      case "humano":
+        return conversations.filter((c) => c.pedeHumano);
+      default:
+        return conversations;
+    }
+  }, [conversations, filtro]);
 
   const refresh = useCallback(async () => {
     const supabase = createClient();
@@ -662,7 +944,9 @@ export function AtendimentosPanel({
     setMessages((prev) => prependMessageDesc(prev, msg));
   }, []);
 
-  const selectedConv = conversations.find((c) => c.contact_norm === selectedContact);
+  const selectedConv = conversations.find(
+    (c) => c.contact_norm === selectedContact
+  );
   const threadMessages = useMemo(
     () =>
       selectedContact
@@ -670,54 +954,105 @@ export function AtendimentosPanel({
             .filter((m) => m.contact_norm === selectedContact)
             .sort(
               (a, b) =>
-                new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+                new Date(a.created_at).getTime() -
+                new Date(b.created_at).getTime()
             )
         : [],
     [messages, selectedContact]
   );
 
   const inboxEmpty = conversations.length === 0;
+  const pills: { key: FiltroPill; label: string; count: number }[] = [
+    { key: "ativas", label: "Ativas", count: counts.ativas },
+    { key: "humano", label: "Pedem humano", count: counts.humano },
+    { key: "todas", label: "Todas", count: counts.todas },
+  ];
+
+  const agentOn =
+    selectedContact != null
+      ? (agentByContact[selectedContact] ?? true)
+      : true;
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border bg-card shadow-sm">
-      <div className="grid min-h-0 flex-1 lg:grid-cols-[360px_1fr]">
-        <div
-          className={cn(
-            "h-full min-h-0",
-            mobileShowThread ? "hidden lg:block" : "block"
-          )}
-        >
-          <ConversationList
-            conversations={conversations}
-            selectedContact={selectedContact}
-            search={search}
-            onSearchChange={setSearch}
-            onSelect={handleSelect}
-            inboxEmpty={inboxEmpty}
-          />
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
+      <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-[#0b2148]">
+            Atendimentos
+          </h1>
+          <p className="text-sm text-[#64748B]">
+            Conversas do WhatsApp conduzidas pelo agente de IA
+          </p>
         </div>
+        <div className="flex flex-wrap gap-2">
+          {pills.map((p) => (
+            <button
+              key={p.key}
+              type="button"
+              onClick={() => setFiltro(p.key)}
+              className={cn(
+                "rounded-full border px-3.5 py-1.5 text-sm font-medium transition",
+                filtro === p.key
+                  ? "border-[#0b2148] bg-[#0b2148] text-white shadow-sm"
+                  : "border-[#e2e8f0] bg-white text-[#64748B] hover:border-[#0b2148]/30 hover:text-[#0b2148]"
+              )}
+            >
+              {p.label} ({p.count})
+            </button>
+          ))}
+        </div>
+      </div>
 
-        <div
-          className={cn(
-            "h-full min-h-0",
-            mobileShowThread ? "block" : "hidden lg:block"
-          )}
-        >
-          {selectedContact && selectedConv ? (
-            <ConversationThread
-              contactNorm={selectedContact}
-              phone={selectedConv.phone}
-              displayName={selectedConv.displayName}
-              initialMessages={threadMessages}
-              showBack
-              onBack={handleBack}
-              onMessageSent={handleMessageSent}
-              onListRefresh={refresh}
-              whatsappInstancia={whatsappInstancia}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[#e2e8f0] bg-white shadow-sm">
+        <div className="grid min-h-0 flex-1 lg:grid-cols-[340px_1fr]">
+          <div
+            className={cn(
+              "h-full min-h-0",
+              mobileShowThread ? "hidden lg:block" : "block"
+            )}
+          >
+            <ConversationList
+              conversations={filteredConversations}
+              selectedContact={selectedContact}
+              search={search}
+              onSearchChange={setSearch}
+              onSelect={handleSelect}
+              inboxEmpty={inboxEmpty}
             />
-          ) : (
-            <EmptyThread inboxEmpty={inboxEmpty} />
-          )}
+          </div>
+
+          <div
+            className={cn(
+              "h-full min-h-0",
+              mobileShowThread ? "block" : "hidden lg:block"
+            )}
+          >
+            {selectedContact && selectedConv ? (
+              <ConversationThread
+                contactNorm={selectedContact}
+                phone={selectedConv.phone}
+                displayName={selectedConv.displayName}
+                casoStatus={selectedConv.casoStatus}
+                beneficio={selectedConv.beneficio}
+                cpf={selectedConv.cpf}
+                initialMessages={threadMessages}
+                showBack
+                onBack={handleBack}
+                onMessageSent={handleMessageSent}
+                onListRefresh={refresh}
+                whatsappInstancia={whatsappInstancia}
+                agentOn={agentOn}
+                onAgentChange={(on) =>
+                  setAgentByContact((prev) => ({
+                    ...prev,
+                    [selectedContact]: on,
+                  }))
+                }
+              />
+            ) : (
+              <EmptyThread inboxEmpty={inboxEmpty} />
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -747,7 +1082,12 @@ export function ConversationThreadExport({
       contactNorm={contactNorm}
       phone={phone}
       displayName={null}
+      casoStatus={null}
+      beneficio={null}
+      cpf={null}
       initialMessages={initialMessages}
+      agentOn
+      onAgentChange={() => {}}
     />
   );
 }

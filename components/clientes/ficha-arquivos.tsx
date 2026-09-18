@@ -283,7 +283,14 @@ export function FichaArquivos({
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (window.location.hash === "#arquivos") {
+    const pastaParam = new URLSearchParams(window.location.search)
+      .get("pasta")
+      ?.trim();
+    if (pastaParam) {
+      setSelected(pastaParam);
+      setDestino(pastaParam);
+    }
+    if (window.location.hash === "#arquivos" || pastaParam) {
       document.getElementById("arquivos")?.scrollIntoView({ behavior: "smooth" });
     }
   }, []);

@@ -40,20 +40,12 @@ export default async function ClientesPage({
     : null;
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Clientes</h1>
-        <p className="text-muted-foreground">
-          Pessoas com processo judicial ou atendimento no WhatsApp
-        </p>
-      </div>
-      <ClientesList
-        processos={processos ?? []}
-        casosAbertura={casosAbertura}
-        pessoas={pessoas}
-        abrirCaso={abrirCaso}
-        user={user!}
-      />
-    </div>
+    <ClientesList
+      processos={processos ?? []}
+      casosAbertura={casosAbertura}
+      pessoas={pessoas}
+      abrirCaso={abrirCaso}
+      user={user!}
+    />
   );
 }

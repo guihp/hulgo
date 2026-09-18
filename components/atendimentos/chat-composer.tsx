@@ -7,7 +7,6 @@ import {
   ImageIcon,
   Loader2,
   MapPin,
-  Paperclip,
   Send,
   Smile,
   Video,
@@ -37,8 +36,23 @@ type ChatComposerProps = {
   phone: string;
   contactNorm: string;
   instancia?: string;
-  onSent?: (mensagem: Tables<"mensagens">) => void;
+  onSent?: (mensagem: Tables<"mensagens">, iaPausada?: boolean) => void;
 };
+
+const QUICK_ACTIONS = [
+  {
+    label: "Pedir documentos",
+    text: "Olá! Poderia me enviar os documentos pendentes, por favor?",
+  },
+  {
+    label: "Confirmar dados",
+    text: "Poderia confirmar se seus dados cadastrais estão corretos?",
+  },
+  {
+    label: "Explicar próximo passo",
+    text: "Vou te explicar o próximo passo do seu atendimento.",
+  },
+] as const;
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -99,7 +113,7 @@ export function ChatComposer({
     (result: EnviarMensagemResult, successLabel: string) => {
       if (result.warning) toast.warning(result.warning);
       else toast.success(successLabel);
-      if (result.mensagem) onSent?.(result.mensagem);
+      if (result.mensagem) onSent?.(result.mensagem, result.iaPausada);
     },
     [onSent]
   );
@@ -282,21 +296,35 @@ export function ChatComposer({
 
   return (
     <>
-      <div className="border-t bg-card px-3 py-2">
+      <div className="border-t border-[#e2e8f0] bg-white px-3 py-3">
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {QUICK_ACTIONS.map((action) => (
+            <button
+              key={action.label}
+              type="button"
+              disabled={sending}
+              onClick={() => setText(action.text)}
+              className="rounded-full border border-[#e2e8f0] bg-[#F8FAFC] px-3 py-1 text-xs font-medium text-[#0b2148] transition hover:border-[#0b2148]/30 hover:bg-[#0b2148]/5 disabled:opacity-50"
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
         <div className="flex items-end gap-2">
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="outline"
                   size="icon"
                   disabled={sending}
                   aria-label="Anexar"
+                  className="size-10 shrink-0 border-[#e2e8f0] text-[#0b2148] hover:bg-[#F1F5F9]"
                 />
               }
             >
-              <Paperclip className="h-5 w-5" />
+              <span className="text-lg font-medium leading-none">+</span>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" side="top">
               <DropdownMenuItem onClick={() => mediaInputRef.current?.click()}>
@@ -341,28 +369,28 @@ export function ChatComposer({
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={handleTextKeyDown}
-            placeholder="Digite uma mensagem"
+            placeholder="Escreva uma mensagem..."
             disabled={sending}
             rows={1}
-            className="max-h-32 min-h-10 flex-1 resize-none py-2.5"
+            className="max-h-32 min-h-10 flex-1 resize-none border-[#e2e8f0] bg-white py-2.5 text-[#0b2148] placeholder:text-[#94a3b8] focus-visible:border-[#0b2148] focus-visible:ring-[#0b2148]/12"
           />
 
           <Button
             type="button"
-            size="icon"
             disabled={sending || !text.trim()}
             onClick={() => void handleSendText()}
-            aria-label="Enviar"
+            className="h-10 shrink-0 gap-1.5 bg-[#0b2148] px-4 text-white hover:bg-[#163a7a]"
           >
             {sending ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
+              <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <Send className="h-5 w-5" />
+              <Send className="h-4 w-4" />
             )}
+            Enviar
           </Button>
         </div>
-        <p className="mt-1 hidden text-[10px] text-muted-foreground sm:block">
-          Enter para enviar · Shift+Enter para nova linha
+        <p className="mt-2 text-[11px] text-[#94a3b8]">
+          Ao enviar, o agente pausa nesta conversa e você assume o atendimento.
         </p>
       </div>
 

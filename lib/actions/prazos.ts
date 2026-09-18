@@ -30,15 +30,26 @@ export async function criarPrazo(input: NovoPrazoInput) {
     throw new Error("Data do prazo inválida");
   }
 
+  // Optional FKs: omit empty/0 so inserts without vínculo don't hit *_fkey.
+  const cpfNorm = input.cpf?.trim() ? normalizeCpf(input.cpf) : null;
+  const casoId =
+    typeof input.caso_id === "number" && input.caso_id > 0
+      ? input.caso_id
+      : null;
+  const processoId =
+    typeof input.processo_id === "number" && input.processo_id > 0
+      ? input.processo_id
+      : null;
+
   const supabase = await createClient();
   const { error } = await supabase.from("app_prazos").insert({
     titulo: input.titulo.trim(),
     tipo: input.tipo,
     data_prazo: input.data_prazo,
     descricao: input.descricao?.trim() || null,
-    cpf: input.cpf ? normalizeCpf(input.cpf) : null,
-    caso_id: input.caso_id ?? null,
-    processo_id: input.processo_id ?? null,
+    cpf: cpfNorm || null,
+    caso_id: casoId,
+    processo_id: processoId,
     criado_por: user.id,
   });
 

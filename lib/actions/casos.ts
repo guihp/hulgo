@@ -1,12 +1,17 @@
 "use server";
 
+import { getAppUser } from "@/lib/actions/auth";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import type { AprovacaoStatus, CasoStatus, Json } from "@/types/database";
 import { enviarEncaminhamentoAnaliseSePendente } from "@/lib/casos/encaminhamento-analise";
-import { normalizeCpf } from "@/lib/utils/cpf";
+import { isValidCpf, normalizeCpf } from "@/lib/utils/cpf";
 import { brazilianDateToIso } from "@/lib/utils/dates";
-import { normalizePhoneBrStorage } from "@/lib/utils/phone";
+import { fichaPessoaHref } from "@/lib/utils/ficha";
+import {
+  normalizePhoneBrStorage,
+  phoneToContactNorm,
+} from "@/lib/utils/phone";
 import {
   isValidNumeroProcesso,
   normalizeNumeroProcesso,
@@ -371,4 +376,227 @@ export async function deleteProcesso(id: number) {
   if (error) throw new Error(error.message);
   revalidatePath("/clientes");
   return { success: true };
+}
+
+export type CriarClienteCasoInput = {
+  nome: string;
+  /** WhatsApp / celular — normalizado com DDI 55 (mesmo padrão de storage). */
+  telefone: string;
+  cpf?: string | null;
+  /** Benefício / tipo de demanda (ex.: aposentadoria rural, BPC). */
+  beneficio_identificado?: string | null;
+  tipo_segurado?: string | null;
+  area?: string | null;
+  /** Default: em_atendimento (igual criação via atualizar_dados_caso). */
+  status?: CasoStatus;
+};
+
+export type CriarClienteCasoResult = {
+  success: true;
+  casoId: number;
+  created: boolean;
+  href: string;
+  nome: string;
+  telefone: string;
+  cpf: string | null;
+  status: string;
+  beneficio_identificado: string | null;
+};
+
+function telefoneLookupVariants(telefone: string): string[] {
+  const stored = normalizePhoneBrStorage(telefone);
+  const contact = phoneToContactNorm(telefone);
+  const variants = new Set<string>();
+  for (const v of [stored, contact, telefone.replace(/\D/g, "")]) {
+    if (!v) continue;
+    variants.add(v);
+    if (v.startsWith("55") && v.length > 11) variants.add(v.slice(2));
+    else if (v.length === 10 || v.length === 11) variants.add(`55${v}`);
+  }
+  return [...variants];
+}
+
+/**
+ * Cria (ou reusa) cliente/pessoa no fluxo de triagem (`casos_novos`).
+ * Alinhado a `atualizar_dados_caso` / n8n: telefone normalizado, CPF só dígitos,
+ * status inicial `em_atendimento`. Se já existir caso pelo CPF (ou telefone),
+ * completa campos vazios e devolve o existente + deep-link da ficha.
+ */
+export async function criarClienteCaso(
+  input: CriarClienteCasoInput
+): Promise<CriarClienteCasoResult> {
+  const user = await getAppUser();
+  if (!user) throw new Error("Não autenticado");
+
+  const nome = input.nome?.trim() ?? "";
+  if (!nome) throw new Error("Nome é obrigatório");
+
+  const telefoneRaw = input.telefone?.trim() ?? "";
+  if (!telefoneRaw) throw new Error("Telefone é obrigatório");
+
+  const telefone = normalizePhoneBrStorage(telefoneRaw);
+  if (phoneToContactNorm(telefone).length < 10) {
+    throw new Error("Telefone inválido");
+  }
+
+  const cpfRaw = input.cpf?.trim() ? normalizeCpf(input.cpf) : "";
+  if (cpfRaw) {
+    if (cpfRaw.length !== 11 || !isValidCpf(cpfRaw)) {
+      throw new Error("CPF inválido");
+    }
+  }
+
+  const beneficio =
+    input.beneficio_identificado?.trim() || null;
+  const tipoSegurado = input.tipo_segurado?.trim() || null;
+  const area = input.area?.trim() || null;
+  const status: CasoStatus = input.status ?? "em_atendimento";
+
+  const supabase = await createClient();
+  const casoSelect =
+    "id, nome, cpf, telefone, status, beneficio_identificado, tipo_segurado, area";
+
+  type CasoRow = {
+    id: number;
+    nome: string | null;
+    cpf: string | null;
+    telefone: string | null;
+    status: string | null;
+    beneficio_identificado: string | null;
+    tipo_segurado: string | null;
+    area: string | null;
+  };
+
+  let existing: CasoRow | null = null;
+
+  if (cpfRaw) {
+    const { data } = await supabase
+      .from("casos_novos")
+      .select(casoSelect)
+      .eq("cpf", cpfRaw)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    existing = data;
+  }
+
+  if (!existing) {
+    const variants = telefoneLookupVariants(telefone);
+    const { data: byPhone } = await supabase
+      .from("casos_novos")
+      .select(casoSelect)
+      .in("telefone", variants)
+      .order("created_at", { ascending: false })
+      .limit(5);
+    const rows = byPhone ?? [];
+    const target = phoneToContactNorm(telefone);
+    existing =
+      rows.find((r) => phoneToContactNorm(r.telefone) === target) ??
+      rows[0] ??
+      null;
+  }
+
+  const hrefFor = (cpf: string | null, phone: string) =>
+    fichaPessoaHref({
+      cpf,
+      contactNorm: phoneToContactNorm(phone),
+    });
+
+  if (existing) {
+    const patch: {
+      nome?: string;
+      cpf?: string;
+      telefone?: string;
+      beneficio_identificado?: string;
+      tipo_segurado?: string;
+      area?: string;
+    } = {};
+    if (!existing.nome && nome) patch.nome = nome;
+    if (!existing.cpf && cpfRaw) patch.cpf = cpfRaw;
+    if (!existing.telefone && telefone) patch.telefone = telefone;
+    if (!existing.beneficio_identificado && beneficio) {
+      patch.beneficio_identificado = beneficio;
+    }
+    if (!existing.tipo_segurado && tipoSegurado) {
+      patch.tipo_segurado = tipoSegurado;
+    }
+    if (!existing.area && area) patch.area = area;
+
+    if (Object.keys(patch).length) {
+      const { error } = await supabase
+        .from("casos_novos")
+        .update(patch)
+        .eq("id", existing.id);
+      if (error) throw new Error(error.message);
+    }
+
+    const cpfOut = (existing.cpf ? normalizeCpf(existing.cpf) : null) || cpfRaw || null;
+    const telOut = existing.telefone
+      ? normalizePhoneBrStorage(existing.telefone)
+      : telefone;
+
+    await logEvent("casos_novos", existing.id, "caso_reusado_painel", {
+      origem: "criarClienteCaso",
+      campos: Object.keys(patch),
+    });
+
+    revalidatePath("/kanban");
+    revalidatePath("/clientes");
+    revalidatePath(hrefFor(cpfOut, telOut));
+
+    return {
+      success: true,
+      casoId: existing.id,
+      created: false,
+      href: hrefFor(cpfOut, telOut),
+      nome: existing.nome?.trim() || nome,
+      telefone: telOut,
+      cpf: cpfOut,
+      status: existing.status ?? status,
+      beneficio_identificado:
+        existing.beneficio_identificado?.trim() || beneficio,
+    };
+  }
+
+  const { data: created, error } = await supabase
+    .from("casos_novos")
+    .insert({
+      nome,
+      telefone,
+      cpf: cpfRaw || null,
+      beneficio_identificado: beneficio,
+      tipo_segurado: tipoSegurado,
+      area,
+      status,
+    })
+    .select(casoSelect)
+    .single();
+
+  if (error || !created) {
+    throw new Error(error?.message ?? "Falha ao criar caso");
+  }
+
+  await logEvent("casos_novos", created.id, "caso_criado_painel", {
+    origem: "criarClienteCaso",
+    telefone,
+    cpf: cpfRaw || null,
+  });
+
+  const href = hrefFor(cpfRaw || null, telefone);
+  revalidatePath("/kanban");
+  revalidatePath("/clientes");
+  revalidatePath(href);
+  revalidatePath(`/kanban/${created.id}`);
+
+  return {
+    success: true,
+    casoId: created.id,
+    created: true,
+    href,
+    nome,
+    telefone,
+    cpf: cpfRaw || null,
+    status: created.status ?? status,
+    beneficio_identificado: beneficio,
+  };
 }

@@ -108,6 +108,204 @@ export type Database = {
         };
         Relationships: [];
       };
+      app_agente_config: {
+        Row: {
+          id: number;
+          persona_rascunho: string;
+          mensagem_abertura_rascunho: string;
+          persona: string;
+          mensagem_abertura: string;
+          versao: number;
+          published_at: string | null;
+          updated_at: string;
+          updated_by: string | null;
+          published_by: string | null;
+        };
+        Insert: {
+          id?: number;
+          persona_rascunho?: string;
+          mensagem_abertura_rascunho?: string;
+          persona?: string;
+          mensagem_abertura?: string;
+          versao?: number;
+          published_at?: string | null;
+          updated_at?: string;
+          updated_by?: string | null;
+          published_by?: string | null;
+        };
+        Update: {
+          id?: number;
+          persona_rascunho?: string;
+          mensagem_abertura_rascunho?: string;
+          persona?: string;
+          mensagem_abertura?: string;
+          versao?: number;
+          published_at?: string | null;
+          updated_at?: string;
+          updated_by?: string | null;
+          published_by?: string | null;
+        };
+        Relationships: [];
+      };
+      app_agente_sandbox_sessoes: {
+        Row: {
+          id: string;
+          user_id: string;
+          versao: string;
+          tipo_caso_id: string | null;
+          tipo_caso_label: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          versao: string;
+          tipo_caso_id?: string | null;
+          tipo_caso_label?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          versao?: string;
+          tipo_caso_id?: string | null;
+          tipo_caso_label?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      app_agente_sandbox_mensagens: {
+        Row: {
+          id: string;
+          sessao_id: string;
+          role: string;
+          content: string;
+          media_kind: string | null;
+          media_path: string | null;
+          media_url: string | null;
+          media_mime: string | null;
+          transcript: string | null;
+          meta: Json;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          sessao_id: string;
+          role: string;
+          content?: string;
+          media_kind?: string | null;
+          media_path?: string | null;
+          media_url?: string | null;
+          media_mime?: string | null;
+          transcript?: string | null;
+          meta?: Json;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          sessao_id?: string;
+          role?: string;
+          content?: string;
+          media_kind?: string | null;
+          media_path?: string | null;
+          media_url?: string | null;
+          media_mime?: string | null;
+          transcript?: string | null;
+          meta?: Json;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      app_assistente_sessoes: {
+        Row: {
+          id: string;
+          user_id: string;
+          created_at: string;
+          updated_at: string;
+          pending_anexo: Json | null;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          created_at?: string;
+          updated_at?: string;
+          pending_anexo?: Json | null;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          created_at?: string;
+          updated_at?: string;
+          pending_anexo?: Json | null;
+        };
+        Relationships: [];
+      };
+      app_assistente_mensagens: {
+        Row: {
+          id: string;
+          sessao_id: string;
+          role: string;
+          content: string;
+          tool_trace: Json;
+          anexos: Json;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          sessao_id: string;
+          role: string;
+          content?: string;
+          tool_trace?: Json;
+          anexos?: Json;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          sessao_id?: string;
+          role?: string;
+          content?: string;
+          tool_trace?: Json;
+          anexos?: Json;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      app_assistente_auditoria: {
+        Row: {
+          id: string;
+          sessao_id: string | null;
+          user_id: string;
+          tool: string;
+          args: Json;
+          result: Json;
+          confirmed_by: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          sessao_id?: string | null;
+          user_id: string;
+          tool: string;
+          args?: Json;
+          result?: Json;
+          confirmed_by?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          sessao_id?: string | null;
+          user_id?: string;
+          tool?: string;
+          args?: Json;
+          result?: Json;
+          confirmed_by?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       aprovacoes_pendentes: {
         Row: {
           cpf: string | null;

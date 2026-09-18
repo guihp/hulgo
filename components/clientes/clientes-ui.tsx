@@ -1,15 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Pencil, Plus, Users } from "lucide-react";
+import { differenceInDays } from "date-fns";
+import { Eye, EyeOff, Pencil, Plus, Search, Users } from "lucide-react";
 import { upsertProcesso } from "@/lib/actions/casos";
 import type { AppUser } from "@/lib/actions/auth";
 import type { Tables } from "@/types/database";
 import { CpfDisplay } from "@/components/shared/cpf-display";
 import { EmptyState } from "@/components/shared/empty-state";
-import { Badge } from "@/components/ui/badge";
 import { LinkButton } from "@/components/ui/link-button";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -27,15 +27,9 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
   cpfCnpjDocumentLabel,
+  formatCpfCnpj,
+  maskCpf,
   maskCpfCnpjInput,
   normalizeCpf,
 } from "@/lib/utils/cpf";
@@ -57,6 +51,55 @@ import {
   maskNumeroProcessoInput,
   normalizeNumeroProcesso,
 } from "@/lib/utils/processo";
+import { cn } from "@/lib/utils";
+
+const inputShell =
+  "border-[#e2e8f0] bg-white text-[#0b2148] placeholder:text-[#94a3b8] focus-visible:border-[#0b2148] focus-visible:ring-[#0b2148]/12";
+
+/** Shared list grid: fixed contato/vínculos/ação tracks so header and rows align. */
+const clientesListGrid =
+  "grid grid-cols-1 gap-3 px-4 sm:grid-cols-[minmax(0,1fr)_14rem_10rem_7.5rem] sm:items-center sm:gap-4 sm:px-5";
+
+type ClienteFiltro = "todos" | "com_processo" | "so_atendimento" | "sem_cpf";
+
+function initialsFromName(name: string | null | undefined): string {
+  const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function diasNaEtapa(createdAt: string | null | undefined): number {
+  if (!createdAt) return 0;
+  return Math.max(0, differenceInDays(new Date(), new Date(createdAt)));
+}
+
+function ClienteKpiCard({
+  label,
+  value,
+  sub,
+  dotClass,
+}: {
+  label: string;
+  value: number;
+  sub: string;
+  dotClass: string;
+}) {
+  return (
+    <Card className="rounded-2xl border-[#e2e8f0] bg-white shadow-none">
+      <CardContent className="p-4 sm:p-5">
+        <div className="flex items-start justify-between gap-2">
+          <p className="text-xs font-medium text-[#64748B]">{label}</p>
+          <span className={cn("mt-1 size-2 shrink-0 rounded-full", dotClass)} />
+        </div>
+        <p className="mt-3 text-3xl font-bold tabular-nums tracking-tight text-[#0b2148]">
+          {value}
+        </p>
+        <p className="mt-1 text-xs text-[#94a3b8]">{sub}</p>
+      </CardContent>
+    </Card>
+  );
+}
 
 type Processo = Tables<"processos_clientes">;
 
@@ -317,14 +360,16 @@ export function ClientesList({
   user?: AppUser;
 }) {
   const [search, setSearch] = useState("");
+  const [filtro, setFiltro] = useState<ClienteFiltro>("todos");
+  const [revealCpfs, setRevealCpfs] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [abrindoCaso, setAbrindoCaso] = useState<Tables<"casos_novos"> | null>(
     abrirCaso
   );
 
-  // Clientes do Kanban em "Abertura de processo" que ainda não têm processo
+  // Clientes do Kanban em etapas de abertura que ainda não têm processo
   // cadastrado — dedupe por telefone/CPF e exclui quem já está na tabela
-  const emAbertura = (() => {
+  const emAbertura = useMemo(() => {
     const cpfsComProcesso = new Set(processos.map((p) => normalizeCpf(p.cpf)));
     const telefonesComProcesso = new Set(
       processos.map((p) => p.telefone?.replace(/\D/g, "") ?? "").filter(Boolean)
@@ -340,167 +385,336 @@ export function ClientesList({
       vistos.add(key);
       return true;
     });
-  })();
+  }, [casosAbertura, processos]);
 
-  const filtered = pessoas.filter((p) => {
-    const q = search.toLowerCase();
+  const kpis = useMemo(() => {
+    const total = pessoas.length;
+    const comProcesso = pessoas.filter((p) => p.nProcessos > 0).length;
+    const soAtendimento = pessoas.filter(
+      (p) => p.nProcessos === 0 && p.nCasos > 0
+    ).length;
+    const semCpf = pessoas.filter((p) => !p.cpf).length;
+    return { total, comProcesso, soAtendimento, semCpf };
+  }, [pessoas]);
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase().trim();
     const qDigits = q.replace(/\D/g, "");
-    return (
-      !q ||
-      p.nome.toLowerCase().includes(q) ||
-      (p.cpf && p.cpf.includes(qDigits)) ||
-      (p.telefone && p.telefone.replace(/\D/g, "").includes(qDigits)) ||
-      (p.beneficio?.toLowerCase().includes(q) ?? false)
-    );
-  });
+    return pessoas.filter((p) => {
+      if (filtro === "com_processo" && p.nProcessos === 0) return false;
+      if (filtro === "so_atendimento" && !(p.nProcessos === 0 && p.nCasos > 0))
+        return false;
+      if (filtro === "sem_cpf" && p.cpf) return false;
+      if (!q) return true;
+      return (
+        p.nome.toLowerCase().includes(q) ||
+        (p.cpf != null && qDigits.length > 0 && p.cpf.includes(qDigits)) ||
+        (p.telefone != null &&
+          qDigits.length > 0 &&
+          p.telefone.replace(/\D/g, "").includes(qDigits)) ||
+        (p.beneficio?.toLowerCase().includes(q) ?? false)
+      );
+    });
+  }, [pessoas, search, filtro]);
+
+  const pills: { key: ClienteFiltro; label: string; count: number }[] = [
+    { key: "todos", label: "Todos", count: kpis.total },
+    { key: "com_processo", label: "Com processo", count: kpis.comProcesso },
+    { key: "so_atendimento", label: "Só atendimento", count: kpis.soAtendimento },
+    { key: "sem_cpf", label: "Sem CPF", count: kpis.semCpf },
+  ];
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <Input
-          placeholder="Buscar por nome, CPF ou telefone..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="sm:max-w-sm"
-        />
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-[#0b2148]">
+            Clientes
+          </h1>
+          <p className="mt-1 text-sm text-[#64748B]">
+            Pessoas com processo judicial ou atendimento no WhatsApp
+          </p>
+        </div>
         <ProcessoDialog
           open={createOpen}
           onOpenChange={setCreateOpen}
           title="Cadastrar processo"
           trigger={
-            <DialogTrigger className={buttonVariants()}>
-              <Plus className="mr-2 h-4 w-4" />
+            <DialogTrigger
+              className={cn(
+                buttonVariants(),
+                "rounded-full bg-[#0b2148] text-white shadow-[0_8px_24px_rgba(11,33,72,0.22)] hover:bg-[#163a7a]"
+              )}
+            >
+              <Plus className="size-4" />
               Novo processo
             </DialogTrigger>
           }
         />
-        <ProcessoDialog
-          open={abrindoCaso !== null}
-          onOpenChange={(next) => {
-            if (!next) setAbrindoCaso(null);
-          }}
-          title="Criar processo para o cliente"
-          prefill={
-            abrindoCaso
-              ? {
-                  nome: abrindoCaso.nome ?? "",
-                  cpf: maskCpfCnpjInput(abrindoCaso.cpf ?? ""),
-                  telefone: maskPhoneBrInput(abrindoCaso.telefone ?? ""),
-                  area: abrindoCaso.area ?? "",
-                  data_nascimento: isoToBrazilianDate(
-                    abrindoCaso.data_nascimento
-                  ),
-                  descricao_caso: abrindoCaso.beneficio_identificado ?? "",
-                }
-              : undefined
-          }
+      </div>
+
+      <ProcessoDialog
+        open={abrindoCaso !== null}
+        onOpenChange={(next) => {
+          if (!next) setAbrindoCaso(null);
+        }}
+        title="Criar processo para o cliente"
+        prefill={
+          abrindoCaso
+            ? {
+                nome: abrindoCaso.nome ?? "",
+                cpf: maskCpfCnpjInput(abrindoCaso.cpf ?? ""),
+                telefone: maskPhoneBrInput(abrindoCaso.telefone ?? ""),
+                area: abrindoCaso.area ?? "",
+                data_nascimento: isoToBrazilianDate(
+                  abrindoCaso.data_nascimento
+                ),
+                descricao_caso: abrindoCaso.beneficio_identificado ?? "",
+              }
+            : undefined
+        }
+      />
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <ClienteKpiCard
+          label="Clientes na base"
+          value={kpis.total}
+          sub="cadastrados no escritório"
+          dotClass="bg-[#0b2148]"
+        />
+        <ClienteKpiCard
+          label="Com processo"
+          value={kpis.comProcesso}
+          sub="ficha judicial ativa"
+          dotClass="bg-[#163a7a]"
+        />
+        <ClienteKpiCard
+          label="Só atendimento"
+          value={kpis.soAtendimento}
+          sub="WhatsApp sem processo"
+          dotClass="bg-amber-500"
+        />
+        <ClienteKpiCard
+          label="Sem CPF"
+          value={kpis.semCpf}
+          sub="cadastro incompleto"
+          dotClass="bg-rose-500"
         />
       </div>
 
       {emAbertura.length > 0 && (
-        <Card>
-          <CardContent className="p-4">
-            <h2 className="mb-1 text-base font-semibold">
-              Aguardando abertura de processo ({emAbertura.length})
-            </h2>
-            <p className="mb-3 text-sm text-muted-foreground">
-              Clientes na coluna &quot;Abertura de processo&quot; do funil que
-              ainda não têm processo cadastrado
+        <section className="rounded-2xl border border-[#e2e8f0] bg-white p-4 shadow-none sm:p-5">
+          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="size-2 shrink-0 rounded-full bg-amber-500" />
+              <h2 className="text-sm font-semibold text-[#0b2148]">
+                Aguardando abertura de processo
+              </h2>
+              <span className="inline-flex size-6 items-center justify-center rounded-full bg-[#F1F5F9] text-xs font-semibold text-[#64748B]">
+                {emAbertura.length}
+              </span>
+            </div>
+            <p className="text-xs text-[#94a3b8] sm:text-right">
+              Na etapa &quot;Abertura de processo&quot; do funil, ainda sem
+              processo cadastrado
             </p>
-            <div className="space-y-2">
-              {emAbertura.map((c) => (
+          </div>
+          <div className="space-y-2">
+            {emAbertura.map((c) => {
+              const dias = diasNaEtapa(c.updated_at ?? c.created_at);
+              const meta = [
+                c.beneficio_identificado || "Benefício não identificado",
+                c.telefone ? maskPhoneBrInput(c.telefone) : null,
+              ]
+                .filter(Boolean)
+                .join(" · ");
+              return (
                 <div
                   key={c.id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm"
+                  className="flex flex-col gap-3 rounded-xl border border-[#e2e8f0] bg-[#F8FAFC] px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4"
                 >
-                  <div className="min-w-0">
-                    <p className="font-medium">{c.nome ?? "Sem nome"}</p>
-                    <p className="text-muted-foreground">
-                      <CpfDisplay value={c.cpf} />
-                      {c.telefone ? ` · ${maskPhoneBrInput(c.telefone)}` : ""}
-                      {c.beneficio_identificado
-                        ? ` · ${c.beneficio_identificado}`
-                        : ""}
-                    </p>
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-sm font-semibold text-amber-900">
+                      {initialsFromName(c.nome)}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold text-[#0b2148]">
+                        {c.nome ?? "Sem nome"}
+                      </p>
+                      <p className="truncate text-sm text-[#64748B]">{meta}</p>
+                    </div>
                   </div>
-                  <div className="flex gap-1">
+                  <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
+                    <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-800">
+                      há {dias} dia{dias === 1 ? "" : "s"} na etapa
+                    </span>
                     <LinkButton
                       href={`/kanban/${c.id}`}
                       size="sm"
                       variant="outline"
+                      className="border-[#e2e8f0] text-[#0b2148] hover:bg-white"
                     >
                       Ver caso
                     </LinkButton>
-                    <Button size="sm" onClick={() => setAbrindoCaso(c)}>
-                      <Plus className="mr-1 h-3.5 w-3.5" />
+                    <Button
+                      size="sm"
+                      className="bg-[#0b2148] text-white hover:bg-[#163a7a]"
+                      onClick={() => setAbrindoCaso(c)}
+                    >
                       Criar processo
                     </Button>
                   </div>
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+              );
+            })}
+          </div>
+        </section>
       )}
 
-      {filtered.length === 0 ? (
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+        <div className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-[#94a3b8]" />
+          <Input
+            placeholder="Buscar por nome, CPF ou telefone..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className={cn(inputShell, "h-11 pl-9")}
+          />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {pills.map((p) => (
+            <button
+              key={p.key}
+              type="button"
+              onClick={() => setFiltro(p.key)}
+              className={cn(
+                "rounded-full border px-3.5 py-1.5 text-sm font-medium transition",
+                filtro === p.key
+                  ? "border-[#0b2148] bg-[#0b2148] text-white shadow-sm"
+                  : "border-[#e2e8f0] bg-white text-[#64748B] hover:border-[#0b2148]/30 hover:text-[#0b2148]"
+              )}
+            >
+              {p.label} ({p.count})
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-3 lg:ml-auto">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="border-[#e2e8f0] text-[#0b2148] hover:bg-[#0b2148]/5"
+            onClick={() => setRevealCpfs((v) => !v)}
+          >
+            {revealCpfs ? (
+              <EyeOff className="size-3.5" />
+            ) : (
+              <Eye className="size-3.5" />
+            )}
+            {revealCpfs ? "Ocultar CPFs" : "Revelar CPFs"}
+          </Button>
+          <span className="text-sm tabular-nums text-[#64748B]">
+            <span className="font-semibold text-[#0b2148]">{filtered.length}</span>
+            /{kpis.total}
+          </span>
+        </div>
+      </div>
+
+      {pessoas.length === 0 ? (
         <EmptyState
           icon={Users}
           title="Nenhuma pessoa encontrada"
           description="Pessoas com processo judicial ou atendimento no WhatsApp aparecem aqui."
         />
+      ) : filtered.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-[#e2e8f0] bg-white p-8 text-center text-sm text-[#64748B]">
+          Nenhum cliente corresponde aos filtros atuais.
+        </div>
       ) : (
-        <Card>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Nome</TableHead>
-                  <TableHead>Documento</TableHead>
-                  <TableHead className="hidden md:table-cell">WhatsApp</TableHead>
-                  <TableHead className="hidden sm:table-cell">Vínculos</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filtered.map((p) => (
-                  <TableRow key={p.key}>
-                    <TableCell className="font-medium">{p.nome}</TableCell>
-                    <TableCell>
-                      {p.cpf ? (
-                        <CpfDisplay value={p.cpf} />
-                      ) : (
-                        <span className="text-muted-foreground">Sem CPF</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="hidden md:table-cell text-muted-foreground">
-                      {p.telefone ? maskPhoneBrInput(p.telefone) : "—"}
-                    </TableCell>
-                    <TableCell className="hidden sm:table-cell">
-                      <div className="flex flex-wrap gap-1">
-                        {p.nProcessos > 0 ? (
-                          <Badge variant="default">
-                            {p.nProcessos} processo{p.nProcessos === 1 ? "" : "s"}
-                          </Badge>
-                        ) : null}
-                        {p.nCasos > 0 ? (
-                          <Badge variant="secondary">
-                            {p.nCasos} caso{p.nCasos === 1 ? "" : "s"}
-                          </Badge>
-                        ) : null}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <LinkButton href={p.href} size="sm" variant="outline">
-                        Ver ficha
-                      </LinkButton>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+        <section className="overflow-hidden rounded-2xl border border-[#e2e8f0] bg-white">
+          <div className={cn(clientesListGrid, "border-b border-[#e2e8f0] py-3")}>
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold tracking-[0.08em] text-[#94a3b8] uppercase">
+                Cliente
+              </p>
+            </div>
+            <div className="min-w-0 text-left">
+              <p className="text-[11px] font-semibold tracking-[0.08em] text-[#94a3b8] uppercase">
+                Contato
+              </p>
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold tracking-[0.08em] text-[#94a3b8] uppercase">
+                Vínculos
+              </p>
+            </div>
+            <div className="min-w-0 text-right sm:justify-self-end">
+              <p className="text-[10px] leading-tight text-[#94a3b8]">
+                ordem alfabética
+              </p>
+            </div>
+          </div>
+          <ul className="divide-y divide-[#e2e8f0]">
+            {filtered.map((p) => (
+              <li key={p.key} className={cn(clientesListGrid, "py-4")}>
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[#0b2148]/10 text-sm font-semibold text-[#0b2148]">
+                    {initialsFromName(p.nome)}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold text-[#0b2148]">
+                      {p.nome}
+                    </p>
+                    <p className="truncate text-sm text-[#64748B]">
+                      {p.beneficio || "Benefício não identificado"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="min-w-0 text-left">
+                  {p.cpf ? (
+                    <p className="font-mono text-sm text-[#0F172A]">
+                      {revealCpfs ? formatCpfCnpj(p.cpf) : maskCpf(p.cpf)}
+                    </p>
+                  ) : (
+                    <p className="text-sm font-medium text-amber-700/80">
+                      Sem CPF cadastrado
+                    </p>
+                  )}
+                  <p className="text-sm text-[#64748B]">
+                    {p.telefone
+                      ? maskPhoneBrInput(p.telefone)
+                      : "sem WhatsApp"}
+                  </p>
+                </div>
+
+                <div className="flex min-w-0 flex-wrap gap-1.5">
+                  {p.nProcessos > 0 ? (
+                    <span className="rounded-full border border-[#0b2148]/20 bg-[#0b2148]/8 px-2.5 py-0.5 text-xs font-medium text-[#0b2148]">
+                      {p.nProcessos} processo{p.nProcessos === 1 ? "" : "s"}
+                    </span>
+                  ) : null}
+                  {p.nCasos > 0 ? (
+                    <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-xs font-medium text-slate-600">
+                      {p.nCasos} caso{p.nCasos === 1 ? "" : "s"}
+                    </span>
+                  ) : null}
+                </div>
+
+                <div className="sm:justify-self-end">
+                  <LinkButton
+                    href={p.href}
+                    size="sm"
+                    variant="outline"
+                    className="border-[#e2e8f0] text-[#0b2148] hover:bg-[#F8FAFC]"
+                  >
+                    Ver ficha
+                  </LinkButton>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
     </div>
   );

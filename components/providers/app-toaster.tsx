@@ -7,19 +7,23 @@ export function AppToaster() {
     <Toaster
       position="top-right"
       offset={16}
-      richColors
       closeButton
       toastOptions={{
         duration: 5000,
         classNames: {
           toast:
-            "!bg-background/60 !text-foreground !border-border/35 !backdrop-blur-md !shadow-sm",
-          title: "!text-sm !font-medium",
-          description: "!text-xs !text-muted-foreground",
+            "!bg-white/92 !text-[#0b2148] !border-[#0b2148]/12 !backdrop-blur-md !shadow-[0_16px_40px_rgba(11,33,72,0.12)]",
+          title: "!text-sm !font-medium !text-[#0b2148]",
+          description: "!text-xs !text-[#64748B]",
           actionButton:
-            "!bg-primary/75 !text-primary-foreground !text-xs !h-7 !px-2.5",
+            "!bg-[#0b2148] !text-white !text-xs !h-7 !px-2.5",
+          cancelButton:
+            "!bg-[#f5f7fa] !text-[#0b2148] !text-xs !h-7 !px-2.5",
           closeButton:
-            "!bg-background/40 !border-border/35 !text-muted-foreground",
+            "!bg-[#f5f7fa] !border-[#0b2148]/12 !text-[#0b2148]",
+          icon: "!text-[#163a7a]",
+          error: "!border-[#0b2148]/16",
+          success: "!border-[#0b2148]/16",
         },
       }}
     />

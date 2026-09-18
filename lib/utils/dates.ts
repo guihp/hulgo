@@ -120,6 +120,24 @@ function brazilCalendarParts(d: Date): { year: number; month: number; day: numbe
   return { year: get("year"), month: get("month"), day: get("day") };
 }
 
+/**
+ * Start/end of the calendar day in America/Sao_Paulo as UTC ISO strings.
+ * Brazil has no DST since 2019 — fixed offset -03:00.
+ */
+export function brazilCalendarDayBounds(now: Date = new Date()): {
+  day: string;
+  startIso: string;
+  endIso: string;
+} {
+  const { year, month, day } = brazilCalendarParts(now);
+  const dayStr = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  return {
+    day: dayStr,
+    startIso: new Date(`${dayStr}T00:00:00.000-03:00`).toISOString(),
+    endIso: new Date(`${dayStr}T23:59:59.999-03:00`).toISOString(),
+  };
+}
+
 function isSameBrazilDay(a: Date, b: Date): boolean {
   const pa = brazilCalendarParts(a);
   const pb = brazilCalendarParts(b);

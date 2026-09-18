@@ -32,7 +32,10 @@ Veja `.env.example` para a lista completa. Resumo:
 | `N8N_WEBHOOK_CONTROLE_IA` | **Somente servidor** | Pausar/despausar IA no n8n |
 | `N8N_INTEGRACAO_TOKEN` | **Somente servidor** | Token das rotas `/api/integracao/*` |
 | `EVOGO_*` | **Somente servidor** | EvoGo — envio WhatsApp |
-| `CRON_SECRET` | **Somente servidor** | Protege `/api/cron/datajud` |
+| `CRON_SECRET` | **Somente servidor** | Protege `/api/cron/datajud` e `/api/cron/agente-sandbox` |
+| `OPENAI_API_KEY` | **Somente servidor** | Sandbox do agente (Configurações → Testar agente) |
+| `OPENAI_MODEL` | **Somente servidor** | Opcional — padrão `gpt-5.6-luna` |
+| `OPENAI_TRANSCRIBE_MODEL` | **Somente servidor** | Opcional — padrão `whisper-1` |
 | `DATAJUD_API_KEY` | **Somente servidor** | Override opcional da chave DataJud |
 
 **Nunca** use `service_role` no front-end.

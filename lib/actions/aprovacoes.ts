@@ -5,7 +5,117 @@ import { createClient } from "@/lib/supabase/server";
 import { getAppUser } from "@/lib/actions/auth";
 import { enviarMensagem } from "@/lib/actions/mensagens";
 import { controlarIA } from "@/lib/n8n";
+import { normalizeCpf } from "@/lib/utils/cpf";
+import { phoneToContactNorm } from "@/lib/utils/phone";
 import type { AprovacaoAcao, AprovacaoStatus, Json } from "@/types/database";
+
+export type AprovacaoContexto = {
+  contactNorm: string;
+  cpf: string;
+  processos: {
+    id: number;
+    numero_processo: string;
+    tribunal: string | null;
+    area: string | null;
+    ativo: boolean | null;
+  }[];
+  casoFunil: {
+    id: number;
+    status: string | null;
+    beneficio_identificado: string | null;
+    nome: string | null;
+  } | null;
+  anteriores: {
+    id: number;
+    status: string | null;
+    created_at: string | null;
+    numero_processo: string | null;
+    decidido_em: string | null;
+  }[];
+  mensagens: {
+    id: number;
+    type: string | null;
+    text: string | null;
+    created_at: string;
+  }[];
+  decisorNome: string | null;
+};
+
+export async function getAprovacaoContexto(
+  aprovacaoId: number
+): Promise<AprovacaoContexto | null> {
+  const user = await getAppUser();
+  if (!user) return null;
+
+  const supabase = await createClient();
+  const { data: aprovacao } = await supabase
+    .from("aprovacoes_pendentes")
+    .select("id, cpf, telefone_cliente, decidido_por")
+    .eq("id", aprovacaoId)
+    .single();
+
+  if (!aprovacao) return null;
+
+  const cpf = normalizeCpf(aprovacao.cpf ?? "");
+  const contactNorm = phoneToContactNorm(aprovacao.telefone_cliente);
+
+  const [processos, casoFunil, anteriores, mensagens, decisor] =
+    await Promise.all([
+      cpf
+        ? supabase
+            .from("processos_clientes")
+            .select("id, numero_processo, tribunal, area, ativo")
+            .eq("cpf", cpf)
+            .then((r) => r.data ?? [])
+        : Promise.resolve([]),
+      contactNorm
+        ? supabase
+            .from("casos_novos")
+            .select("id, status, beneficio_identificado, nome")
+            .ilike("telefone", `%${contactNorm.slice(-8)}%`)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .then((r) => r.data?.[0] ?? null)
+        : Promise.resolve(null),
+      cpf
+        ? supabase
+            .from("aprovacoes_pendentes")
+            .select("id, status, created_at, numero_processo, decidido_em")
+            .eq("cpf", aprovacao.cpf ?? "")
+            .neq("id", aprovacao.id)
+            .order("created_at", { ascending: false })
+            .limit(5)
+            .then((r) => r.data ?? [])
+        : Promise.resolve([]),
+      contactNorm
+        ? supabase
+            .from("mensagens")
+            .select("id, type, text, created_at")
+            .eq("contact_norm", contactNorm)
+            .order("created_at", { ascending: false })
+            .limit(6)
+            .then((r) => r.data ?? [])
+        : Promise.resolve([]),
+      aprovacao.decidido_por
+        ? supabase
+            .from("app_usuarios")
+            .select("nome")
+            .eq("id", aprovacao.decidido_por)
+            .single()
+            .then((r) => r.data?.nome ?? null)
+        : Promise.resolve(null),
+    ]);
+
+  return {
+    contactNorm,
+    cpf,
+    processos,
+    casoFunil,
+    anteriores,
+    mensagens: [...mensagens].reverse(),
+    decisorNome: decisor,
+  };
+}
 
 const STATUS_POR_ACAO: Record<AprovacaoAcao, AprovacaoStatus> = {
   aprovar: "aprovado",

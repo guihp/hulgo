@@ -8,6 +8,9 @@ export type ResultadoBusca = {
   titulo: string;
   subtitulo: string;
   href: string;
+  /** Identity helpers for assistente disambiguation (optional for ⌘K). */
+  cpf?: string | null;
+  telefone?: string | null;
 };
 
 export async function buscarGlobal(termo: string): Promise<ResultadoBusca[]> {
@@ -27,7 +30,7 @@ export async function buscarGlobal(termo: string): Promise<ResultadoBusca[]> {
   const [processos, casos, conversas] = await Promise.all([
     supabase
       .from("processos_clientes")
-      .select("nome, cpf, numero_processo, tribunal")
+      .select("nome, cpf, telefone, numero_processo, tribunal")
       .or(
         [
           `nome.ilike.${like}`,
@@ -40,7 +43,7 @@ export async function buscarGlobal(termo: string): Promise<ResultadoBusca[]> {
       .limit(5),
     supabase
       .from("casos_novos")
-      .select("id, nome, cpf, beneficio_identificado, status")
+      .select("id, nome, cpf, telefone, beneficio_identificado, status")
       .or(
         [
           `nome.ilike.${like}`,
@@ -62,20 +65,26 @@ export async function buscarGlobal(termo: string): Promise<ResultadoBusca[]> {
   ]);
 
   for (const p of processos.data ?? []) {
+    const cpf = p.cpf ? normalizeCpf(p.cpf) : null;
     resultados.push({
       tipo: "cliente",
       titulo: p.nome,
       subtitulo: `Processo ${p.numero_processo}${p.tribunal ? ` · ${p.tribunal}` : ""}`,
-      href: `/clientes/${normalizeCpf(p.cpf)}`,
+      href: `/clientes/${cpf ?? normalizeCpf(p.cpf)}`,
+      cpf,
+      telefone: p.telefone ?? null,
     });
   }
 
   for (const c of casos.data ?? []) {
+    const cpf = c.cpf ? normalizeCpf(c.cpf) : null;
     resultados.push({
       tipo: "caso",
       titulo: c.nome ?? "Caso sem nome",
       subtitulo: c.beneficio_identificado ?? "Benefício não identificado",
       href: `/kanban/${c.id}`,
+      cpf,
+      telefone: c.telefone ?? null,
     });
   }
 
@@ -89,6 +98,7 @@ export async function buscarGlobal(termo: string): Promise<ResultadoBusca[]> {
       titulo: m.phone ?? contact,
       subtitulo: "Conversa no WhatsApp",
       href: `/atendimentos/${contact}`,
+      telefone: contact,
     });
     if (vistos.size >= 3) break;
   }
