@@ -51,7 +51,7 @@ Configure em **Environment Variables** (runtime):
 | `CRON_SECRET` | Recomendado | Protege `/api/cron/datajud`, `/api/cron/prazos-notificar`, etc. |
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | Sim† (build) | Chave pública VAPID (também em Build Variables) |
 | `VAPID_PRIVATE_KEY` | Sim† | Chave privada VAPID (somente runtime) |
-| `VAPID_SUBJECT` | Sim† | Ex.: `mailto:voce@seudominio.com` |
+| `VAPID_SUBJECT` | Sim† | Contato válido no JWT VAPID. Use `mailto:voce@seudominio.com` ou `https://seudominio.com`. **Nunca** `mailto:admin@localhost` — a Apple rejeita com `BadJwtToken` e o push fica `sent: 0`. |
 | `PUSH_WEBHOOK_SECRET` | Sim† | Secret do webhook Supabase → `/api/push/webhook` |
 | `DATAJUD_API_KEY` | Não | Override da chave DataJud |
 
@@ -119,6 +119,7 @@ Criação de prazo/aprovação (painel ou n8n) dispara push imediato via trigger
 | Push na **criação** do prazo não chega | `net._http_response.status_code = 405` ou `307` → `/login` | Redeploy do app com `lib/supabase/middleware.ts` (rota pública `/api/push/webhook`). Teste: `curl -X POST …/api/push/webhook` deve retornar **401** (sem secret), não redirect. |
 | Lembrete 5 min não chega | Cron Coolify ausente ou intervalo > 5 min | Scheduled Task `*/5 * * * *` no endpoint acima; confira `CRON_SECRET` no container. |
 | Cron OK, `enviados: 0`, `vapid skip` | `VAPID_*` ausente no Coolify | Definir `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`. |
+| Webhook `sent: 0` / Apple `BadJwtToken` | `VAPID_SUBJECT=mailto:admin@localhost` (inválido na Apple) | Trocar para `mailto:voce@seudominio.com` ou `https://seudominio.com`, redeploy, e **reativar** o push no app (novas subscriptions). |
 | `já notificado` no relatório do cron | Dedupe normal | Esperado após o primeiro envio por `lembrete_id`. |
 
 Diagnóstico SQL (Supabase): prazo + `app_prazos_lembretes` + linhas em `app_prazos_alertas`;

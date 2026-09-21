@@ -43,7 +43,6 @@ const DEFAULT_LEMBRETE_INPUTS: LembreteInput[] = [
 
 function revalidatePrazos() {
   revalidatePath("/prazos");
-  revalidatePath("/");
 }
 
 function assertDataPrazo(data: string) {
@@ -137,12 +136,22 @@ export async function criarPrazo(input: NovoPrazoInput) {
     .select("id")
     .single();
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    console.error("[criarPrazo] insert", error.code, error.message, error.details);
+    throw new Error(error.message || "Falha ao criar prazo");
+  }
   if (!criado?.id) throw new Error("Falha ao criar prazo");
 
-  await replaceLembretes(supabase, criado.id, lembretes);
+  try {
+    await replaceLembretes(supabase, criado.id, lembretes);
+  } catch (e) {
+    console.error("[criarPrazo] lembretes", e);
+    // Prazo já existe — remove para não deixar órfão sem lembretes configuráveis
+    await supabase.from("app_prazos").delete().eq("id", criado.id);
+    throw e instanceof Error ? e : new Error("Falha ao salvar lembretes");
+  }
 
-  revalidatePrazos();
+  revalidatePath("/prazos");
   return { success: true, id: criado.id };
 }
 

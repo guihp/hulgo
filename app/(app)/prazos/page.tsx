@@ -9,10 +9,15 @@ type PrazoLembrete = Tables<"app_prazos_lembretes">;
 
 export default async function PrazosPage() {
   const supabase = await createClient();
-  const { data: prazosRaw } = await supabase
+  const { data: prazosRaw, error: prazosErr } = await supabase
     .from("app_prazos")
     .select("*")
     .order("data_prazo", { ascending: true });
+
+  if (prazosErr) {
+    console.error("[prazos/page] select", prazosErr.message);
+    throw new Error(`Não foi possível carregar prazos: ${prazosErr.message}`);
+  }
 
   const rows = prazosRaw ?? [];
   const prazoIds = rows.map((p) => p.id);

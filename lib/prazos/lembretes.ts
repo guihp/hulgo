@@ -2,6 +2,7 @@
 
 export type LembretePreset =
   | "na_hora"
+  | "5min"
   | "15min"
   | "1hora"
   | "1dia"
@@ -32,6 +33,7 @@ export const LEMBRETE_PRESET_OPTIONS: {
   offset?: number;
 }[] = [
   { value: "na_hora", label: "Somente no horário", offset: 0 },
+  { value: "5min", label: "5 min antes", offset: 5 },
   { value: "15min", label: "15 min antes", offset: 15 },
   { value: "1hora", label: "1 hora antes", offset: 60 },
   { value: "1dia", label: "1 dia antes", offset: 1440 },
@@ -56,6 +58,8 @@ export function labelForOffset(offsetMinutes: number): string {
   switch (offsetMinutes) {
     case 0:
       return "Somente no horário";
+    case 5:
+      return "5 min antes";
     case 15:
       return "15 min antes";
     case 60:
@@ -77,6 +81,7 @@ export function labelForOffset(offsetMinutes: number): string {
 
 export function offsetFromDraft(draft: LembreteDraft): number {
   if (draft.preset === "na_hora") return 0;
+  if (draft.preset === "5min") return 5;
   if (draft.preset === "15min") return 15;
   if (draft.preset === "1hora") return 60;
   if (draft.preset === "1dia") return 1440;
@@ -90,6 +95,7 @@ export function draftFromOffset(
   key: string
 ): LembreteDraft {
   if (offsetMinutes === 0) return { key, preset: "na_hora" };
+  if (offsetMinutes === 5) return { key, preset: "5min" };
   if (offsetMinutes === 15) return { key, preset: "15min" };
   if (offsetMinutes === 60) return { key, preset: "1hora" };
   if (offsetMinutes === 1440) return { key, preset: "1dia" };

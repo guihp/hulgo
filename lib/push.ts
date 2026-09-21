@@ -25,7 +25,8 @@ function ensureVapid() {
   if (vapidConfigured) return true;
   const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY?.trim();
   const privateKey = process.env.VAPID_PRIVATE_KEY?.trim();
-  const subject = process.env.VAPID_SUBJECT?.trim() || "mailto:admin@localhost";
+  const subject =
+    process.env.VAPID_SUBJECT?.trim() || "mailto:contato@iafeoficial.com";
   if (!publicKey || !privateKey) return false;
   webpush.setVapidDetails(subject, publicKey, privateKey);
   vapidConfigured = true;

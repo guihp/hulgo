@@ -178,7 +178,10 @@ function metaLine(prazo: PrazoEnriched) {
 }
 
 function dateBlockParts(dataPrazo: string, horaPrazo?: string | null) {
-  const d = new Date(dataPrazo + "T12:00:00");
+  const d = new Date(`${dataPrazo}T12:00:00`);
+  if (Number.isNaN(d.getTime())) {
+    return { day: "—", month: "—", time: horaPrazoForInput(horaPrazo) || null };
+  }
   const hora = horaPrazoForInput(horaPrazo);
   return {
     day: format(d, "dd", { locale: ptBR }),
