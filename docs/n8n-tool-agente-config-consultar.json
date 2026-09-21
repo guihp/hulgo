@@ -1,0 +1,40 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "toolDescription": "Carrega o prompt atual do agente WhatsApp no painel (rascunho + produção/publicado). Use ANTES de editar, comparar ou aplicar persona/mensagem de abertura — não invente o texto. Retorna versao, published_at, updated_at, rascunho { persona, mensagem_abertura } e producao { persona, mensagem_abertura }. producao = o que está publicado na UI; rascunho = rascunho efetivo (fallback para publicado se vazio).",
+        "method": "POST",
+        "url": "https://hzfvciamevimjzuvidcp.supabase.co/functions/v1/agente-config-consultar",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer SEU_SUPABASE_SERVICE_ROLE_KEY"
+            },
+            {
+              "name": "apikey",
+              "value": "SEU_SUPABASE_SERVICE_ROLE_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [5936, 1648],
+      "id": "dd000003-0003-4000-8000-000000000003",
+      "name": "consultar_agente_config"
+    }
+  ],
+  "connections": {
+    "consultar_agente_config": {
+      "ai_tool": [[{ "node": "AI Agent1", "type": "ai_tool", "index": 0 }]]
+    }
+  },
+  "pinData": {},
+  "meta": {}
+}

@@ -181,6 +181,29 @@ Detalhes da API: [CHECKLIST-BENEFICIOS-API.md](./CHECKLIST-BENEFICIOS-API.md).
 
 ---
 
+## Tool 10 — `consultar_agente_config`
+
+**Quando usar:** antes de editar, comparar ou aplicar persona / mensagem de abertura do agente WhatsApp. Só leitura (rascunho + produção publicados).
+
+Auth **igual** a `atualizar_dados_caso`: Edge Function + service role.
+
+| Campo | Valor |
+|-------|--------|
+| **Name** | `consultar_agente_config` |
+| **Type** | HTTP Request Tool |
+| **Method** | POST |
+| **URL** | `https://hzfvciamevimjzuvidcp.supabase.co/functions/v1/agente-config-consultar` |
+| **Headers** | `Authorization: Bearer SEU_SUPABASE_SERVICE_ROLE_KEY` + `apikey: SEU_SUPABASE_SERVICE_ROLE_KEY` |
+| **Body** | `={}` |
+| **JSON importável** | [`n8n-tool-agente-config-consultar.json`](./n8n-tool-agente-config-consultar.json) |
+
+**Description (cole no nó):**
+```
+Carrega o prompt atual do agente WhatsApp no painel (rascunho + produção/publicado). Use ANTES de editar, comparar ou aplicar persona/mensagem de abertura — não invente o texto. Retorna versao, published_at, updated_at, rascunho { persona, mensagem_abertura } e producao { persona, mensagem_abertura }. producao = o que está publicado na UI; rascunho = rascunho efetivo (fallback para publicado se vazio).
+```
+
+---
+
 # Blocos de prompt (resumo)
 
 Cole o systemMessage completo de **[PROMPT-AGENTE-IA.md](./PROMPT-AGENTE-IA.md)**. Trechos-chave:
@@ -214,5 +237,6 @@ Fluxo fase 1:
 - [ ] `registrar_caso_para_advogado` ligada ao AI Agent
 - [ ] `buscar_processos_por_cpf` ligada (só localizar cadastro)
 - [ ] DataJud / aprovação desconectadas do Agent (fase 1)
-- [ ] Header `x-integracao-token` nas HTTP tools do **painel** (Next); Edge tools (`caso-atualizar`, `checklist-beneficios`, …) usam service role Bearer + apikey
+- [ ] `consultar_agente_config` ligada quando o fluxo precisa ler prompt rascunho/produção
+- [ ] Header `x-integracao-token` nas HTTP tools do **painel** (Next); Edge tools (`caso-atualizar`, `checklist-beneficios`, `agente-config-consultar`, …) usam service role Bearer + apikey
 - [ ] systemMessage = [PROMPT-AGENTE-IA.md](./PROMPT-AGENTE-IA.md)
