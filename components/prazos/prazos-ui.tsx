@@ -20,7 +20,6 @@ import {
   criarPrazo,
   concluirPrazo,
   excluirPrazo,
-  draftsToInputs,
 } from "@/lib/actions/prazos";
 import type { PrazoTipo, Tables } from "@/types/database";
 import { PRAZO_TIPOS } from "@/lib/utils/beneficios";
@@ -30,6 +29,7 @@ import {
   LEMBRETE_PRESET_LABELS,
   LEMBRETE_PRESET_OPTIONS,
   draftFromOffset,
+  draftsToInputs,
   formatPrazoDateTime,
   horaPrazoForInput,
   newLembreteKey,
@@ -588,8 +588,8 @@ export function NovoPrazoDialog({
       >
         <Plus className="h-4 w-4" /> {triggerLabel}
       </DialogTrigger>
-      <DialogContent className="border-[#e2e8f0] bg-white sm:max-w-md">
-        <DialogHeader>
+      <DialogContent className="gap-0 overflow-hidden border-[#e2e8f0] bg-white p-0 sm:max-w-md">
+        <DialogHeader className="shrink-0 space-y-1 border-b border-[#e2e8f0] px-4 py-3 pr-12">
           <DialogTitle className="text-lg font-bold text-[#0b2148]">
             Novo prazo
           </DialogTitle>
@@ -597,34 +597,36 @@ export function NovoPrazoDialog({
             Cadastre exigências, recursos, perícias e audiências.
           </DialogDescription>
         </DialogHeader>
-        <PrazoFormFields
-          titulo={titulo}
-          setTitulo={setTitulo}
-          tipo={tipo}
-          setTipo={setTipo}
-          data={data}
-          setData={setData}
-          hora={hora}
-          setHora={setHora}
-          lembretes={lembretes}
-          setLembretes={setLembretes}
-          descricao={descricao}
-          setDescricao={setDescricao}
-          showCpf={!cpf}
-          cpfManual={cpfManual}
-          setCpfManual={setCpfManual}
-        />
-        <DialogFooter className="border-[#e2e8f0] bg-[#F8FAFC]">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3">
+          <PrazoFormFields
+            titulo={titulo}
+            setTitulo={setTitulo}
+            tipo={tipo}
+            setTipo={setTipo}
+            data={data}
+            setData={setData}
+            hora={hora}
+            setHora={setHora}
+            lembretes={lembretes}
+            setLembretes={setLembretes}
+            descricao={descricao}
+            setDescricao={setDescricao}
+            showCpf={!cpf}
+            cpfManual={cpfManual}
+            setCpfManual={setCpfManual}
+          />
+        </div>
+        <DialogFooter className="mx-0 mb-0 shrink-0 flex-row justify-stretch gap-2 rounded-none border-[#e2e8f0] bg-[#F8FAFC] pb-[max(1rem,env(safe-area-inset-bottom))] sm:justify-end">
           <Button
             type="button"
             variant="outline"
-            className="border-[#e2e8f0] text-[#0b2148]"
+            className="min-w-0 flex-1 border-[#e2e8f0] text-[#0b2148] sm:flex-none"
             onClick={() => setOpen(false)}
           >
             Cancelar
           </Button>
           <Button
-            className="bg-[#0b2148] text-white hover:bg-[#163a7a]"
+            className="min-w-0 flex-1 bg-[#0b2148] text-white hover:bg-[#163a7a] sm:flex-none"
             disabled={
               loading || !titulo.trim() || !brazilianDateToIso(data) || !horaPrazoForInput(hora)
             }
@@ -718,8 +720,8 @@ export function EditarPrazoDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="border-[#e2e8f0] bg-white sm:max-w-md">
-        <DialogHeader>
+      <DialogContent className="gap-0 overflow-hidden border-[#e2e8f0] bg-white p-0 sm:max-w-md">
+        <DialogHeader className="shrink-0 space-y-1 border-b border-[#e2e8f0] px-4 py-3 pr-12">
           <DialogTitle className="text-lg font-bold text-[#0b2148]">
             Editar prazo
           </DialogTitle>
@@ -727,21 +729,23 @@ export function EditarPrazoDialog({
             Ajuste data, horário e lembretes de notificação.
           </DialogDescription>
         </DialogHeader>
-        <PrazoFormFields
-          titulo={titulo}
-          setTitulo={setTitulo}
-          tipo={tipo}
-          setTipo={setTipo}
-          data={data}
-          setData={setData}
-          hora={hora}
-          setHora={setHora}
-          lembretes={lembretes}
-          setLembretes={setLembretes}
-          descricao={descricao}
-          setDescricao={setDescricao}
-        />
-        <DialogFooter className="border-[#e2e8f0] bg-[#F8FAFC]">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3">
+          <PrazoFormFields
+            titulo={titulo}
+            setTitulo={setTitulo}
+            tipo={tipo}
+            setTipo={setTipo}
+            data={data}
+            setData={setData}
+            hora={hora}
+            setHora={setHora}
+            lembretes={lembretes}
+            setLembretes={setLembretes}
+            descricao={descricao}
+            setDescricao={setDescricao}
+          />
+        </div>
+        <DialogFooter className="mx-0 mb-0 shrink-0 rounded-none border-[#e2e8f0] bg-[#F8FAFC]">
           <Button
             type="button"
             variant="outline"

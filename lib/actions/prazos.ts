@@ -6,7 +6,6 @@ import { getAppUser } from "@/lib/actions/auth";
 import { normalizeCpf } from "@/lib/utils/cpf";
 import type { PrazoTipo } from "@/types/database";
 import {
-  draftsToInputs,
   labelForOffset,
   normalizeHoraPrazo,
   type LembreteInput,
@@ -60,7 +59,9 @@ function assertHoraPrazo(hora: string): string {
 function normalizeLembretes(
   input: LembreteInput[] | undefined
 ): LembreteInput[] {
-  if (!input || input.length === 0) return DEFAULT_LEMBRETE_INPUTS;
+  if (!input || !Array.isArray(input) || input.length === 0) {
+    return DEFAULT_LEMBRETE_INPUTS;
+  }
   const seen = new Set<number>();
   const out: LembreteInput[] = [];
   for (const raw of input) {
@@ -214,6 +215,3 @@ export async function excluirPrazo(id: number) {
   revalidatePrazos();
   return { success: true };
 }
-
-/** Reexport para UI que monta drafts → inputs */
-export { draftsToInputs };
