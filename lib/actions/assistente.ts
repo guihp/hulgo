@@ -507,7 +507,9 @@ export async function confirmarAcaoAssistente(input: {
   const supabase = await createClient();
   const content = result.ok
     ? `Confirmado: ${result.summary}`
-    : `Falha ao executar: ${result.summary}`;
+    : /cpf inválido/i.test(result.summary)
+      ? `Não consegui criar: o CPF informado é inválido (dígitos verificadores). Pode me enviar o CPF correto para eu tentar de novo?`
+      : `Falha ao executar: ${result.summary}`;
 
   const { data: followRow, error: followErr } = await supabase
     .from("app_assistente_mensagens")

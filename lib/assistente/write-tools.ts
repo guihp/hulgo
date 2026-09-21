@@ -43,7 +43,7 @@ import {
 import { CASO_STATUS } from "@/lib/constants";
 import { createClient } from "@/lib/supabase/server";
 import { PRAZO_TIPOS } from "@/lib/utils/beneficios";
-import { normalizeCpf } from "@/lib/utils/cpf";
+import { isValidCpf, normalizeCpf } from "@/lib/utils/cpf";
 import { phoneToContactNorm } from "@/lib/utils/phone";
 import type {
   AssistentePendingAnexo,
@@ -779,8 +779,12 @@ function proposeCriarClienteCaso(
 
   const cpfRaw = str(args.cpf);
   const cpf = cpfRaw ? normalizeCpf(cpfRaw) : "";
-  if (cpf && cpf.length !== 11) {
-    return { ok: false, summary: "CPF inválido (11 dígitos)." };
+  if (cpf && (cpf.length !== 11 || !isValidCpf(cpf))) {
+    return {
+      ok: false,
+      summary:
+        "CPF inválido (dígitos verificadores). Peça ao usuário o CPF correto e chame criar_cliente_caso de novo — não diga que já criou.",
+    };
   }
 
   const beneficio =

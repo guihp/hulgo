@@ -112,6 +112,7 @@ export function buildAssistenteSystemPrompt(opts?: {
     FUNIL_STATUS_LINES,
     "- Só chame criar_cliente_caso com nome + telefone + status (CPF/benefício opcionais). A UI pedirá Confirmar.",
     "- Se a tool recusar por falta de telefone/status, peça o dado faltante e chame de novo — nunca invente telefone.",
+    "- Se a tool ou a confirmação falhar por CPF inválido, peça o CPF correto (dígitos verificadores) e proponha de novo — não diga que o cliente já foi criado.",
     "- Após confirmar e executar, cite na resposta os links retornados (ficha + kanban).",
     "",
     "Links do painel (sempre cite quando as tools devolverem):",

@@ -95,14 +95,35 @@ curl -fsS -H "x-cron-secret: SEU_CRON_SECRET" \
   https://sistema.seudominio.com/api/cron/prazos-notificar
 ```
 
-Sugestão: a cada **5–15 minutos** (`*/5 * * * *` ou `*/15 * * * *`).  
-Envia Web Push 1× por lembrete configurado em `app_prazos_lembretes` quando
-`fire_at = fim_do_dia(data_prazo, America/Sao_Paulo) − offset_minutes` já passou
-(dedupe em `app_prazos_alertas` por `lembrete_id`).
+Sugestão: a cada **5 minutos** (`*/5 * * * *`) — lembrete “5 min antes” só dispara
+se o cron rodar nessa janela; `*/15` pode perder lembretes curtos.
+
+```bash
+# Coolify Scheduled Task (exemplo)
+*/5 * * * * curl -fsS -H "x-cron-secret: SEU_CRON_SECRET" \
+  https://sistema.seudominio.com/api/cron/prazos-notificar
+```
+
+Envia Web Push 1× por lembrete em `app_prazos_lembretes` quando
+`fire_at = deadline(data_prazo + hora_prazo, America/Sao_Paulo) − offset_minutes`
+já passou (dedupe em `app_prazos_alertas` por `lembrete_id`).
 
 Criação de prazo/aprovação (painel ou n8n) dispara push imediato via trigger
 `notify_painel_push_webhook` → `POST /api/push/webhook` (INSERT em `app_prazos`
 / `aprovacoes_pendentes`).
+
+### Troubleshooting push / lembretes
+
+| Sintoma | Causa provável | O que fazer |
+|--------|----------------|-------------|
+| Push na **criação** do prazo não chega | `net._http_response.status_code = 405` ou `307` → `/login` | Redeploy do app com `lib/supabase/middleware.ts` (rota pública `/api/push/webhook`). Teste: `curl -X POST …/api/push/webhook` deve retornar **401** (sem secret), não redirect. |
+| Lembrete 5 min não chega | Cron Coolify ausente ou intervalo > 5 min | Scheduled Task `*/5 * * * *` no endpoint acima; confira `CRON_SECRET` no container. |
+| Cron OK, `enviados: 0`, `vapid skip` | `VAPID_*` ausente no Coolify | Definir `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`. |
+| `já notificado` no relatório do cron | Dedupe normal | Esperado após o primeiro envio por `lembrete_id`. |
+
+Diagnóstico SQL (Supabase): prazo + `app_prazos_lembretes` + linhas em `app_prazos_alertas`;
+últimas respostas HTTP do trigger: `select id, status_code, created from net._http_response order by created desc limit 5`.
+Smoke local do cron (com secret de produção): `GET /api/cron/prazos-notificar` header `x-cron-secret`.
 
 ## 5c. Webhook Supabase → Web Push
 

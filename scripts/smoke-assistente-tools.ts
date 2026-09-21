@@ -1,6 +1,7 @@
 /**
  * One-off smoke: schemas + propose/reject for write tools (no live WhatsApp/DB mutate).
  * Run: npx tsx --require ./scripts/register-stubs.cjs scripts/smoke-assistente-tools.ts
+ * Live DB writes: npx tsx --require ./scripts/register-smoke-live.cjs scripts/smoke-assistente-live.ts
  */
 import {
   ASSISTENTE_TOOL_DEFINITIONS,
