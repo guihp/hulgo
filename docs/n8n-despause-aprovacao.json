@@ -1,0 +1,58 @@
+{
+  "name": "Despause pós-aprovação (sistema)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "despause-aprovacao",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "id": "aa000001-0001-4000-8000-000000000001",
+      "name": "Webhook despause",
+      "webhookId": "despause-aprovacao"
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "key": "={{ $json.body.telefone }}_block_{{ $json.body.instancia }}"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [220, 0],
+      "id": "aa000001-0002-4000-8000-000000000002",
+      "name": "DEL block",
+      "credentials": {
+        "redis": {
+          "id": "SUBSTITUIR_ID_REDIS_IAFE",
+          "name": "Redis IAFE"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"ok\": true, \"id_aprovacao\": $('Webhook despause').first().json.body.id_aprovacao } }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [440, 0],
+      "id": "aa000001-0003-4000-8000-000000000003",
+      "name": "Responder 200"
+    }
+  ],
+  "connections": {
+    "Webhook despause": {
+      "main": [[{ "node": "DEL block", "type": "main", "index": 0 }]]
+    },
+    "DEL block": {
+      "main": [[{ "node": "Responder 200", "type": "main", "index": 0 }]]
+    }
+  },
+  "pinData": {},
+  "settings": { "executionOrder": "v1" }
+}
