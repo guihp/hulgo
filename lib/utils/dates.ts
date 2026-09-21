@@ -67,6 +67,17 @@ export function maskBrazilianDateInput(value: string): string {
   return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
 }
 
+/** Máscara HH:mm (24h) para digitação — não valida faixa ainda. */
+export function maskBrazilianTimeInput(value: string): string {
+  const digits = value.replace(/\D/g, "").slice(0, 4);
+  if (digits.length <= 2) return digits;
+  let hh = digits.slice(0, 2);
+  let mm = digits.slice(2);
+  if (Number(hh) > 23) hh = "23";
+  if (mm.length === 2 && Number(mm) > 59) mm = "59";
+  return `${hh}:${mm}`;
+}
+
 export function brazilianDateToIso(value: string): string | null {
   const m = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   if (!m) return null;

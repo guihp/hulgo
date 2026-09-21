@@ -88,14 +88,21 @@ curl -fsS -H "x-cron-secret: SEU_CRON_SECRET" \
 
 Sugestão: diário às 08:00 (`0 8 * * *`).
 
-## 5b. Cron — alertas de prazos (hoje / amanhã)
+## 5b. Cron — lembretes de prazos
 
 ```bash
 curl -fsS -H "x-cron-secret: SEU_CRON_SECRET" \
   https://sistema.seudominio.com/api/cron/prazos-notificar
 ```
 
-Sugestão: diário às 07:00 (`0 7 * * *`). Envia Web Push 1×/dia por prazo (dedupe em `app_prazos_alertas`).
+Sugestão: a cada **5–15 minutos** (`*/5 * * * *` ou `*/15 * * * *`).  
+Envia Web Push 1× por lembrete configurado em `app_prazos_lembretes` quando
+`fire_at = fim_do_dia(data_prazo, America/Sao_Paulo) − offset_minutes` já passou
+(dedupe em `app_prazos_alertas` por `lembrete_id`).
+
+Criação de prazo/aprovação (painel ou n8n) dispara push imediato via trigger
+`notify_painel_push_webhook` → `POST /api/push/webhook` (INSERT em `app_prazos`
+/ `aprovacoes_pendentes`).
 
 ## 5c. Webhook Supabase → Web Push
 

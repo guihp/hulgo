@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { emitPainelPush } from "@/lib/push";
 import { CASO_STATUS } from "@/lib/constants";
+import { formatPrazoDateTime } from "@/lib/prazos/lembretes";
 import { formatPhone } from "@/lib/utils/phone";
 import { fichaPessoaHref } from "@/lib/utils/ficha";
 
@@ -158,17 +159,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, ...result });
     }
 
+    // INSERT de qualquer origem (n8n, painel/kanban, DataJud cron, assistente).
+    // Sem filtros de status/origem — todo registro novo gera push.
     if (table === "aprovacoes_pendentes" && type === "INSERT") {
       const id = Number(record.id);
+      const nome =
+        (record.nome_cliente as string | null)?.trim() ||
+        formatPhone(String(record.telefone_cliente ?? ""));
       const result = await emitPainelPush({
         kind: "aprovacao",
         title: "✅ Nova aprovação pendente",
-        body: `${
-          (record.nome_cliente as string | null) ??
-          formatPhone(String(record.telefone_cliente ?? ""))
-        } aguardando sua revisão`,
-        href: `/aprovacoes/${id}`,
-        tag: `aprov-${id}`,
+        body: `${nome || "Cliente"} aguardando sua revisão`,
+        href: Number.isFinite(id) && id > 0 ? `/aprovacoes/${id}` : "/aprovacoes",
+        tag: `aprov-${id || Date.now()}`,
       });
       return NextResponse.json({ ok: true, ...result });
     }
@@ -177,12 +180,17 @@ export async function POST(req: NextRequest) {
       const id = Number(record.id);
       const titulo = String(record.titulo ?? "Prazo");
       const dataPrazo = String(record.data_prazo ?? "");
+      const horaPrazo =
+        record.hora_prazo != null ? String(record.hora_prazo) : null;
+      const quando = dataPrazo
+        ? formatPrazoDateTime(dataPrazo, horaPrazo)
+        : "";
       const result = await emitPainelPush({
         kind: "prazo",
         title: "📅 Novo prazo",
-        body: dataPrazo ? `${titulo} — ${dataPrazo}` : titulo,
+        body: quando ? `${titulo} — ${quando}` : titulo,
         href: "/prazos",
-        tag: `prazo-${id}`,
+        tag: `prazo-${id || Date.now()}`,
       });
       return NextResponse.json({ ok: true, ...result });
     }

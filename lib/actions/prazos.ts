@@ -5,20 +5,98 @@ import { createClient } from "@/lib/supabase/server";
 import { getAppUser } from "@/lib/actions/auth";
 import { normalizeCpf } from "@/lib/utils/cpf";
 import type { PrazoTipo } from "@/types/database";
+import {
+  draftsToInputs,
+  labelForOffset,
+  normalizeHoraPrazo,
+  type LembreteInput,
+} from "@/lib/prazos/lembretes";
 
 export type NovoPrazoInput = {
   titulo: string;
   tipo: PrazoTipo;
   data_prazo: string; // yyyy-mm-dd
+  /** HH:MM ou HH:MM:SS (America/Sao_Paulo). Obrigatório em novos prazos. */
+  hora_prazo: string;
   descricao?: string;
+  /** Se omitido/vazio → default 1h antes + na hora */
+  lembretes?: LembreteInput[];
   cpf?: string;
   caso_id?: number;
   processo_id?: number;
 };
 
+export type AtualizarPrazoInput = {
+  id: number;
+  titulo: string;
+  tipo: PrazoTipo;
+  data_prazo: string;
+  hora_prazo: string;
+  descricao?: string;
+  lembretes?: LembreteInput[];
+};
+
+const DEFAULT_LEMBRETE_INPUTS: LembreteInput[] = [
+  { offset_minutes: 60, label: "1 hora antes" },
+  { offset_minutes: 0, label: "Somente no horário" },
+];
+
 function revalidatePrazos() {
   revalidatePath("/prazos");
   revalidatePath("/");
+}
+
+function assertDataPrazo(data: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) {
+    throw new Error("Data do prazo inválida");
+  }
+}
+
+function assertHoraPrazo(hora: string): string {
+  const n = normalizeHoraPrazo(hora);
+  if (!n) throw new Error("Horário do prazo inválido");
+  return n;
+}
+
+function normalizeLembretes(
+  input: LembreteInput[] | undefined
+): LembreteInput[] {
+  if (!input || input.length === 0) return DEFAULT_LEMBRETE_INPUTS;
+  const seen = new Set<number>();
+  const out: LembreteInput[] = [];
+  for (const raw of input) {
+    const offset = Math.max(0, Math.floor(Number(raw.offset_minutes)));
+    if (!Number.isFinite(offset) || seen.has(offset)) continue;
+    seen.add(offset);
+    out.push({
+      offset_minutes: offset,
+      label: raw.label?.trim() || labelForOffset(offset),
+    });
+  }
+  return out.length ? out : DEFAULT_LEMBRETE_INPUTS;
+}
+
+async function replaceLembretes(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  prazoId: number,
+  lembretes: LembreteInput[]
+) {
+  const { error: delErr } = await supabase
+    .from("app_prazos_lembretes")
+    .delete()
+    .eq("prazo_id", prazoId);
+  if (delErr) throw new Error(delErr.message);
+
+  const rows = lembretes.map((l) => ({
+    prazo_id: prazoId,
+    offset_minutes: l.offset_minutes,
+    label: l.label ?? labelForOffset(l.offset_minutes),
+  }));
+
+  const { error: insErr } = await supabase
+    .from("app_prazos_lembretes")
+    .insert(rows);
+  if (insErr) throw new Error(insErr.message);
 }
 
 export async function criarPrazo(input: NovoPrazoInput) {
@@ -26,9 +104,9 @@ export async function criarPrazo(input: NovoPrazoInput) {
   if (!user) throw new Error("Não autenticado");
 
   if (!input.titulo.trim()) throw new Error("Título é obrigatório");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.data_prazo)) {
-    throw new Error("Data do prazo inválida");
-  }
+  assertDataPrazo(input.data_prazo);
+  const horaPrazo = assertHoraPrazo(input.hora_prazo);
+  const lembretes = normalizeLembretes(input.lembretes);
 
   // Optional FKs: omit empty/0 so inserts without vínculo don't hit *_fkey.
   const cpfNorm = input.cpf?.trim() ? normalizeCpf(input.cpf) : null;
@@ -42,18 +120,59 @@ export async function criarPrazo(input: NovoPrazoInput) {
       : null;
 
   const supabase = await createClient();
-  const { error } = await supabase.from("app_prazos").insert({
-    titulo: input.titulo.trim(),
-    tipo: input.tipo,
-    data_prazo: input.data_prazo,
-    descricao: input.descricao?.trim() || null,
-    cpf: cpfNorm || null,
-    caso_id: casoId,
-    processo_id: processoId,
-    criado_por: user.id,
-  });
+  const { data: criado, error } = await supabase
+    .from("app_prazos")
+    .insert({
+      titulo: input.titulo.trim(),
+      tipo: input.tipo,
+      data_prazo: input.data_prazo,
+      hora_prazo: horaPrazo,
+      descricao: input.descricao?.trim() || null,
+      lembrar_em: null,
+      cpf: cpfNorm || null,
+      caso_id: casoId,
+      processo_id: processoId,
+      criado_por: user.id,
+    })
+    .select("id")
+    .single();
 
   if (error) throw new Error(error.message);
+  if (!criado?.id) throw new Error("Falha ao criar prazo");
+
+  await replaceLembretes(supabase, criado.id, lembretes);
+
+  revalidatePrazos();
+  return { success: true, id: criado.id };
+}
+
+export async function atualizarPrazo(input: AtualizarPrazoInput) {
+  const user = await getAppUser();
+  if (!user) throw new Error("Não autenticado");
+
+  if (!input.id || input.id <= 0) throw new Error("Prazo inválido");
+  if (!input.titulo.trim()) throw new Error("Título é obrigatório");
+  assertDataPrazo(input.data_prazo);
+  const horaPrazo = assertHoraPrazo(input.hora_prazo);
+  const lembretes = normalizeLembretes(input.lembretes);
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("app_prazos")
+    .update({
+      titulo: input.titulo.trim(),
+      tipo: input.tipo,
+      data_prazo: input.data_prazo,
+      hora_prazo: horaPrazo,
+      descricao: input.descricao?.trim() || null,
+      lembrar_em: null,
+    })
+    .eq("id", input.id);
+
+  if (error) throw new Error(error.message);
+
+  await replaceLembretes(supabase, input.id, lembretes);
+
   revalidatePrazos();
   return { success: true };
 }
@@ -86,3 +205,6 @@ export async function excluirPrazo(id: number) {
   revalidatePrazos();
   return { success: true };
 }
+
+/** Reexport para UI que monta drafts → inputs */
+export { draftsToInputs };

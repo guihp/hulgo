@@ -23,6 +23,7 @@ export async function updateSession(request: NextRequest) {
   const isPublicApi =
     request.nextUrl.pathname.startsWith("/api/integracao") ||
     request.nextUrl.pathname.startsWith("/api/cron") ||
+    request.nextUrl.pathname.startsWith("/api/push/webhook") ||
     request.nextUrl.pathname === "/api/health";
 
   if (

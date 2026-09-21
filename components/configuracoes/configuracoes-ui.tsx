@@ -7,6 +7,7 @@ import { AgenteIaPanel } from "@/components/configuracoes/agente-ia-panel";
 import { TestarAgentePanel } from "@/components/configuracoes/testar-agente-panel";
 import { EscritorioPanel } from "@/components/configuracoes/escritorio-panel";
 import { ParceirosPanel } from "@/components/configuracoes/parceiros-panel";
+import { AppCelularPanel } from "@/components/configuracoes/app-celular-panel";
 import type { AppConfigMap } from "@/lib/config/app-config";
 import type { TipoCasoMatch } from "@/lib/actions/tipos-caso";
 import type { AgenteConfig, EquipeMember } from "@/lib/actions/configuracoes";
@@ -43,6 +44,11 @@ const TABS = [
     value: "parceiros",
     label: "Parceiros",
     subtitle: "Cadastro de parceiros com nome, cidade e telefone.",
+  },
+  {
+    value: "app",
+    label: "App no celular",
+    subtitle: "Como instalar o PWA no Android e no iPhone e ativar o push.",
   },
 ] as const;
 
@@ -175,6 +181,15 @@ export function ConfiguracoesUi({
             className={tab === "parceiros" ? undefined : "hidden"}
           >
             <ParceirosPanel initialParceiros={parceiros} />
+          </div>
+        ) : null}
+        {mounted.app ? (
+          <div
+            role="tabpanel"
+            hidden={tab !== "app"}
+            className={tab === "app" ? undefined : "hidden"}
+          >
+            <AppCelularPanel />
           </div>
         ) : null}
       </div>

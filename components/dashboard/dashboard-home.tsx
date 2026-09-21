@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { LinkButton } from "@/components/ui/link-button";
 import { DashboardCharts } from "@/components/dashboard/dashboard-charts";
 import { formatRelative } from "@/lib/utils/dates";
+import { formatPrazoDateTime } from "@/lib/prazos/lembretes";
 import { cn } from "@/lib/utils";
 import { Area, AreaChart, ResponsiveContainer } from "recharts";
 
@@ -45,6 +46,7 @@ export type DashboardPayload = {
     id: string | number;
     titulo: string;
     data_prazo: string;
+    hora_prazo?: string | null;
   }[];
 };
 
@@ -257,7 +259,7 @@ export function DashboardHome({
                           {p.titulo}
                         </p>
                         <p className="text-xs text-[#64748B]">
-                          {new Date(p.data_prazo + "T12:00:00").toLocaleDateString("pt-BR")}
+                          {formatPrazoDateTime(p.data_prazo, p.hora_prazo)}
                         </p>
                       </div>
                       <Badge variant={vencido ? "destructive" : "outline"}>

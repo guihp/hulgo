@@ -14,6 +14,7 @@ import { createClient } from "@/lib/supabase/client";
 import { CASO_STATUS } from "@/lib/constants";
 import { formatPhone } from "@/lib/utils/phone";
 import { fichaPessoaHref } from "@/lib/utils/ficha";
+import { formatPrazoDateTime } from "@/lib/prazos/lembretes";
 import { subscribePush, unsubscribePush } from "@/lib/actions/push";
 import {
   getExistingPushSubscription,
@@ -418,11 +419,12 @@ export function NotificationsProvider({
             id: number;
             titulo: string;
             data_prazo: string;
+            hora_prazo?: string | null;
           };
           push({
             kind: "prazo",
             title: "📅 Novo prazo",
-            body: `${prazo.titulo} — ${prazo.data_prazo}`,
+            body: `${prazo.titulo} — ${formatPrazoDateTime(prazo.data_prazo, prazo.hora_prazo)}`,
             href: "/prazos",
           });
         }

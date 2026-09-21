@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -9,14 +9,33 @@ import { ptBR } from "date-fns/locale";
 import {
   CalendarClock,
   ExternalLink,
+  Pencil,
   Plus,
   Search,
   Trash2,
   X,
 } from "lucide-react";
-import { criarPrazo, concluirPrazo, excluirPrazo } from "@/lib/actions/prazos";
+import {
+  atualizarPrazo,
+  criarPrazo,
+  concluirPrazo,
+  excluirPrazo,
+  draftsToInputs,
+} from "@/lib/actions/prazos";
 import type { PrazoTipo, Tables } from "@/types/database";
 import { PRAZO_TIPOS } from "@/lib/utils/beneficios";
+import {
+  CUSTOM_UNIT_LABELS,
+  DEFAULT_LEMBRETES,
+  LEMBRETE_PRESET_LABELS,
+  LEMBRETE_PRESET_OPTIONS,
+  draftFromOffset,
+  formatPrazoDateTime,
+  horaPrazoForInput,
+  newLembreteKey,
+  type LembreteDraft,
+  type LembretePreset,
+} from "@/lib/prazos/lembretes";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -42,15 +61,21 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { formatDate } from "@/lib/utils/dates";
+import {
+  PrazoDateInput,
+  PrazoTimeInput,
+} from "@/components/prazos/prazo-datetime-fields";
 import { fichaPessoaHref } from "@/lib/utils/ficha";
+import { brazilianDateToIso, isoToBrazilianDate } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils";
 
 type Prazo = Tables<"app_prazos">;
+type PrazoLembrete = Tables<"app_prazos_lembretes">;
 
 export type PrazoEnriched = Prazo & {
   cliente_nome?: string | null;
   numero_processo?: string | null;
+  lembretes?: PrazoLembrete[];
 };
 
 const fieldLabel =
@@ -152,11 +177,13 @@ function metaLine(prazo: PrazoEnriched) {
   return parts.join(" · ") || prazo.descricao || "Sem vínculo de cliente";
 }
 
-function dateBlockParts(dataPrazo: string) {
+function dateBlockParts(dataPrazo: string, horaPrazo?: string | null) {
   const d = new Date(dataPrazo + "T12:00:00");
+  const hora = horaPrazoForInput(horaPrazo);
   return {
     day: format(d, "dd", { locale: ptBR }),
     month: format(d, "MMM", { locale: ptBR }).replace(".", "").toUpperCase(),
+    time: hora || null,
   };
 }
 
@@ -224,7 +251,249 @@ function matchesBusca(prazo: PrazoEnriched, q: string) {
   return hay.includes(needle);
 }
 
-/* ---------- Dialog de novo prazo (reutilizado em caso/cliente) ---------- */
+/* ---------- Dialog criar / editar prazo ---------- */
+
+function lembretesToDrafts(rows: PrazoLembrete[] | undefined): LembreteDraft[] {
+  if (!rows?.length) return DEFAULT_LEMBRETES.map((d) => ({ ...d }));
+  return [...rows]
+    .sort((a, b) => b.offset_minutes - a.offset_minutes)
+    .map((r) => draftFromOffset(r.offset_minutes, `db-${r.id}`));
+}
+
+function LembretesEditor({
+  lembretes,
+  setLembretes,
+}: {
+  lembretes: LembreteDraft[];
+  setLembretes: (v: LembreteDraft[]) => void;
+}) {
+  function updateAt(index: number, patch: Partial<LembreteDraft>) {
+    setLembretes(
+      lembretes.map((row, i) => (i === index ? { ...row, ...patch } : row))
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <Label className={fieldLabel}>Lembretes</Label>
+          <p className="text-xs text-[#94a3b8]">
+            Quando notificar antes ou no horário do prazo
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="shrink-0 border-[#e2e8f0] text-[#0b2148]"
+          onClick={() =>
+            setLembretes([
+              ...lembretes,
+              { key: newLembreteKey(), preset: "1hora" },
+            ])
+          }
+        >
+          <Plus className="mr-1 size-3.5" />
+          Adicionar
+        </Button>
+      </div>
+      <ul className="space-y-2">
+        {lembretes.map((row, index) => (
+          <li
+            key={row.key}
+            className="flex flex-col gap-2 rounded-lg border border-[#e2e8f0] bg-[#F8FAFC] p-2.5 sm:flex-row sm:items-center"
+          >
+            <Select
+              value={row.preset}
+              onValueChange={(v) => {
+                const preset = (v ?? "1hora") as LembretePreset;
+                updateAt(index, {
+                  preset,
+                  ...(preset === "outro"
+                    ? {
+                        customAmount: row.customAmount ?? 30,
+                        customUnit: row.customUnit ?? "minutes",
+                      }
+                    : {}),
+                });
+              }}
+            >
+              <SelectTrigger className={cn(inputShell, "sm:min-w-[180px]")}>
+                <SelectValue>
+                  {(v) =>
+                    LEMBRETE_PRESET_LABELS[(v as LembretePreset) ?? "1hora"] ??
+                    "1 hora antes"
+                  }
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {LEMBRETE_PRESET_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {row.preset === "outro" && (
+              <div className="flex flex-1 items-center gap-2">
+                <Input
+                  type="number"
+                  min={0}
+                  className={cn(inputShell, "w-20")}
+                  value={row.customAmount ?? ""}
+                  onChange={(e) =>
+                    updateAt(index, {
+                      customAmount: Number(e.target.value) || 0,
+                    })
+                  }
+                  aria-label="Quantidade"
+                />
+                <Select
+                  value={row.customUnit ?? "minutes"}
+                  onValueChange={(v) =>
+                    updateAt(index, {
+                      customUnit: v === "days" ? "days" : "minutes",
+                    })
+                  }
+                >
+                  <SelectTrigger className={cn(inputShell, "w-[120px]")}>
+                    <SelectValue>
+                      {(v) =>
+                        CUSTOM_UNIT_LABELS[
+                          (v === "days" ? "days" : "minutes") as
+                            | "minutes"
+                            | "days"
+                        ]
+                      }
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="minutes">minutos</SelectItem>
+                    <SelectItem value="days">dias</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="self-end text-[#94a3b8] hover:bg-red-50 hover:text-red-600 sm:ml-auto sm:self-center"
+              disabled={lembretes.length <= 1}
+              onClick={() =>
+                setLembretes(lembretes.filter((_, i) => i !== index))
+              }
+              aria-label="Remover lembrete"
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function PrazoFormFields({
+  titulo,
+  setTitulo,
+  tipo,
+  setTipo,
+  data,
+  setData,
+  hora,
+  setHora,
+  lembretes,
+  setLembretes,
+  descricao,
+  setDescricao,
+  showCpf,
+  cpfManual,
+  setCpfManual,
+}: {
+  titulo: string;
+  setTitulo: (v: string) => void;
+  tipo: PrazoTipo;
+  setTipo: (v: PrazoTipo) => void;
+  data: string;
+  setData: (v: string) => void;
+  hora: string;
+  setHora: (v: string) => void;
+  lembretes: LembreteDraft[];
+  setLembretes: (v: LembreteDraft[]) => void;
+  descricao: string;
+  setDescricao: (v: string) => void;
+  showCpf?: boolean;
+  cpfManual?: string;
+  setCpfManual?: (v: string) => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="space-y-1.5">
+        <Label className={fieldLabel}>Título</Label>
+        <Input
+          className={inputShell}
+          value={titulo}
+          onChange={(e) => setTitulo(e.target.value)}
+          placeholder="Ex.: Responder exigência do INSS — Maria Silva"
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label className={fieldLabel}>Tipo</Label>
+        <Select value={tipo} onValueChange={(v) => setTipo(v as PrazoTipo)}>
+          <SelectTrigger className={inputShell}>
+            <SelectValue>
+              {(v) =>
+                PRAZO_TIPOS.find((t) => t.value === v)?.label ?? "Tipo"
+              }
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {PRAZO_TIPOS.map((t) => (
+              <SelectItem key={t.value} value={t.value}>
+                {t.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-1.5">
+        <Label className={fieldLabel}>Data e horário do prazo</Label>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <PrazoDateInput value={data} onChange={setData} />
+          <PrazoTimeInput value={hora} onChange={setHora} />
+        </div>
+        <p className="text-xs text-[#94a3b8]">
+          Deadline em horário de Brasília — lembretes contam a partir deste
+          instante
+        </p>
+      </div>
+      {showCpf && setCpfManual && (
+        <div className="space-y-1.5">
+          <Label className={fieldLabel}>Cliente</Label>
+          <Input
+            className={inputShell}
+            value={cpfManual ?? ""}
+            onChange={(e) => setCpfManual(e.target.value)}
+            placeholder="CPF do cliente (opcional)"
+          />
+        </div>
+      )}
+      <LembretesEditor lembretes={lembretes} setLembretes={setLembretes} />
+      <div className="space-y-1.5">
+        <Label className={fieldLabel}>Observações</Label>
+        <Textarea
+          className={cn(inputShell, "min-h-[72px] resize-y")}
+          value={descricao}
+          onChange={(e) => setDescricao(e.target.value)}
+          rows={2}
+          placeholder="Detalhes opcionais"
+        />
+      </div>
+    </div>
+  );
+}
 
 export function NovoPrazoDialog({
   cpf,
@@ -245,34 +514,56 @@ export function NovoPrazoDialog({
   const [open, setOpen] = useState(false);
   const [titulo, setTitulo] = useState("");
   const [tipo, setTipo] = useState<PrazoTipo>("outro");
-  const [data, setData] = useState("");
+  const [data, setData] = useState(() =>
+    isoToBrazilianDate(format(new Date(), "yyyy-MM-dd"))
+  );
+  const [hora, setHora] = useState("08:00");
+  const [lembretes, setLembretes] = useState<LembreteDraft[]>(() =>
+    DEFAULT_LEMBRETES.map((d) => ({ ...d }))
+  );
   const [descricao, setDescricao] = useState("");
   const [cpfManual, setCpfManual] = useState("");
-  const [lembrarDias, setLembrarDias] = useState<"1" | "3" | "7">("3");
   const [loading, setLoading] = useState(false);
 
   const cpfFinal = cpf ?? (cpfManual.trim() || undefined);
 
+  function reset() {
+    setTitulo("");
+    setData(isoToBrazilianDate(format(new Date(), "yyyy-MM-dd")));
+    setHora("08:00");
+    setLembretes(DEFAULT_LEMBRETES.map((d) => ({ ...d })));
+    setDescricao("");
+    setCpfManual("");
+    setTipo("outro");
+  }
+
   async function salvar() {
+    const dataIso = brazilianDateToIso(data);
+    if (!dataIso) {
+      toast.error("Data do prazo inválida");
+      return;
+    }
+    const horaNorm = horaPrazoForInput(hora);
+    if (!horaNorm) {
+      toast.error("Horário inválido (use HH:mm)");
+      return;
+    }
     setLoading(true);
     try {
       await criarPrazo({
         titulo,
         tipo,
-        data_prazo: data,
+        data_prazo: dataIso,
+        hora_prazo: horaNorm,
         descricao,
+        lembretes: draftsToInputs(lembretes),
         cpf: cpfFinal,
         caso_id: casoId,
         processo_id: processoId,
       });
       toast.success("Prazo criado");
       setOpen(false);
-      setTitulo("");
-      setData("");
-      setDescricao("");
-      setCpfManual("");
-      setTipo("outro");
-      setLembrarDias("3");
+      reset();
       router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro ao criar prazo");
@@ -303,87 +594,23 @@ export function NovoPrazoDialog({
             Cadastre exigências, recursos, perícias e audiências.
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label className={fieldLabel}>Título</Label>
-            <Input
-              className={inputShell}
-              value={titulo}
-              onChange={(e) => setTitulo(e.target.value)}
-              placeholder="Ex.: Responder exigência do INSS — Maria Silva"
-            />
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label className={fieldLabel}>Tipo</Label>
-              <Select value={tipo} onValueChange={(v) => setTipo(v as PrazoTipo)}>
-                <SelectTrigger className={inputShell}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PRAZO_TIPOS.map((t) => (
-                    <SelectItem key={t.value} value={t.value}>
-                      {t.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label className={fieldLabel}>Data limite</Label>
-              <Input
-                type="date"
-                className={inputShell}
-                value={data}
-                onChange={(e) => setData(e.target.value)}
-              />
-            </div>
-          </div>
-          {!cpf && (
-            <div className="space-y-1.5">
-              <Label className={fieldLabel}>Cliente</Label>
-              <Input
-                className={inputShell}
-                value={cpfManual}
-                onChange={(e) => setCpfManual(e.target.value)}
-                placeholder="CPF do cliente (opcional)"
-              />
-            </div>
-          )}
-          <div className="space-y-1.5">
-            <Label className={fieldLabel}>Lembrar antes</Label>
-            <div className="flex flex-wrap gap-2">
-              {(["1", "3", "7"] as const).map((d) => (
-                <button
-                  key={d}
-                  type="button"
-                  onClick={() => setLembrarDias(d)}
-                  className={cn(
-                    "rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors",
-                    lembrarDias === d
-                      ? "border-[#0b2148] bg-[#0b2148]/8 text-[#0b2148]"
-                      : "border-[#e2e8f0] bg-white text-[#64748B] hover:border-[#0b2148]/30"
-                  )}
-                >
-                  {d} {d === "1" ? "dia" : "dias"}
-                </button>
-              ))}
-            </div>
-            <p className="text-xs text-[#94a3b8]">
-              Preferência visual — alertas automáticos em breve.
-            </p>
-          </div>
-          <div className="space-y-1.5">
-            <Label className={fieldLabel}>Observações</Label>
-            <Textarea
-              className={cn(inputShell, "min-h-[72px] resize-y")}
-              value={descricao}
-              onChange={(e) => setDescricao(e.target.value)}
-              rows={2}
-              placeholder="Detalhes opcionais"
-            />
-          </div>
-        </div>
+        <PrazoFormFields
+          titulo={titulo}
+          setTitulo={setTitulo}
+          tipo={tipo}
+          setTipo={setTipo}
+          data={data}
+          setData={setData}
+          hora={hora}
+          setHora={setHora}
+          lembretes={lembretes}
+          setLembretes={setLembretes}
+          descricao={descricao}
+          setDescricao={setDescricao}
+          showCpf={!cpf}
+          cpfManual={cpfManual}
+          setCpfManual={setCpfManual}
+        />
         <DialogFooter className="border-[#e2e8f0] bg-[#F8FAFC]">
           <Button
             type="button"
@@ -395,7 +622,136 @@ export function NovoPrazoDialog({
           </Button>
           <Button
             className="bg-[#0b2148] text-white hover:bg-[#163a7a]"
-            disabled={loading || !titulo.trim() || !data}
+            disabled={
+              loading || !titulo.trim() || !brazilianDateToIso(data) || !horaPrazoForInput(hora)
+            }
+            onClick={salvar}
+          >
+            Salvar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function EditarPrazoDialog({
+  prazo,
+  open,
+  onOpenChange,
+}: {
+  prazo: PrazoEnriched;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const router = useRouter();
+  const [titulo, setTitulo] = useState(prazo.titulo);
+  const [tipo, setTipo] = useState<PrazoTipo>(
+    (prazo.tipo as PrazoTipo) || "outro"
+  );
+  const [data, setData] = useState(() => isoToBrazilianDate(prazo.data_prazo));
+  const [hora, setHora] = useState(
+    () => horaPrazoForInput(prazo.hora_prazo) || "23:59"
+  );
+  const [lembretes, setLembretes] = useState<LembreteDraft[]>(() =>
+    lembretesToDrafts(prazo.lembretes)
+  );
+  const [descricao, setDescricao] = useState(prazo.descricao ?? "");
+  const [loading, setLoading] = useState(false);
+
+  // Sync when opening / switching prazo
+  useEffect(() => {
+    if (!open) return;
+    setTitulo(prazo.titulo);
+    setTipo((prazo.tipo as PrazoTipo) || "outro");
+    setData(isoToBrazilianDate(prazo.data_prazo));
+    setHora(horaPrazoForInput(prazo.hora_prazo) || "23:59");
+    setLembretes(lembretesToDrafts(prazo.lembretes));
+    setDescricao(prazo.descricao ?? "");
+  }, [
+    open,
+    prazo.id,
+    prazo.titulo,
+    prazo.tipo,
+    prazo.data_prazo,
+    prazo.hora_prazo,
+    prazo.descricao,
+    prazo.lembretes,
+  ]);
+
+  async function salvar() {
+    const dataIso = brazilianDateToIso(data);
+    if (!dataIso) {
+      toast.error("Data do prazo inválida");
+      return;
+    }
+    const horaNorm = horaPrazoForInput(hora);
+    if (!horaNorm) {
+      toast.error("Horário inválido (use HH:mm)");
+      return;
+    }
+    setLoading(true);
+    try {
+      await atualizarPrazo({
+        id: prazo.id,
+        titulo,
+        tipo,
+        data_prazo: dataIso,
+        hora_prazo: horaNorm,
+        descricao,
+        lembretes: draftsToInputs(lembretes),
+      });
+      toast.success("Prazo atualizado");
+      onOpenChange(false);
+      router.refresh();
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Erro ao atualizar prazo"
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="border-[#e2e8f0] bg-white sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-lg font-bold text-[#0b2148]">
+            Editar prazo
+          </DialogTitle>
+          <DialogDescription className="text-[#64748B]">
+            Ajuste data, horário e lembretes de notificação.
+          </DialogDescription>
+        </DialogHeader>
+        <PrazoFormFields
+          titulo={titulo}
+          setTitulo={setTitulo}
+          tipo={tipo}
+          setTipo={setTipo}
+          data={data}
+          setData={setData}
+          hora={hora}
+          setHora={setHora}
+          lembretes={lembretes}
+          setLembretes={setLembretes}
+          descricao={descricao}
+          setDescricao={setDescricao}
+        />
+        <DialogFooter className="border-[#e2e8f0] bg-[#F8FAFC]">
+          <Button
+            type="button"
+            variant="outline"
+            className="border-[#e2e8f0] text-[#0b2148]"
+            onClick={() => onOpenChange(false)}
+          >
+            Cancelar
+          </Button>
+          <Button
+            className="bg-[#0b2148] text-white hover:bg-[#163a7a]"
+            disabled={
+              loading || !titulo.trim() || !brazilianDateToIso(data) || !horaPrazoForInput(hora)
+            }
             onClick={salvar}
           >
             Salvar
@@ -662,8 +1018,12 @@ function PrazoRowFull({
   onToggle: (p: Prazo) => void;
   onRemove: (id: number) => void;
 }) {
+  const [editOpen, setEditOpen] = useState(false);
   const urg = prazoUrgencia(prazo.data_prazo, prazo.concluido);
-  const { day, month } = dateBlockParts(prazo.data_prazo);
+  const { day, month, time } = dateBlockParts(
+    prazo.data_prazo,
+    prazo.hora_prazo
+  );
   const href = prazoHref(prazo);
   const dimmed = prazo.concluido;
 
@@ -694,6 +1054,11 @@ function PrazoRowFull({
           <span className="text-[10px] font-semibold tracking-wide text-[#64748B]">
             {month}
           </span>
+          {time && (
+            <span className="mt-0.5 text-[10px] font-medium tabular-nums text-[#64748B]">
+              {time}
+            </span>
+          )}
         </div>
         <div className="min-w-0 flex-1">
           <p
@@ -755,6 +1120,15 @@ function PrazoRowFull({
         <Button
           variant="ghost"
           size="icon-sm"
+          className="text-[#64748B] hover:bg-[#0b2148]/5 hover:text-[#0b2148]"
+          onClick={() => setEditOpen(true)}
+          aria-label="Editar prazo"
+        >
+          <Pencil className="size-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
           className="text-[#94a3b8] hover:bg-red-50 hover:text-red-600"
           onClick={() => onRemove(prazo.id)}
           aria-label="Excluir prazo"
@@ -762,13 +1136,18 @@ function PrazoRowFull({
           <X className="size-4" />
         </Button>
       </div>
+      <EditarPrazoDialog
+        prazo={prazo}
+        open={editOpen}
+        onOpenChange={setEditOpen}
+      />
     </li>
   );
 }
 
 /* ---------- Lista compacta (ficha cliente / caso) ---------- */
 
-export function PrazosList({ prazos }: { prazos: Prazo[] }) {
+export function PrazosList({ prazos }: { prazos: PrazoEnriched[] }) {
   const router = useRouter();
   const [mostrarConcluidos, setMostrarConcluidos] = useState(false);
 
@@ -857,10 +1236,11 @@ function PrazoRowCompact({
   onToggle,
   onRemove,
 }: {
-  prazo: Prazo;
+  prazo: PrazoEnriched;
   onToggle: (p: Prazo) => void;
   onRemove: (id: number) => void;
 }) {
+  const [editOpen, setEditOpen] = useState(false);
   const urg = prazoUrgencia(prazo.data_prazo, prazo.concluido);
 
   return (
@@ -881,7 +1261,9 @@ function PrazoRowCompact({
             {prazo.titulo}
           </p>
           <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span>{formatDate(prazo.data_prazo)}</span>
+            <span>
+              {formatPrazoDateTime(prazo.data_prazo, prazo.hora_prazo)}
+            </span>
             <Badge variant="outline" className={tipoBadgeClasses(prazo.tipo)}>
               {tipoLabel(prazo.tipo)}
             </Badge>
@@ -904,6 +1286,15 @@ function PrazoRowCompact({
         <Button
           variant="ghost"
           size="icon"
+          className="shrink-0 text-muted-foreground hover:text-[#0b2148]"
+          onClick={() => setEditOpen(true)}
+          aria-label="Editar prazo"
+        >
+          <Pencil className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
           className="shrink-0 text-muted-foreground"
           onClick={() => onRemove(prazo.id)}
           aria-label="Excluir prazo"
@@ -911,6 +1302,11 @@ function PrazoRowCompact({
           <Trash2 className="h-4 w-4" />
         </Button>
       </CardContent>
+      <EditarPrazoDialog
+        prazo={prazo}
+        open={editOpen}
+        onOpenChange={setEditOpen}
+      />
     </Card>
   );
 }

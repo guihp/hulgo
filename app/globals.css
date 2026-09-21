@@ -159,6 +159,18 @@
   color: #64748b !important;
 }
 
+/* Hidden scrollbar, scroll still works (prazo time wheels) */
+[data-prazo-wheel] {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
+}
+[data-prazo-wheel]::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
+}
+
 [data-sonner-toast][data-styled="true"] [data-close-button] {
   background: #f5f7fa !important;
   border-color: rgb(11 33 72 / 0.12) !important;

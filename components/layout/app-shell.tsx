@@ -286,7 +286,7 @@ export function AppShell({ user, children }: { user: AppUser; children: React.Re
                   <GlobalSearch centered />
                 </div>
 
-                <div className="flex items-center justify-end gap-2 sm:gap-3">
+                <div className="col-start-3 flex items-center justify-end justify-self-end gap-2 sm:gap-3">
                   <div className="lg:hidden">
                     <GlobalSearch />
                   </div>

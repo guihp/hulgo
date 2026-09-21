@@ -126,18 +126,45 @@ export type Database = {
           alerta_dia: string;
           tipo: string;
           enviado_em: string;
+          lembrete_id: number | null;
         };
         Insert: {
           prazo_id: number;
           alerta_dia: string;
           tipo: string;
           enviado_em?: string;
+          lembrete_id?: number | null;
         };
         Update: {
           prazo_id?: number;
           alerta_dia?: string;
           tipo?: string;
           enviado_em?: string;
+          lembrete_id?: number | null;
+        };
+        Relationships: [];
+      };
+      app_prazos_lembretes: {
+        Row: {
+          id: number;
+          prazo_id: number;
+          offset_minutes: number;
+          label: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: never;
+          prazo_id: number;
+          offset_minutes: number;
+          label?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: never;
+          prazo_id?: number;
+          offset_minutes?: number;
+          label?: string | null;
+          created_at?: string;
         };
         Relationships: [];
       };
@@ -511,7 +538,10 @@ export type Database = {
           criado_por: string | null;
           data_prazo: string;
           descricao: string | null;
+          /** HH:MM:SS America/Sao_Paulo; null = legado (23:59:59 SP) */
+          hora_prazo: string | null;
           id: number;
+          lembrar_em: string | null;
           processo_id: number | null;
           tipo: string;
           titulo: string;
@@ -525,7 +555,9 @@ export type Database = {
           criado_por?: string | null;
           data_prazo: string;
           descricao?: string | null;
+          hora_prazo?: string | null;
           id?: never;
+          lembrar_em?: string | null;
           processo_id?: number | null;
           tipo?: string;
           titulo: string;
@@ -539,7 +571,9 @@ export type Database = {
           criado_por?: string | null;
           data_prazo?: string;
           descricao?: string | null;
+          hora_prazo?: string | null;
           id?: never;
+          lembrar_em?: string | null;
           processo_id?: number | null;
           tipo?: string;
           titulo?: string;

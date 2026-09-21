@@ -52,6 +52,7 @@ import type {
   AssistenteSessaoListItem,
   AssistenteToolTraceItem,
 } from "@/lib/assistente/types";
+import { labelForOffset } from "@/lib/prazos/lembretes";
 import { cn } from "@/lib/utils";
 
 const inputShell =
@@ -240,6 +241,41 @@ type PromptEditPreviewUi = {
   alteracoes: AssistentePromptEditPreviewItem[];
 };
 
+function readNormalizedArgs(data: unknown): Record<string, unknown> | null {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+  const norm = (data as Record<string, unknown>).normalizedArgs;
+  if (!norm || typeof norm !== "object" || Array.isArray(norm)) return null;
+  return norm as Record<string, unknown>;
+}
+
+function criarPrazoConfirmExtras(
+  args: Record<string, unknown>
+): { hora: string; lembretes: string } {
+  const horaRaw =
+    typeof args.hora_prazo === "string" ? args.hora_prazo.trim() : "";
+  const hora = horaRaw ? horaRaw.slice(0, 5) : "08:00";
+  const raw = args.lembretes;
+  if (Array.isArray(raw) && raw.length) {
+    const lines: { offset: number; label: string }[] = [];
+    for (const item of raw) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+      const rec = item as Record<string, unknown>;
+      const offset = Math.max(0, Math.floor(Number(rec.offset_minutes)));
+      if (!Number.isFinite(offset)) continue;
+      const label =
+        typeof rec.label === "string" && rec.label.trim()
+          ? rec.label.trim()
+          : labelForOffset(offset);
+      lines.push({ offset, label });
+    }
+    const sorted = lines.sort((a, b) => b.offset - a.offset);
+    if (sorted.length) {
+      return { hora, lembretes: sorted.map((l) => l.label).join(", ") };
+    }
+  }
+  return { hora, lembretes: "1 hora antes, na hora" };
+}
+
 function readPromptEditPreview(data: unknown): PromptEditPreviewUi | null {
   if (!data || typeof data !== "object" || Array.isArray(data)) return null;
   const d = data as Record<string, unknown>;
@@ -421,6 +457,13 @@ function ConfirmCard({
     toolLabel(item.name);
 
   const promptPreview = readPromptEditPreview(item.result.data);
+  const prazoExtras =
+    item.name === "criar_prazo"
+      ? (() => {
+          const args = readNormalizedArgs(item.result.data);
+          return args ? criarPrazoConfirmExtras(args) : null;
+        })()
+      : null;
 
   if (status === "confirmed") {
     return (
@@ -449,6 +492,17 @@ function ConfirmCard({
       <p className="mt-0.5 text-[11px] text-[#64748B]">
         {toolLabel(item.name)}
       </p>
+      {prazoExtras ? (
+        <p className="mt-1 text-[11px] text-[#475569]">
+          Horário:{" "}
+          <span className="font-medium text-[#0b2148]">{prazoExtras.hora}</span>
+          {" · "}
+          Lembretes:{" "}
+          <span className="font-medium text-[#0b2148]">
+            {prazoExtras.lembretes}
+          </span>
+        </p>
+      ) : null}
       {promptPreview ? (
         <div className="mt-2 max-h-64 space-y-2 overflow-y-auto pr-0.5">
           {promptPreview.alteracoes.length > 0

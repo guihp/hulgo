@@ -67,7 +67,7 @@ async function getDashboardData(): Promise<DashboardPayload> {
       .limit(10),
     supabase
       .from("app_prazos")
-      .select("id, titulo, tipo, data_prazo, caso_id")
+      .select("id, titulo, tipo, data_prazo, hora_prazo, caso_id")
       .eq("concluido", false)
       .lte("data_prazo", em7dias)
       .order("data_prazo", { ascending: true })

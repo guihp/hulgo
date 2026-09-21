@@ -21,6 +21,10 @@ import {
 } from "@/lib/actions/documentos";
 import { enviarMensagem } from "@/lib/actions/mensagens";
 import { criarPrazo } from "@/lib/actions/prazos";
+import {
+  labelForOffset,
+  type LembreteInput,
+} from "@/lib/prazos/lembretes";
 import { getAppUser } from "@/lib/actions/auth";
 import {
   applyPromptEditsBatch,
@@ -109,6 +113,24 @@ export const ASSISTENTE_WRITE_TOOL_DEFINITIONS = [
             type: "string",
             description:
               "Data em yyyy-mm-dd. Converta datas em português (ex.: 10 de outubro) você mesmo; se só dia/mês, use o ano corrente do relógio do system prompt (não avance sozinho para o ano seguinte).",
+          },
+          hora_prazo: {
+            type: "string",
+            description:
+              "Opcional — horário do prazo HH:MM (America/Sao_Paulo). Se omitido, usa 08:00.",
+          },
+          lembretes: {
+            type: "array",
+            description:
+              "Opcional — avisos antes do deadline. offset_minutes = minutos antes (0 = na hora). Se omitido, usa 1h antes + na hora.",
+            items: {
+              type: "object",
+              properties: {
+                offset_minutes: { type: "number" },
+                label: { type: "string" },
+              },
+              required: ["offset_minutes"],
+            },
           },
           descricao: { type: "string" },
           cpf: {
@@ -419,6 +441,48 @@ function prazoTipoLabel(tipo: string): string {
   return PRAZO_TIPOS.find((t) => t.value === tipo)?.label ?? tipo;
 }
 
+const DEFAULT_HORA_PRAZO = "08:00";
+const DEFAULT_LEMBRETES_SUMMARY = "1 hora antes, na hora";
+
+function lembretesSummaryLine(lembretes?: LembreteInput[]): string {
+  if (!lembretes?.length) return DEFAULT_LEMBRETES_SUMMARY;
+  return [...lembretes]
+    .sort((a, b) => b.offset_minutes - a.offset_minutes)
+    .map((l) => l.label?.trim() || labelForOffset(l.offset_minutes))
+    .join(", ");
+}
+
+function parseOptionalLembretes(
+  args: Record<string, unknown>
+): { lembretes?: LembreteInput[]; err?: string } {
+  const raw = args.lembretes;
+  if (raw == null) return {};
+  if (!Array.isArray(raw)) {
+    return { err: "lembretes deve ser um array." };
+  }
+  if (raw.length === 0) return {};
+  const seen = new Set<number>();
+  const out: LembreteInput[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const rec = item as Record<string, unknown>;
+    const offset = Math.max(0, Math.floor(Number(rec.offset_minutes)));
+    if (!Number.isFinite(offset) || seen.has(offset)) continue;
+    seen.add(offset);
+    const label = str(rec.label) || undefined;
+    out.push({
+      offset_minutes: offset,
+      ...(label ? { label } : {}),
+    });
+  }
+  if (!out.length) {
+    return {
+      err: "lembretes inválidos — informe offset_minutes (0 = na hora).",
+    };
+  }
+  return { lembretes: out };
+}
+
 type ProposeOk = {
   ok: true;
   normalizedArgs: Record<string, unknown>;
@@ -468,6 +532,22 @@ function proposeCriarPrazo(
     return { ok: false, summary: "data_prazo deve ser yyyy-mm-dd." };
   }
 
+  const horaRaw = str(args.hora_prazo);
+  const hora_prazo = horaRaw
+    ? /^\d{1,2}:\d{2}(:\d{2})?$/.test(horaRaw)
+      ? horaRaw
+      : null
+    : DEFAULT_HORA_PRAZO;
+  if (horaRaw && !hora_prazo) {
+    return { ok: false, summary: "hora_prazo deve ser HH:MM." };
+  }
+
+  const lembretesParsed = parseOptionalLembretes(args);
+  if (lembretesParsed.err) {
+    return { ok: false, summary: lembretesParsed.err };
+  }
+  const lembretes = lembretesParsed.lembretes;
+
   const cpf = optionalCpf(args.cpf);
   const caso_id = optionalPositiveId(args.caso_id);
   const processo_id = optionalPositiveId(args.processo_id);
@@ -479,13 +559,15 @@ function proposeCriarPrazo(
       titulo,
       tipo,
       data_prazo,
+      hora_prazo: hora_prazo ?? DEFAULT_HORA_PRAZO,
       ...(descricao ? { descricao } : {}),
       ...(cpf ? { cpf } : {}),
       ...(caso_id != null ? { caso_id } : {}),
       ...(processo_id != null ? { processo_id } : {}),
+      ...(lembretes?.length ? { lembretes } : {}),
     },
     label: `Prazo: ${titulo}`,
-    summary: `Criar prazo "${titulo}" (${prazoTipoLabel(tipo)}) em ${data_prazo}.`,
+    summary: `Criar prazo "${titulo}" (${prazoTipoLabel(tipo)}) em ${data_prazo} às ${String(hora_prazo).slice(0, 5)} · lembretes: ${lembretesSummaryLine(lembretes)}.`,
   };
 }
 
@@ -1164,7 +1246,10 @@ async function execCriarPrazo(
   const titulo = str(args.titulo);
   const tipo = str(args.tipo) as PrazoTipo;
   const data_prazo = str(args.data_prazo);
+  const hora_prazo = str(args.hora_prazo) || DEFAULT_HORA_PRAZO;
   const cpf = optionalCpf(args.cpf);
+  const lembretesParsed = parseOptionalLembretes(args);
+  const lembretes = lembretesParsed.lembretes;
   // Never pass empty/invalid FKs — inventing or "" breaks app_prazos_*_fkey.
   const links = await verifiedPrazoLinks({
     caso_id: optionalPositiveId(args.caso_id),
@@ -1174,14 +1259,16 @@ async function execCriarPrazo(
     titulo,
     tipo,
     data_prazo,
+    hora_prazo,
     descricao: str(args.descricao) || undefined,
     ...(cpf ? { cpf } : {}),
     ...links,
+    ...(lembretes?.length ? { lembretes } : {}),
   });
 
   return {
     ok: true,
-    summary: `Prazo "${titulo}" criado para ${data_prazo}.`,
+    summary: `Prazo "${titulo}" criado para ${data_prazo} às ${hora_prazo.slice(0, 5)}.`,
     links: [
       cpf
         ? { label: "Abrir ficha", href: assistenteFichaHref({ cpf }) }

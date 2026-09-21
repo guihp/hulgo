@@ -3,6 +3,9 @@ import {
   PrazosPageContent,
   type PrazoEnriched,
 } from "@/components/prazos/prazos-ui";
+import type { Tables } from "@/types/database";
+
+type PrazoLembrete = Tables<"app_prazos_lembretes">;
 
 export default async function PrazosPage() {
   const supabase = await createClient();
@@ -12,6 +15,7 @@ export default async function PrazosPage() {
     .order("data_prazo", { ascending: true });
 
   const rows = prazosRaw ?? [];
+  const prazoIds = rows.map((p) => p.id);
   const casoIds = [
     ...new Set(
       rows.map((p) => p.caso_id).filter((id): id is number => id != null)
@@ -25,7 +29,7 @@ export default async function PrazosPage() {
     ),
   ];
 
-  const [casosRes, processosRes] = await Promise.all([
+  const [casosRes, processosRes, lembretesRes] = await Promise.all([
     casoIds.length
       ? supabase.from("casos_novos").select("id, nome").in("id", casoIds)
       : Promise.resolve({ data: [] as { id: number; nome: string | null }[] }),
@@ -37,6 +41,13 @@ export default async function PrazosPage() {
       : Promise.resolve({
           data: [] as { id: number; numero_processo: string }[],
         }),
+    prazoIds.length
+      ? supabase
+          .from("app_prazos_lembretes")
+          .select("*")
+          .in("prazo_id", prazoIds)
+          .order("offset_minutes", { ascending: false })
+      : Promise.resolve({ data: [] as PrazoLembrete[] }),
   ]);
 
   const nomePorCaso = new Map(
@@ -45,6 +56,12 @@ export default async function PrazosPage() {
   const processoPorId = new Map(
     (processosRes.data ?? []).map((p) => [p.id, p.numero_processo] as const)
   );
+  const lembretesPorPrazo = new Map<number, PrazoLembrete[]>();
+  for (const l of lembretesRes.data ?? []) {
+    const list = lembretesPorPrazo.get(l.prazo_id) ?? [];
+    list.push(l);
+    lembretesPorPrazo.set(l.prazo_id, list);
+  }
 
   const prazos: PrazoEnriched[] = rows.map((p) => ({
     ...p,
@@ -52,6 +69,7 @@ export default async function PrazosPage() {
     numero_processo: p.processo_id
       ? (processoPorId.get(p.processo_id) ?? null)
       : null,
+    lembretes: lembretesPorPrazo.get(p.id) ?? [],
   }));
 
   return <PrazosPageContent prazos={prazos} />;

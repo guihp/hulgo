@@ -1,13 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { emitPainelPush } from "@/lib/push";
+import {
+  fireAtFromPrazo,
+  formatPrazoDateTime,
+  labelForOffset,
+} from "@/lib/prazos/lembretes";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Alerta diário de prazos vencendo hoje e amanhã.
- * Agendar no Coolify (Scheduled Task) — ver docs/DEPLOY-COOLIFY.md:
- *   0 7 * * * curl -s -H "x-cron-secret: $CRON_SECRET" https://SEU-DOMINIO/api/cron/prazos-notificar
+ * Alertas de prazos — somente lembretes configurados em app_prazos_lembretes.
+ *
+ * Deadline: data_prazo + hora_prazo em America/Sao_Paulo
+ * (hora_prazo null = legado 23:59:59 SP).
+ * fire_at = deadline - offset_minutes (offset 0 = na hora).
+ * Dedupe: app_prazos_alertas (tipo=lembrete, lembrete_id único).
+ *
+ * Agendar no Coolify a cada 5–15 min:
+ *   */5 * * * * curl -s -H "x-cron-secret: $CRON_SECRET" https://SEU-DOMINIO/api/cron/prazos-notificar
+ *
+ * (Hoje/amanhã automáticos e lembrar_em pontual foram descontinuados.)
  */
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET?.trim();
@@ -20,77 +33,106 @@ export async function GET(req: NextRequest) {
   }
 
   const service = createServiceClient();
+  const agora = new Date();
 
-  // Usa fuso America/Sao_Paulo para “hoje/amanhã”
   const fmt = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Sao_Paulo",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
   });
-  const hoje = fmt.format(new Date()); // yyyy-mm-dd
-  // Meio-dia BRT evita edge de DST ao somar 1 dia
-  const amanhaParts = new Date(`${hoje}T12:00:00-03:00`);
-  amanhaParts.setDate(amanhaParts.getDate() + 1);
-  const amanha = fmt.format(amanhaParts);
+  const hojeSp = fmt.format(agora);
 
-  const { data: prazos, error } = await service
+  const relatorio: { id: number; lembrete_id: number; resultado: string }[] =
+    [];
+  let enviados = 0;
+  let candidatos = 0;
+
+  const { data: prazosAbertos, error: errPrazos } = await service
     .from("app_prazos")
-    .select("id, titulo, data_prazo, tipo")
-    .eq("concluido", false)
-    .in("data_prazo", [hoje, amanha]);
+    .select("id, titulo, data_prazo, hora_prazo")
+    .eq("concluido", false);
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  if (errPrazos) {
+    return NextResponse.json({ error: errPrazos.message }, { status: 500 });
   }
 
-  const relatorio: { id: number; tipo: string; resultado: string }[] = [];
-  let enviados = 0;
+  const abertos = prazosAbertos ?? [];
+  if (!abertos.length) {
+    return NextResponse.json({
+      ok: true,
+      hoje: hojeSp,
+      candidatos: 0,
+      enviados: 0,
+      relatorio: [],
+    });
+  }
 
-  for (const p of prazos ?? []) {
-    const tipoAlerta = p.data_prazo === hoje ? "hoje" : "amanha";
-    const alertaDia = hoje;
+  const prazoMap = new Map(abertos.map((p) => [p.id, p] as const));
+  const { data: lembretes, error: errLemb } = await service
+    .from("app_prazos_lembretes")
+    .select("id, prazo_id, offset_minutes, label")
+    .in(
+      "prazo_id",
+      abertos.map((p) => p.id)
+    );
 
-    const { error: dedupeErr } = await service
-      .from("app_prazos_alertas")
-      .insert({
-        prazo_id: p.id,
-        alerta_dia: alertaDia,
-        tipo: tipoAlerta,
-      });
+  if (errLemb) {
+    return NextResponse.json({ error: errLemb.message }, { status: 500 });
+  }
+
+  for (const row of lembretes ?? []) {
+    const prazo = prazoMap.get(row.prazo_id);
+    if (!prazo) continue;
+
+    const fireAt = fireAtFromPrazo(
+      prazo.data_prazo,
+      row.offset_minutes,
+      prazo.hora_prazo
+    );
+    if (fireAt.getTime() > agora.getTime()) continue;
+
+    candidatos += 1;
+
+    const { error: dedupeErr } = await service.from("app_prazos_alertas").insert({
+      prazo_id: prazo.id,
+      alerta_dia: hojeSp,
+      tipo: "lembrete",
+      lembrete_id: row.id,
+    });
 
     if (dedupeErr) {
-      // unique violation → já notificado hoje
       if (dedupeErr.code === "23505") {
         relatorio.push({
-          id: p.id,
-          tipo: tipoAlerta,
+          id: prazo.id,
+          lembrete_id: row.id,
           resultado: "já notificado",
         });
         continue;
       }
       relatorio.push({
-        id: p.id,
-        tipo: tipoAlerta,
+        id: prazo.id,
+        lembrete_id: row.id,
         resultado: `dedupe erro: ${dedupeErr.message}`,
       });
       continue;
     }
 
-    const tituloPush =
-      tipoAlerta === "hoje" ? "⏰ Prazo vence hoje" : "📅 Prazo vence amanhã";
+    const quando =
+      row.label?.trim() || labelForOffset(row.offset_minutes);
+
     const result = await emitPainelPush({
       kind: "prazo",
-      title: tituloPush,
-      body: `${p.titulo} (${p.data_prazo})`,
+      title: "🔔 Lembrete de prazo",
+      body: `${prazo.titulo} — ${quando} (vence ${formatPrazoDateTime(prazo.data_prazo, prazo.hora_prazo)})`,
       href: "/prazos",
-      tag: `prazo-alerta-${p.id}-${alertaDia}-${tipoAlerta}`,
+      tag: `prazo-lembrete-${row.id}`,
     });
 
     enviados += result.sent;
     relatorio.push({
-      id: p.id,
-      tipo: tipoAlerta,
+      id: prazo.id,
+      lembrete_id: row.id,
       resultado: result.skipped
         ? "vapid skip"
         : `push sent=${result.sent} removed=${result.removed}`,
@@ -99,9 +141,8 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     ok: true,
-    hoje,
-    amanha,
-    candidatos: prazos?.length ?? 0,
+    hoje: hojeSp,
+    candidatos,
     enviados,
     relatorio,
   });

@@ -5,6 +5,10 @@ import { normalizeCpf } from "@/lib/utils/cpf";
 import { phoneToContactNorm } from "@/lib/utils/phone";
 import type { Tables } from "@/types/database";
 
+export type FichaPrazo = Tables<"app_prazos"> & {
+  lembretes?: Tables<"app_prazos_lembretes">[];
+};
+
 export type FichaPessoa = {
   cpf: string | null;
   contactNorm: string;
@@ -12,7 +16,7 @@ export type FichaPessoa = {
   processos: Tables<"processos_clientes">[];
   casos: Tables<"casos_novos">[];
   mensagens: Tables<"mensagens">[];
-  prazos: Tables<"app_prazos">[];
+  prazos: FichaPrazo[];
   documentos: Tables<"documentos_cliente">[];
   pastas: Tables<"documentos_pastas">[];
   midiasChat: MidiaChat[];
@@ -107,6 +111,28 @@ export async function loadFichaPessoa(opts: {
         .order("data_prazo", { ascending: true })
     : { data: [] as Tables<"app_prazos">[] };
 
+  const prazosBase = prazosRes.data ?? [];
+  const prazoIds = prazosBase.map((p) => p.id);
+  const lembretesRes = prazoIds.length
+    ? await supabase
+        .from("app_prazos_lembretes")
+        .select("*")
+        .in("prazo_id", prazoIds)
+        .order("offset_minutes", { ascending: false })
+    : { data: [] as Tables<"app_prazos_lembretes">[] };
+
+  const lembretesPorPrazo = new Map<number, Tables<"app_prazos_lembretes">[]>();
+  for (const l of lembretesRes.data ?? []) {
+    const list = lembretesPorPrazo.get(l.prazo_id) ?? [];
+    list.push(l);
+    lembretesPorPrazo.set(l.prazo_id, list);
+  }
+
+  const prazos: FichaPrazo[] = prazosBase.map((p) => ({
+    ...p,
+    lembretes: lembretesPorPrazo.get(p.id) ?? [],
+  }));
+
   if (
     !processos.length &&
     !casos.length &&
@@ -128,7 +154,7 @@ export async function loadFichaPessoa(opts: {
     processos,
     casos,
     mensagens,
-    prazos: prazosRes.data ?? [],
+    prazos,
     documentos: arquivos.documentos,
     pastas: arquivos.pastas,
     midiasChat: arquivos.midiasChat,
