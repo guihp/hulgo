@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
  * Dedupe: app_prazos_alertas (tipo=lembrete, lembrete_id único).
  *
  * Agendar no Coolify a cada 5–15 min:
- *   */5 * * * * curl -s -H "x-cron-secret: $CRON_SECRET" https://SEU-DOMINIO/api/cron/prazos-notificar
+ *   * /5 * * * * curl -s -H "x-cron-secret: $CRON_SECRET" https://SEU-DOMINIO/api/cron/prazos-notificar
  *
  * (Hoje/amanhã automáticos e lembrar_em pontual foram descontinuados.)
  */
