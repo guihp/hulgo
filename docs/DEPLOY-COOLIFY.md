@@ -190,6 +190,7 @@ Acesse [http://localhost:3000](http://localhost:3000).
 | WhatsApp não envia | EvoGo env faltando | Conferir `EVOGO_*` no runtime |
 | Aprovação não despausa IA | Webhook n8n | Conferir `N8N_WEBHOOK_APROVACAO` |
 | Build falha com Supabase undefined | Build vars faltando | `NEXT_PUBLIC_*` em Build Variables |
+| Build morre em `Running TypeScript` (exit 255, sem erro TS) | OOM na VPS durante o typecheck | VPS com ≥4 GB RAM/swap; Dockerfile já usa `NODE_OPTIONS=--max-old-space-size=3072` |
 | Health check falha | App ainda iniciando | Aumentar `start-period` ou aguardar build |
 
 ## Arquitetura

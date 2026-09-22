@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
 
-FROM node:20-alpine AS base
+# Node 22: @supabase/* e deps pedem engines >=22 (Node 20 só gera EBADENGINE).
+FROM node:22-alpine AS base
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
@@ -21,6 +22,8 @@ ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
 ENV NEXT_PUBLIC_VAPID_PUBLIC_KEY=$NEXT_PUBLIC_VAPID_PUBLIC_KEY
 
 ENV NEXT_TELEMETRY_DISABLED=1
+# Evita OOM no `next build` (fase TypeScript) em VPS pequenas do Coolify.
+ENV NODE_OPTIONS="--max-old-space-size=3072"
 RUN npm run build
 
 FROM base AS runner
