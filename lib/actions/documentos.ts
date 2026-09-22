@@ -169,6 +169,38 @@ export async function registrarArquivosCliente(input: {
     if (Number.isInteger(parsed)) processoId = parsed;
   }
 
+  const supabase = await createClient();
+  if (casoId != null) {
+    const { data: casoOk } = await supabase
+      .from("casos_novos")
+      .select("id")
+      .eq("id", casoId)
+      .maybeSingle();
+    if (!casoOk) {
+      if (pasta === `caso:${casoId}`) {
+        throw new Error(
+          `Caso #${casoId} não existe — não dá para anexar na pasta do caso.`
+        );
+      }
+      casoId = null;
+    }
+  }
+  if (processoId != null) {
+    const { data: procOk } = await supabase
+      .from("processos_clientes")
+      .select("id")
+      .eq("id", processoId)
+      .maybeSingle();
+    if (!procOk) {
+      if (pasta === `processo:${processoId}`) {
+        throw new Error(
+          `Processo #${processoId} não existe — não dá para anexar nessa pasta.`
+        );
+      }
+      processoId = null;
+    }
+  }
+
   const rows = input.arquivos.map((a) => {
     const url = a.urlMedia.trim();
     if (!url) throw new Error("URL do arquivo ausente");
@@ -185,7 +217,6 @@ export async function registrarArquivosCliente(input: {
     };
   });
 
-  const supabase = await createClient();
   const { data: docs, error } = await supabase
     .from("documentos_cliente")
     .insert(rows)

@@ -180,19 +180,10 @@ export async function iniciarSessaoAssistente(): Promise<AssistenteSessionResult
   const supabase = await createClient();
   const model = getOpenAIChatModel();
 
-  const { data: recent } = await supabase
-    .from("app_assistente_sessoes")
-    .select("id")
-    .eq("user_id", user.id)
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (recent?.id) {
-    const messages = await listMessages(recent.id);
-    if (messages.length === 0) {
-      return { sessaoId: recent.id, messages: [], model };
-    }
+  const reused = await findEmptySessaoId(user.id);
+  if (reused) {
+    await pruneEmptySessoes(user.id, reused);
+    return { sessaoId: reused, messages: [], model };
   }
 
   const { data, error } = await supabase
@@ -202,14 +193,23 @@ export async function iniciarSessaoAssistente(): Promise<AssistenteSessionResult
     .single();
   if (error) throw new Error(error.message);
 
+  await pruneEmptySessoes(user.id, data.id);
   return { sessaoId: data.id, messages: [], model };
 }
 
-/** Always creates a fresh empty session (Nova conversa). */
+/** Nova conversa: reuses an empty session when possible (avoids "vazia" clutter). */
 export async function novaSessaoAssistente(): Promise<AssistenteSessionResult> {
   const user = await requireAppUser();
   const supabase = await createClient();
   const model = getOpenAIChatModel();
+
+  const reused = await findEmptySessaoId(user.id);
+
+  if (reused) {
+    await pruneEmptySessoes(user.id, reused);
+    await touchSessao(reused);
+    return { sessaoId: reused, messages: [], model };
+  }
 
   const { data, error } = await supabase
     .from("app_assistente_sessoes")
@@ -218,7 +218,54 @@ export async function novaSessaoAssistente(): Promise<AssistenteSessionResult> {
     .single();
   if (error) throw new Error(error.message);
 
+  await pruneEmptySessoes(user.id, data.id);
   return { sessaoId: data.id, messages: [], model };
+}
+
+async function findEmptySessaoId(userId: string): Promise<string | null> {
+  const supabase = await createClient();
+  const { data: sessoes } = await supabase
+    .from("app_assistente_sessoes")
+    .select("id")
+    .eq("user_id", userId)
+    .order("updated_at", { ascending: false })
+    .limit(20);
+  if (!sessoes?.length) return null;
+
+  for (const s of sessoes) {
+    const { count } = await supabase
+      .from("app_assistente_mensagens")
+      .select("id", { count: "exact", head: true })
+      .eq("sessao_id", s.id)
+      .in("role", ["user", "assistant"]);
+    if ((count ?? 0) === 0) return s.id;
+  }
+  return null;
+}
+
+/** Deletes empty sessions except keepId (history should not list "vazia"). */
+async function pruneEmptySessoes(userId: string, keepId: string) {
+  const supabase = await createClient();
+  const { data: sessoes } = await supabase
+    .from("app_assistente_sessoes")
+    .select("id")
+    .eq("user_id", userId)
+    .neq("id", keepId)
+    .limit(50);
+  if (!sessoes?.length) return;
+
+  const toDelete: string[] = [];
+  for (const s of sessoes) {
+    const { count } = await supabase
+      .from("app_assistente_mensagens")
+      .select("id", { count: "exact", head: true })
+      .eq("sessao_id", s.id)
+      .in("role", ["user", "assistant"]);
+    if ((count ?? 0) === 0) toDelete.push(s.id);
+  }
+  if (!toDelete.length) return;
+
+  await supabase.from("app_assistente_sessoes").delete().in("id", toDelete);
 }
 
 /** Lists recent sessions for the current user (newest first). */
@@ -264,19 +311,24 @@ export async function listarSessoesAssistente(): Promise<
     if (text) bucket.lastContent = text;
   }
 
-  return sessoes.map((s) => {
-    const info = bySessao.get(s.id);
-    const raw = info?.firstUser || info?.lastContent || "Nova conversa";
-    const preview =
-      raw.length > 72 ? `${raw.slice(0, 69).trimEnd()}…` : raw;
-    return {
-      id: s.id,
-      created_at: s.created_at,
-      updated_at: s.updated_at,
-      preview,
-      message_count: info?.count ?? 0,
-    };
-  });
+  const listed = sessoes
+    .map((s) => {
+      const info = bySessao.get(s.id);
+      const raw = info?.firstUser || info?.lastContent || "Nova conversa";
+      const preview =
+        raw.length > 72 ? `${raw.slice(0, 69).trimEnd()}…` : raw;
+      return {
+        id: s.id,
+        created_at: s.created_at,
+        updated_at: s.updated_at,
+        preview,
+        message_count: info?.count ?? 0,
+      };
+    })
+    // Hide empty shells — they are not real conversations.
+    .filter((s) => s.message_count > 0);
+
+  return listed;
 }
 
 /** Opens an existing session owned by the current user. */
@@ -392,27 +444,47 @@ export async function enviarMensagemAssistente(input: {
       : null,
   });
 
-  const loop = await runAssistenteToolLoop({
-    systemPrompt,
-    history,
-    userMessage: modelUserMessage,
-    pendingAnexo,
-    onTool: async (item) => {
-      await insertAudit({
-        sessaoId: input.sessaoId,
-        userId: user.id,
-        item,
-      });
-    },
-  });
+  let loopContent: string;
+  let loopTrace: AssistenteToolTraceItem[] = [];
+  let loopModel = getOpenAIChatModel();
+
+  try {
+    const loop = await runAssistenteToolLoop({
+      systemPrompt,
+      history,
+      userMessage: modelUserMessage,
+      pendingAnexo,
+      onTool: async (item) => {
+        await insertAudit({
+          sessaoId: input.sessaoId,
+          userId: user.id,
+          item,
+        });
+      },
+    });
+    loopContent = loop.content;
+    loopTrace = loop.toolTrace;
+    loopModel = loop.model;
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error("[assistente] runAssistenteToolLoop:", errMsg);
+    // Não relança: em produção o throw da Server Action vira digest de RSC.
+    loopContent =
+      "Não consegui responder agora. " +
+      (/api key|OPENAI|401|Unauthorized/i.test(errMsg)
+        ? "Verifique OPENAI_API_KEY no ambiente (Coolify)."
+        : /model|not found|404/i.test(errMsg)
+          ? `Modelo "${loopModel}" indisponível — confira OPENAI_MODEL.`
+          : errMsg.slice(0, 280));
+  }
 
   const { data: asstRow, error: asstErr } = await supabase
     .from("app_assistente_mensagens")
     .insert({
       sessao_id: input.sessaoId,
       role: "assistant",
-      content: loop.content,
-      tool_trace: asJson(loop.toolTrace),
+      content: loopContent,
+      tool_trace: asJson(loopTrace),
     })
     .select("id, role, content, tool_trace, anexos, created_at")
     .single();
@@ -427,7 +499,7 @@ export async function enviarMensagemAssistente(input: {
     sessaoId: input.sessaoId,
     userMessage,
     assistantMessage,
-    model: loop.model,
+    model: loopModel,
   };
 }
 

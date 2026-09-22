@@ -215,3 +215,11 @@ export async function excluirPrazo(id: number) {
   revalidatePrazos();
   return { success: true };
 }
+
+/** Processa lembretes vencidos (mesmo fluxo do cron). Para tick no app aberto. */
+export async function tickLembretesPrazos() {
+  const user = await getAppUser();
+  if (!user) throw new Error("Não autenticado");
+  const { processarLembretesPrazos } = await import("@/lib/prazos/notificar");
+  return processarLembretesPrazos();
+}

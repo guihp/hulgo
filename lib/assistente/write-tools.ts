@@ -664,8 +664,8 @@ function proposeAnexarDocumento(
     }
   }
 
-  const caso_id = num(args.caso_id);
-  const processo_id = num(args.processo_id);
+  const caso_id = optionalPositiveId(args.caso_id);
+  const processo_id = optionalPositiveId(args.processo_id);
   const descricao = str(args.descricao) || undefined;
 
   return {
@@ -1319,8 +1319,12 @@ async function execAnexarDocumento(
 
   const nome_documento = str(args.nome_documento) || "Arquivo";
   const descricao = str(args.descricao) || undefined;
-  const caso_id = num(args.caso_id);
-  const processo_id = num(args.processo_id);
+  const links = await verifiedPrazoLinks({
+    caso_id: optionalPositiveId(args.caso_id),
+    processo_id: optionalPositiveId(args.processo_id),
+  });
+  const caso_id = links.caso_id;
+  const processo_id = links.processo_id;
   const url_media = str(args.url_media);
   const file_base64 = str(args.file_base64);
 

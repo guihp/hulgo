@@ -440,6 +440,59 @@ export function NotificationsProvider({
     };
   }, [push]);
 
+  // Lembretes de prazo: cron Coolify cobre app fechado; tick cobre painel aberto.
+  const pushRef = useRef(push);
+  pushRef.current = push;
+
+  useEffect(() => {
+    let cancelled = false;
+    let inFlight = false;
+
+    async function tick() {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const { tickLembretesPrazos } = await import("@/lib/actions/prazos");
+        const result = await tickLembretesPrazos();
+        for (const row of result.relatorio) {
+          if (row.resultado === "já notificado") continue;
+          if (row.resultado.startsWith("dedupe erro")) continue;
+          const toastKey = `prazo-lemb-${row.lembrete_id}`;
+          try {
+            if (sessionStorage.getItem(toastKey) === "1") continue;
+            sessionStorage.setItem(toastKey, "1");
+          } catch {
+            /* private mode */
+          }
+          const titulo = row.titulo ?? `Prazo #${row.id}`;
+          const quando = row.quando ?? "lembrete";
+          const body = `${titulo} — ${quando}`;
+          pushRef.current({
+            kind: "prazo",
+            title: "🔔 Lembrete de prazo",
+            body,
+            href: "/prazos",
+          });
+        }
+        if (cancelled) return;
+      } catch (err) {
+        console.warn(
+          "[lembretes] tick:",
+          err instanceof Error ? err.message : err
+        );
+      } finally {
+        inFlight = false;
+      }
+    }
+
+    void tick();
+    const id = window.setInterval(tick, 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, []);
+
   const unreadCount = notifications.filter((n) => !n.read).length;
 
   const markAllRead = useCallback(
