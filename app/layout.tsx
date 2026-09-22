@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/providers/theme-provider";
+import { PwaInstallProvider } from "@/components/providers/pwa-install-provider";
 import { AppToaster } from "@/components/providers/app-toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
@@ -53,10 +54,12 @@ export default function RootLayout({
         className={`${plusJakarta.variable} ${jetbrainsMono.variable} min-h-screen font-sans antialiased`}
       >
         <ThemeProvider>
-          <TooltipProvider>
-            {children}
-            <AppToaster />
-          </TooltipProvider>
+          <PwaInstallProvider>
+            <TooltipProvider>
+              {children}
+              <AppToaster />
+            </TooltipProvider>
+          </PwaInstallProvider>
         </ThemeProvider>
       </body>
     </html>

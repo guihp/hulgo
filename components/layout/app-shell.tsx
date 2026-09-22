@@ -25,6 +25,7 @@ import { useTheme } from "next-themes";
 import { AssistenteDrawer } from "@/components/assistente/assistente-drawer";
 import { GlobalSearch } from "@/components/layout/global-search";
 import { NotificationsBell } from "@/components/layout/notifications-bell";
+import { PwaInstallBanner } from "@/components/layout/pwa-install-banner";
 import { NotificationsProvider } from "@/components/providers/notifications-provider";
 import { AppLogo } from "@/components/layout/app-logo";
 import { NAV_GROUPS, type NavIconName } from "@/lib/constants";
@@ -313,6 +314,7 @@ export function AppShell({ user, children }: { user: AppUser; children: React.Re
         </div>
       </div>
       <AssistenteDrawer />
+      <PwaInstallBanner />
     </NotificationsProvider>
   );
 }
