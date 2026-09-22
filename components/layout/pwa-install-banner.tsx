@@ -10,7 +10,8 @@ import { cn } from "@/lib/utils";
 const DISMISS_KEY = "pwa-install-banner-dismissed";
 
 export function PwaInstallBanner() {
-  const { canInstall, busy, install, isInstalled } = usePwaInstall();
+  const { shouldOfferInstall, canNativeInstall, busy, install, isInstalled } =
+    usePwaInstall();
   const [dismissed, setDismissed] = useState(true);
 
   useEffect(() => {
@@ -21,17 +22,25 @@ export function PwaInstallBanner() {
     }
   }, []);
 
-  if (isInstalled || !canInstall || dismissed) return null;
+  if (isInstalled || !shouldOfferInstall || dismissed) return null;
 
   async function onInstall() {
-    const outcome = await install();
-    if (outcome === "accepted") {
-      toast.success("App instalado — abra pela tela inicial");
-    } else if (outcome === "dismissed") {
-      toast.message("Instalação cancelada");
-    } else {
-      toast.error("Não foi possível abrir a instalação agora");
+    if (canNativeInstall) {
+      const outcome = await install();
+      if (outcome === "accepted") {
+        toast.success("App instalado — abra pela tela inicial");
+        return;
+      }
+      if (outcome === "dismissed") {
+        toast.message("Instalação cancelada");
+        return;
+      }
     }
+    toast.message("No Chrome: menu ⋮ → Instalar app", {
+      description:
+        "Se não aparecer, abra o site no Chrome (não no navegador do WhatsApp) e atualize a página.",
+      duration: 8000,
+    });
   }
 
   function dismiss() {
@@ -59,7 +68,9 @@ export function PwaInstallBanner() {
           Instalar o app no celular
         </p>
         <p className="mt-0.5 text-xs text-[#64748b]">
-          Abre como aplicativo e facilita as notificações.
+          {canNativeInstall
+            ? "Um toque abre a instalação do Chrome."
+            : "Toque para instalar ou ver o passo a passo."}
         </p>
         <Button
           type="button"
@@ -69,7 +80,7 @@ export function PwaInstallBanner() {
           onClick={() => void onInstall()}
         >
           <Download className="size-3.5" />
-          {busy ? "Abrindo…" : "Instalar agora"}
+          {busy ? "Abrindo…" : "Instalar app"}
         </Button>
       </div>
       <button

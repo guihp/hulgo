@@ -2,11 +2,14 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
+    id: "/",
     name: "Boueres e Fonteles",
     short_name: "Boueres",
     description: "Sistema de gestão para escritório de advocacia previdenciária",
     start_url: "/",
+    scope: "/",
     display: "standalone",
+    orientation: "any",
     background_color: "#0b2148",
     theme_color: "#0b2148",
     lang: "pt-BR",

@@ -10,19 +10,32 @@ const cardShell =
   "rounded-2xl border border-[#e2e8f0] bg-white shadow-none";
 
 export function AppCelularPanel() {
-  const { canInstall, isInstalled, busy, install } = usePwaInstall();
+  const {
+    canNativeInstall,
+    shouldOfferInstall,
+    isInstalled,
+    busy,
+    install,
+    isIos,
+  } = usePwaInstall();
 
   async function onInstall() {
-    const outcome = await install();
-    if (outcome === "accepted") {
-      toast.success("App instalado — abra pela tela inicial");
-    } else if (outcome === "dismissed") {
-      toast.message("Instalação cancelada");
-    } else {
-      toast.error(
-        "O Chrome ainda não liberou a instalação. Use o menu ⋮ → Instalar app."
-      );
+    if (canNativeInstall) {
+      const outcome = await install();
+      if (outcome === "accepted") {
+        toast.success("App instalado — abra pela tela inicial");
+        return;
+      }
+      if (outcome === "dismissed") {
+        toast.message("Instalação cancelada");
+        return;
+      }
     }
+    toast.message("No Chrome: menu ⋮ → Instalar app (ou Adicionar à tela inicial)", {
+      description:
+        "Abra pelo Chrome do Android — navegadores embutidos (WhatsApp etc.) não permitem instalar.",
+      duration: 9000,
+    });
   }
 
   return (
@@ -51,10 +64,12 @@ export function AppCelularPanel() {
               ativar as notificações.
             </p>
           </div>
-        ) : canInstall ? (
+        ) : !isIos ? (
           <div className="mt-5 rounded-xl border border-[#0b2148]/15 bg-[#F8FAFC] p-4">
             <p className="text-sm text-[#475569]">
-              No Android (Chrome), um toque abre o diálogo nativo de instalação.
+              {canNativeInstall
+                ? "O Chrome liberou a instalação — toque abaixo para confirmar."
+                : "Toque abaixo. Se o diálogo nativo não abrir, use o menu ⋮ do Chrome → Instalar app."}
             </p>
             <Button
               type="button"
@@ -65,6 +80,12 @@ export function AppCelularPanel() {
               <Download className="size-4" />
               {busy ? "Abrindo instalação…" : "Instalar app agora"}
             </Button>
+            {!shouldOfferInstall && !canNativeInstall ? (
+              <p className="mt-2 text-xs text-[#64748b]">
+                Dica: abra este site no app Chrome do Android (não pelo
+                WhatsApp).
+              </p>
+            ) : null}
           </div>
         ) : null}
 
@@ -73,36 +94,18 @@ export function AppCelularPanel() {
             <h3 className="text-sm font-semibold text-[#0b2148]">
               Android (Chrome)
             </h3>
-            {canInstall ? (
-              <p className="mt-2 text-sm text-[#475569]">
-                Use o botão{" "}
+            <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-sm text-[#475569]">
+              <li>Abra o painel no app Chrome (não no navegador do WhatsApp).</li>
+              <li>
+                Toque em{" "}
                 <span className="font-medium text-[#0b2148]">
                   Instalar app agora
                 </span>{" "}
-                acima. Se não aparecer, atualize a página ou use o menu{" "}
+                acima, ou no menu{" "}
                 <span className="font-medium text-[#0b2148]">⋮</span> → Instalar
                 app.
-              </p>
-            ) : (
-              <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-sm text-[#475569]">
-                <li>Abra o painel no Chrome.</li>
-                <li>
-                  Toque no menu{" "}
-                  <span className="font-medium text-[#0b2148]">⋮</span>.
-                </li>
-                <li>
-                  Escolha{" "}
-                  <span className="font-medium text-[#0b2148]">
-                    Instalar app
-                  </span>{" "}
-                  ou{" "}
-                  <span className="font-medium text-[#0b2148]">
-                    Adicionar à tela inicial
-                  </span>
-                  .
-                </li>
-              </ol>
-            )}
+              </li>
+            </ol>
           </div>
 
           <div>
