@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   Briefcase,
+  Download,
   Eye,
   FileText,
   Folder,
@@ -12,15 +13,28 @@ import {
   FolderPlus,
   Gavel,
   MessageCircle,
+  Trash2,
   Upload,
 } from "lucide-react";
 import { ArquivoVisualizarDialog } from "@/components/arquivos/arquivo-visualizar-dialog";
 import type { MidiaChat } from "@/lib/data/arquivos";
 import {
   criarPastaCliente,
+  excluirDocumento,
   registrarArquivosCliente,
 } from "@/lib/actions/documentos";
 import { createClient } from "@/lib/supabase/client";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -110,44 +124,161 @@ function fileKindLabel(url: string, type?: string | null) {
   return "Arquivo";
 }
 
-function DocTile({ doc }: { doc: Documento }) {
+function fileNameForDownload(nome: string, url: string) {
+  if (/\.[a-z0-9]{1,8}$/i.test(nome)) return nome;
+  const fromUrl = url.split("?")[0]?.split("/").pop();
+  if (fromUrl && fromUrl.includes(".")) {
+    const ext = fromUrl.split(".").pop()!;
+    return `${nome}.${ext}`;
+  }
+  return nome;
+}
+
+async function downloadUrl(url: string, fileName: string) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("Falha ao baixar");
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(objectUrl);
+  } catch {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+}
+
+const tileActionClass =
+  "inline-flex h-7 w-7 items-center justify-center rounded-md bg-background/95 text-foreground shadow-sm ring-1 ring-foreground/10 transition-colors hover:bg-background hover:text-primary";
+
+function DocTile({
+  doc,
+  onDeleted,
+}: {
+  doc: Documento;
+  onDeleted?: () => void;
+}) {
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const kind = resolveMediaDisplayKind(null, doc.url_media);
   const isImage = kind === "image";
 
+  async function baixar() {
+    await downloadUrl(
+      doc.url_media,
+      fileNameForDownload(doc.nome_documento, doc.url_media)
+    );
+  }
+
+  async function excluir() {
+    setDeleting(true);
+    try {
+      await excluirDocumento(doc.id);
+      setConfirmOpen(false);
+      toast.success("Arquivo excluído");
+      onDeleted?.();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao excluir");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setPreviewOpen(true)}
+      <div
         className={cn(
-          "group flex flex-col overflow-hidden rounded-xl border border-border/70 bg-card text-left transition-colors",
-          "hover:border-primary/40 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          "group relative flex flex-col overflow-hidden rounded-xl border border-border/70 bg-card text-left transition-colors",
+          "hover:border-primary/40 hover:bg-muted/30"
         )}
       >
         <div className="relative aspect-[4/3] w-full overflow-hidden bg-muted/40">
-          {isImage ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={doc.url_media}
-              alt=""
-              className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
-              loading="lazy"
-            />
-          ) : (
-            <div className="flex h-full flex-col items-center justify-center gap-2 px-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-background/80 ring-1 ring-foreground/10">
-                <FileText className="h-6 w-6 text-muted-foreground" />
+          <button
+            type="button"
+            onClick={() => setPreviewOpen(true)}
+            className="absolute inset-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label={`Abrir ${doc.nome_documento}`}
+          >
+            {isImage ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={doc.url_media}
+                alt=""
+                className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
+                loading="lazy"
+              />
+            ) : (
+              <div className="flex h-full flex-col items-center justify-center gap-2 px-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-background/80 ring-1 ring-foreground/10">
+                  <FileText className="h-6 w-6 text-muted-foreground" />
+                </div>
+                <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  {fileKindLabel(doc.url_media)}
+                </span>
               </div>
-              <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                {fileKindLabel(doc.url_media)}
-              </span>
-            </div>
-          )}
-          <span className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-md bg-background/90 px-1.5 py-0.5 text-[10px] font-medium text-foreground opacity-0 shadow-sm ring-1 ring-foreground/10 transition-opacity group-hover:opacity-100">
+            )}
+          </button>
+          <span className="pointer-events-none absolute left-2 top-2 inline-flex items-center gap-1 rounded-md bg-background/90 px-1.5 py-0.5 text-[10px] font-medium text-foreground opacity-0 shadow-sm ring-1 ring-foreground/10 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
             <Eye className="h-3 w-3" />
             Abrir
           </span>
+          <div
+            className={cn(
+              "absolute right-2 top-2 z-10 flex items-center gap-1 opacity-0 transition-opacity",
+              "group-hover:opacity-100 group-focus-within:opacity-100"
+            )}
+          >
+            <button
+              type="button"
+              title="Baixar"
+              aria-label="Baixar"
+              className={tileActionClass}
+              onClick={() => void baixar()}
+            >
+              <Download className="h-3.5 w-3.5" />
+            </button>
+            <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+              <AlertDialogTrigger
+                title="Excluir"
+                aria-label="Excluir"
+                className={cn(
+                  tileActionClass,
+                  "text-destructive hover:text-destructive"
+                )}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Excluir arquivo?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Remover <strong>{doc.nome_documento}</strong> da ficha. Esta
+                    ação não pode ser desfeita.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={deleting}>
+                    Cancelar
+                  </AlertDialogCancel>
+                  <AlertDialogAction
+                    disabled={deleting}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      void excluir();
+                    }}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    {deleting ? "Excluindo…" : "Excluir"}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
         </div>
         <div className="space-y-0.5 p-3">
           <p className="truncate text-sm font-medium leading-snug">
@@ -157,7 +288,7 @@ function DocTile({ doc }: { doc: Documento }) {
             {formatDateTime(doc.created_at)}
           </p>
         </div>
-      </button>
+      </div>
       <ArquivoVisualizarDialog
         open={previewOpen}
         onOpenChange={setPreviewOpen}
@@ -660,7 +791,11 @@ export function FichaArquivos({
             ) : (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
                 {docsDaPasta.map((doc) => (
-                  <DocTile key={doc.id} doc={doc} />
+                  <DocTile
+                    key={doc.id}
+                    doc={doc}
+                    onDeleted={() => router.refresh()}
+                  />
                 ))}
               </div>
             )}

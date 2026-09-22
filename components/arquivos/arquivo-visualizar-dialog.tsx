@@ -5,6 +5,7 @@ import {
   Download,
   FileText,
   ImageIcon,
+  Loader2,
   Mic,
   Video,
 } from "lucide-react";
@@ -30,7 +31,18 @@ export type ArquivoVisualizarItem = {
   mensageType?: string | null;
 };
 
-type PreviewMode = "image" | "pdf" | "video" | "audio" | null;
+type PreviewMode =
+  | "image"
+  | "pdf"
+  | "video"
+  | "audio"
+  | "office"
+  | "text"
+  | null;
+
+const OFFICE_EXT =
+  /\.(docx?|xlsx?|pptx?|odt|ods|odp)(\?|$)/i;
+const TEXT_EXT = /\.(txt|md|csv|json|html?|rtf|log)(\?|$)/i;
 
 function filenameFromUrl(url: string, fallback: string): string {
   try {
@@ -47,7 +59,13 @@ function previewMode(kind: MediaDisplayKind, url: string): PreviewMode {
   if (kind === "video") return "video";
   if (kind === "audio") return "audio";
   if (/\.pdf(\?|$)/i.test(url)) return "pdf";
+  if (OFFICE_EXT.test(url)) return "office";
+  if (TEXT_EXT.test(url)) return "text";
   return null;
+}
+
+function officeViewerUrl(fileUrl: string): string {
+  return `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(fileUrl)}`;
 }
 
 function kindIcon(kind: MediaDisplayKind) {
@@ -77,6 +95,80 @@ async function downloadAll(arquivos: ArquivoVisualizarItem[]) {
       await new Promise((resolve) => setTimeout(resolve, 350));
     }
   }
+}
+
+function TextPreview({ url }: { url: string }) {
+  const [text, setText] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setText(null);
+    setError(null);
+    fetch(url)
+      .then(async (res) => {
+        if (!res.ok) throw new Error("Falha ao carregar");
+        const body = await res.text();
+        if (!cancelled) setText(body.slice(0, 200_000));
+      })
+      .catch(() => {
+        if (!cancelled) setError("Não foi possível carregar o texto.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [url]);
+
+  if (error) {
+    return (
+      <div className="flex min-h-[200px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-muted/20 p-8 text-center">
+        <FileText className="h-8 w-8 text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">{error}</p>
+      </div>
+    );
+  }
+
+  if (text == null) {
+    return (
+      <div className="flex min-h-[200px] items-center justify-center rounded-lg border bg-muted/20">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <pre className="max-h-[min(60vh,520px)] overflow-auto whitespace-pre-wrap break-words rounded-lg border bg-muted/20 p-4 font-mono text-xs leading-relaxed text-foreground">
+      {text}
+    </pre>
+  );
+}
+
+function OfficePreview({ url }: { url: string }) {
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    setLoaded(false);
+  }, [url]);
+
+  return (
+    <div className="relative h-[min(60vh,520px)] w-full overflow-hidden rounded-lg border bg-muted/20">
+      {!loaded ? (
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-muted/40">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <p className="text-xs text-muted-foreground">
+            Carregando pré-visualização…
+          </p>
+        </div>
+      ) : null}
+      <iframe
+        key={url}
+        src={officeViewerUrl(url)}
+        title="Visualização do documento"
+        className="h-full w-full bg-white"
+        onLoad={() => setLoaded(true)}
+      />
+    </div>
+  );
 }
 
 function ArquivoPreview({
@@ -132,6 +224,14 @@ function ArquivoPreview({
         <audio controls src={url} className="w-full max-w-md" preload="metadata" />
       </div>
     );
+  }
+
+  if (mode === "office") {
+    return <OfficePreview url={url} />;
+  }
+
+  if (mode === "text") {
+    return <TextPreview url={url} />;
   }
 
   const Icon = kindIcon(kind);
@@ -233,7 +333,9 @@ export function ArquivoVisualizarDialog({
           <ScrollArea className="min-h-0 flex-1">
             <div className="space-y-3 p-4">
               {isBundle ? (
-                <p className="text-xs font-medium text-muted-foreground">{selectedLabel}</p>
+                <p className="text-xs font-medium text-muted-foreground">
+                  {selectedLabel}
+                </p>
               ) : null}
               {selected ? (
                 <ArquivoPreview
