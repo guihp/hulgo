@@ -1,12 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { differenceInDays } from "date-fns";
 import { Eye, EyeOff, Pencil, Plus, Search, Users } from "lucide-react";
 import { upsertProcesso } from "@/lib/actions/casos";
 import type { AppUser } from "@/lib/actions/auth";
+import {
+  listParceiros,
+  type Parceiro,
+} from "@/lib/actions/parceiros";
 import type { Tables } from "@/types/database";
 import { CpfDisplay } from "@/components/shared/cpf-display";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -15,6 +20,13 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { FichaArquivos } from "@/components/clientes/ficha-arquivos";
 import { fichaPessoaHref } from "@/lib/utils/ficha";
 import type { MidiaChat } from "@/lib/data/arquivos";
@@ -104,6 +116,8 @@ function ClienteKpiCard({
 
 type Processo = Tables<"processos_clientes">;
 
+const PARCEIRO_NENHUM = "__none__";
+
 type ProcessoFormState = {
   nome: string;
   cpf: string;
@@ -113,6 +127,7 @@ type ProcessoFormState = {
   area: string;
   data_nascimento: string;
   descricao_caso: string;
+  parceiro_id: string;
   id?: number;
   ativo?: boolean;
 };
@@ -126,6 +141,7 @@ const EMPTY_FORM: ProcessoFormState = {
   area: "",
   data_nascimento: "",
   descricao_caso: "",
+  parceiro_id: "",
 };
 
 function processoToForm(processo: Processo): ProcessoFormState {
@@ -139,6 +155,7 @@ function processoToForm(processo: Processo): ProcessoFormState {
     area: processo.area ?? "",
     data_nascimento: isoToBrazilianDate(processo.data_nascimento),
     descricao_caso: processo.descricao_caso ?? "",
+    parceiro_id: processo.parceiro_id ?? "",
     ativo: processo.ativo ?? true,
   };
 }
@@ -147,10 +164,14 @@ function ProcessoFormFields({
   form,
   setForm,
   idPrefix = "",
+  parceiros,
+  parceirosLoading,
 }: {
   form: ProcessoFormState;
   setForm: React.Dispatch<React.SetStateAction<ProcessoFormState>>;
   idPrefix?: string;
+  parceiros: Parceiro[];
+  parceirosLoading: boolean;
 }) {
   const cpfLabel = cpfCnpjDocumentLabel(form.cpf);
   const fieldId = (name: string) => (idPrefix ? `${idPrefix}-${name}` : name);
@@ -254,6 +275,46 @@ function ProcessoFormFields({
           }
         />
       </div>
+      <div className="space-y-1">
+        <Label htmlFor={fieldId("parceiro")}>Parceiro</Label>
+        {parceirosLoading ? (
+          <p className="text-sm text-muted-foreground">Carregando parceiros…</p>
+        ) : parceiros.length === 0 ? (
+          <p className="rounded-lg border border-dashed border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+            Nenhum parceiro cadastrado. Cadastre em{" "}
+            <Link
+              href="/configuracoes?tab=parceiros"
+              className="font-medium text-foreground underline underline-offset-2"
+            >
+              Configurações → Parceiros
+            </Link>
+            .
+          </p>
+        ) : (
+          <Select
+            value={form.parceiro_id || PARCEIRO_NENHUM}
+            onValueChange={(v) =>
+              setForm((f) => ({
+                ...f,
+                parceiro_id: !v || v === PARCEIRO_NENHUM ? "" : v,
+              }))
+            }
+          >
+            <SelectTrigger id={fieldId("parceiro")} className="w-full">
+              <SelectValue placeholder="Sem parceiro" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={PARCEIRO_NENHUM}>Sem parceiro</SelectItem>
+              {parceiros.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.nome}
+                  {p.cidade ? ` · ${p.cidade}` : ""}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+      </div>
     </div>
   );
 }
@@ -275,6 +336,8 @@ function ProcessoDialog({
 }) {
   const router = useRouter();
   const [form, setForm] = useState<ProcessoFormState>(EMPTY_FORM);
+  const [parceiros, setParceiros] = useState<Parceiro[]>([]);
+  const [parceirosLoading, setParceirosLoading] = useState(false);
   const cpfLabel = cpfCnpjDocumentLabel(form.cpf);
 
   useEffect(() => {
@@ -284,6 +347,25 @@ function ProcessoDialog({
       );
     }
   }, [open, processo, prefill]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setParceirosLoading(true);
+    listParceiros()
+      .then((list) => {
+        if (!cancelled) setParceiros(list);
+      })
+      .catch(() => {
+        if (!cancelled) setParceiros([]);
+      })
+      .finally(() => {
+        if (!cancelled) setParceirosLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   async function handleSave() {
     const nome = maskNomeInput(form.nome).trim();
@@ -322,6 +404,7 @@ function ProcessoDialog({
         area: form.area || null,
         data_nascimento: dataIso,
         descricao_caso: form.descricao_caso || null,
+        parceiro_id: form.parceiro_id || null,
         ativo: form.ativo ?? true,
       });
       toast.success(form.id ? "Processo atualizado" : "Processo salvo");
@@ -339,7 +422,13 @@ function ProcessoDialog({
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
-        <ProcessoFormFields form={form} setForm={setForm} idPrefix={form.id ? `edit-${form.id}` : "new"} />
+        <ProcessoFormFields
+          form={form}
+          setForm={setForm}
+          idPrefix={form.id ? `edit-${form.id}` : "new"}
+          parceiros={parceiros}
+          parceirosLoading={parceirosLoading}
+        />
         <DialogFooter>
           <Button onClick={handleSave}>Salvar</Button>
         </DialogFooter>
@@ -813,9 +902,30 @@ export function Cliente360({
   onAbrirCaso?: (casoId: number) => void;
 }) {
   const [editingProcesso, setEditingProcesso] = useState<Processo | null>(null);
+  const [parceiros, setParceiros] = useState<Parceiro[]>([]);
   const contactNorm =
     contactNormProp ||
     phoneToContactNorm(processos[0]?.telefone ?? casos[0]?.telefone);
+
+  useEffect(() => {
+    let cancelled = false;
+    listParceiros()
+      .then((list) => {
+        if (!cancelled) setParceiros(list);
+      })
+      .catch(() => {
+        if (!cancelled) setParceiros([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const parceiroNomeById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of parceiros) map.set(p.id, p.nome);
+    return map;
+  }, [parceiros]);
 
   return (
     <div className="space-y-6">
@@ -843,7 +953,11 @@ export function Cliente360({
           <p className="text-sm text-muted-foreground">Nenhum processo</p>
         ) : (
           <div className="space-y-2">
-            {processos.map((p) => (
+            {processos.map((p) => {
+              const parceiroNome = p.parceiro_id
+                ? parceiroNomeById.get(p.parceiro_id)
+                : undefined;
+              return (
               <Card key={p.id}>
                 <CardContent className="flex items-start justify-between gap-3 p-4 text-sm">
                   <div className="min-w-0">
@@ -851,6 +965,11 @@ export function Cliente360({
                     <p className="text-muted-foreground">
                       {p.tribunal} · {p.area} · {formatDate(p.created_at)}
                     </p>
+                    {parceiroNome ? (
+                      <p className="mt-1 text-muted-foreground">
+                        Parceiro: {parceiroNome}
+                      </p>
+                    ) : null}
                     {p.telefone ? (
                       <p className="mt-1 text-muted-foreground">
                         {maskPhoneBrInput(p.telefone)}
@@ -867,7 +986,8 @@ export function Cliente360({
                   </Button>
                 </CardContent>
               </Card>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>

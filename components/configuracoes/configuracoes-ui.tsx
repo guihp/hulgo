@@ -54,28 +54,43 @@ const TABS = [
 
 type TabValue = (typeof TABS)[number]["value"];
 
+function parseTab(value: string | null | undefined): TabValue | null {
+  const v = (value ?? "").toLowerCase().trim();
+  return (TABS as readonly { value: string }[]).some((t) => t.value === v)
+    ? (v as TabValue)
+    : null;
+}
+
 export function ConfiguracoesUi({
   config,
   tipos,
   equipe,
   agente,
   parceiros,
+  initialTab,
 }: {
   config: AppConfigMap;
   tipos: TipoCasoMatch[];
   equipe: EquipeMember[];
   agente: AgenteConfig | null;
   parceiros: Parceiro[];
+  initialTab?: string | null;
 }) {
-  const [tab, setTab] = useState<TabValue>("whatsapp");
+  const start = parseTab(initialTab) ?? "whatsapp";
+  const [tab, setTab] = useState<TabValue>(start);
   const [mounted, setMounted] = useState<Partial<Record<TabValue, boolean>>>({
-    whatsapp: true,
+    [start]: true,
   });
   const active = TABS.find((t) => t.value === tab) ?? TABS[0];
 
   function goTab(next: TabValue) {
     setMounted((prev) => (prev[next] ? prev : { ...prev, [next]: true }));
     setTab(next);
+    const params = new URLSearchParams(window.location.search);
+    if (next === "whatsapp") params.delete("tab");
+    else params.set("tab", next);
+    const qs = params.toString();
+    window.history.replaceState(null, "", qs ? `?${qs}` : "/configuracoes");
   }
 
   return (

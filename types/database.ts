@@ -841,6 +841,7 @@ export type Database = {
           monitorar_dias: number | null;
           nome: string;
           numero_processo: string;
+          parceiro_id: string | null;
           telefone: string | null;
           tribunal: string | null;
           ultima_consulta_datajud: string | null;
@@ -857,6 +858,7 @@ export type Database = {
           monitorar_dias?: number | null;
           nome: string;
           numero_processo: string;
+          parceiro_id?: string | null;
           telefone?: string | null;
           tribunal?: string | null;
           ultima_consulta_datajud?: string | null;
@@ -873,12 +875,21 @@ export type Database = {
           monitorar_dias?: number | null;
           nome?: string;
           numero_processo?: string;
+          parceiro_id?: string | null;
           telefone?: string | null;
           tribunal?: string | null;
           ultima_consulta_datajud?: string | null;
           ultimo_movimento?: string | null;
         };
-        Relationships: [];
+        Relationships: [
+          {
+            foreignKeyName: "processos_clientes_parceiro_id_fkey";
+            columns: ["parceiro_id"];
+            isOneToOne: false;
+            referencedRelation: "app_parceiros";
+            referencedColumns: ["id"];
+          },
+        ];
       };
     };
     Views: Record<string, never>;

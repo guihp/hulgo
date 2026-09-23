@@ -28,8 +28,11 @@ function revalidateParceiros() {
   revalidatePath("/configuracoes");
 }
 
+/** Lista parceiros para selects (qualquer usuário autenticado). */
 export async function listParceiros(): Promise<Parceiro[]> {
-  await requireAdvogado();
+  const user = await getAppUser();
+  if (!user) throw new Error("Não autenticado");
+
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("app_parceiros")

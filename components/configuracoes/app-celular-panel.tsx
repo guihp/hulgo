@@ -10,32 +10,20 @@ const cardShell =
   "rounded-2xl border border-[#e2e8f0] bg-white shadow-none";
 
 export function AppCelularPanel() {
-  const {
-    canNativeInstall,
-    shouldOfferInstall,
-    isInstalled,
-    busy,
-    install,
-    isIos,
-  } = usePwaInstall();
+  const { canNativeInstall, isInstalled, busy, install, isIos } =
+    usePwaInstall();
 
   async function onInstall() {
-    if (canNativeInstall) {
-      const outcome = await install();
-      if (outcome === "accepted") {
-        toast.success("App instalado — abra pela tela inicial");
-        return;
-      }
-      if (outcome === "dismissed") {
-        toast.message("Instalação cancelada");
-        return;
-      }
+    const outcome = await install();
+    if (outcome === "accepted") {
+      toast.success("App instalado — abra pela tela inicial");
+    } else if (outcome === "dismissed") {
+      toast.message("Instalação cancelada");
+    } else {
+      toast.error(
+        "Aguarde o Chrome liberar a instalação (ou use o menu ⋮ → Instalar app)."
+      );
     }
-    toast.message("No Chrome: menu ⋮ → Instalar app (ou Adicionar à tela inicial)", {
-      description:
-        "Abra pelo Chrome do Android — navegadores embutidos (WhatsApp etc.) não permitem instalar.",
-      duration: 9000,
-    });
   }
 
   return (
@@ -64,12 +52,10 @@ export function AppCelularPanel() {
               ativar as notificações.
             </p>
           </div>
-        ) : !isIos ? (
+        ) : canNativeInstall ? (
           <div className="mt-5 rounded-xl border border-[#0b2148]/15 bg-[#F8FAFC] p-4">
             <p className="text-sm text-[#475569]">
-              {canNativeInstall
-                ? "O Chrome liberou a instalação — toque abaixo para confirmar."
-                : "Toque abaixo. Se o diálogo nativo não abrir, use o menu ⋮ do Chrome → Instalar app."}
+              O Chrome liberou a instalação — toque abaixo para confirmar.
             </p>
             <Button
               type="button"
@@ -80,14 +66,14 @@ export function AppCelularPanel() {
               <Download className="size-4" />
               {busy ? "Abrindo instalação…" : "Instalar app agora"}
             </Button>
-            {!shouldOfferInstall && !canNativeInstall ? (
-              <p className="mt-2 text-xs text-[#64748b]">
-                Dica: abra este site no app Chrome do Android (não pelo
-                WhatsApp).
-              </p>
-            ) : null}
           </div>
-        ) : null}
+        ) : (
+          <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-950">
+            {isIos
+              ? "No iPhone use Safari → Compartilhar → Adicionar à Tela de Início (não há botão automático)."
+              : "Quando o site estiver instalável, o botão aparece aqui e na faixa inferior. Abra no Chrome (não no WhatsApp) e aguarde alguns segundos após o login."}
+          </div>
+        )}
 
         <div className="mt-5 space-y-5">
           <div>
@@ -95,13 +81,13 @@ export function AppCelularPanel() {
               Android (Chrome)
             </h3>
             <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-sm text-[#475569]">
-              <li>Abra o painel no app Chrome (não no navegador do WhatsApp).</li>
+              <li>Abra o painel no app Chrome.</li>
               <li>
-                Toque em{" "}
+                Quando aparecer, toque em{" "}
                 <span className="font-medium text-[#0b2148]">
-                  Instalar app agora
+                  Instalar na tela inicial
                 </span>{" "}
-                acima, ou no menu{" "}
+                (faixa inferior) ou use o menu{" "}
                 <span className="font-medium text-[#0b2148]">⋮</span> → Instalar
                 app.
               </li>
@@ -113,11 +99,10 @@ export function AppCelularPanel() {
               iPhone / iPad (Safari)
             </h3>
             <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-sm text-[#475569]">
-              <li>Abra o painel no Safari (não use Chrome no iOS).</li>
+              <li>Abra o painel no Safari.</li>
               <li>
                 Toque em{" "}
-                <span className="font-medium text-[#0b2148]">Compartilhar</span>{" "}
-                (ícone da seta para cima).
+                <span className="font-medium text-[#0b2148]">Compartilhar</span>.
               </li>
               <li>
                 Escolha{" "}
@@ -127,11 +112,6 @@ export function AppCelularPanel() {
                 .
               </li>
             </ol>
-            <p className="mt-2 text-sm text-[#64748b]">
-              No iPhone o Safari não permite instalação por botão automático —
-              só pelo compartilhar. No iOS 16.4+, isso também é necessário para
-              o push.
-            </p>
           </div>
         </div>
 
@@ -140,7 +120,7 @@ export function AppCelularPanel() {
           <span className="font-medium text-[#0b2148]">
             Ativar notificações do app
           </span>
-          . Assim você recebe avisos mesmo com o painel fechado.
+          .
         </p>
       </section>
     </div>

@@ -26,13 +26,20 @@ export async function updateSession(request: NextRequest) {
     request.nextUrl.pathname.startsWith("/api/push/webhook") ||
     request.nextUrl.pathname === "/api/health";
 
+  const pathname = request.nextUrl.pathname;
+  const isPwaPublicAsset =
+    pathname === "/sw.js" ||
+    pathname.startsWith("/swe-worker") ||
+    pathname === "/manifest.webmanifest" ||
+    pathname.endsWith(".webmanifest");
+
   if (
     authCookieNames.length > 0 &&
     shouldClearSupabaseAuthCookies(incomingCookies)
   ) {
     stripSupabaseAuthCookiesFromRequest(request, authCookieNames);
 
-    if (isAuthRoute) {
+    if (isAuthRoute || isPwaPublicAsset) {
       const response = NextResponse.next({ request });
       applyClearSupabaseAuthCookies(response, authCookieNames);
       return response;
@@ -82,7 +89,7 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user && !isAuthRoute && !isPublicApi) {
+  if (!user && !isAuthRoute && !isPublicApi && !isPwaPublicAsset) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);

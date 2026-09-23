@@ -291,6 +291,7 @@ export function AppShell({ user, children }: { user: AppUser; children: React.Re
                   <div className="lg:hidden">
                     <GlobalSearch />
                   </div>
+                  <PwaInstallBanner />
                   <div className="flex items-center gap-1.5">
                     <NotificationsBell />
                     <span className="hidden text-sm font-medium text-[#0b2148] sm:inline">
@@ -314,7 +315,6 @@ export function AppShell({ user, children }: { user: AppUser; children: React.Re
         </div>
       </div>
       <AssistenteDrawer />
-      <PwaInstallBanner />
     </NotificationsProvider>
   );
 }

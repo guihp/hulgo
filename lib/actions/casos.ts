@@ -322,6 +322,7 @@ export async function upsertProcesso(
     tribunal?: string | null;
     area?: string | null;
     descricao_caso?: string | null;
+    parceiro_id?: string | null;
     ativo?: boolean;
   }
 ) {
@@ -337,6 +338,7 @@ export async function upsertProcesso(
     numero_processo: normalizeNumeroProcesso(data.numero_processo),
     telefone: data.telefone ? normalizePhoneBrStorage(data.telefone) : data.telefone,
     data_nascimento: dataNascimento,
+    parceiro_id: data.parceiro_id || null,
   };
 
   if (data.id) {

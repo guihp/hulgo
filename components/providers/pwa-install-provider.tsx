@@ -10,21 +10,15 @@ import {
   type ReactNode,
 } from "react";
 import {
-  isAndroidDevice,
   isIosDevice,
   isStandaloneDisplay,
-  supportsNativeInstallPrompt,
   type BeforeInstallPromptEvent,
 } from "@/lib/client/pwa-install";
 
 type PwaInstallContextValue = {
-  /** Já rodando como PWA instalado. */
   isInstalled: boolean;
-  /** Chrome disparou beforeinstallprompt — install() abre o diálogo nativo. */
+  /** Chrome/Edge liberou instalação nativa (beforeinstallprompt). */
   canNativeInstall: boolean;
-  /** Mostrar CTA no front (Android / desktop Chromium, ainda não instalado). */
-  shouldOfferInstall: boolean;
-  /** iPhone/iPad — só fluxo manual Safari. */
   isIos: boolean;
   busy: boolean;
   install: () => Promise<"accepted" | "dismissed" | "unavailable">;
@@ -33,24 +27,16 @@ type PwaInstallContextValue = {
 const PwaInstallContext = createContext<PwaInstallContextValue | null>(null);
 
 export function PwaInstallProvider({ children }: { children: ReactNode }) {
-  const [isInstalled, setIsInstalled] = useState(false);
+  const [isInstalled, setIsInstalled] = useState(true);
   const [isIos, setIsIos] = useState(false);
-  const [offer, setOffer] = useState(false);
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(
     null
   );
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    const installed = isStandaloneDisplay();
-    setIsInstalled(installed);
+    setIsInstalled(isStandaloneDisplay());
     setIsIos(isIosDevice());
-    // Oferecer CTA no Android (e Chromium desktop) quando ainda não é PWA.
-    setOffer(
-      !installed &&
-        (isAndroidDevice() || supportsNativeInstallPrompt()) &&
-        !isIosDevice()
-    );
 
     const onBip = (e: Event) => {
       e.preventDefault();
@@ -59,18 +45,13 @@ export function PwaInstallProvider({ children }: { children: ReactNode }) {
     const onInstalled = () => {
       setDeferred(null);
       setIsInstalled(true);
-      setOffer(false);
     };
 
     window.addEventListener("beforeinstallprompt", onBip);
     window.addEventListener("appinstalled", onInstalled);
 
     const mq = window.matchMedia("(display-mode: standalone)");
-    const onMode = () => {
-      const now = isStandaloneDisplay();
-      setIsInstalled(now);
-      if (now) setOffer(false);
-    };
+    const onMode = () => setIsInstalled(isStandaloneDisplay());
     mq.addEventListener?.("change", onMode);
 
     return () => {
@@ -87,10 +68,7 @@ export function PwaInstallProvider({ children }: { children: ReactNode }) {
       await deferred.prompt();
       const { outcome } = await deferred.userChoice;
       setDeferred(null);
-      if (outcome === "accepted") {
-        setIsInstalled(true);
-        setOffer(false);
-      }
+      if (outcome === "accepted") setIsInstalled(true);
       return outcome;
     } catch {
       return "unavailable" as const;
@@ -103,12 +81,11 @@ export function PwaInstallProvider({ children }: { children: ReactNode }) {
     () => ({
       isInstalled,
       canNativeInstall: Boolean(deferred) && !isInstalled,
-      shouldOfferInstall: offer && !isInstalled,
       isIos,
       busy,
       install,
     }),
-    [isInstalled, deferred, offer, isIos, busy, install]
+    [isInstalled, deferred, isIos, busy, install]
   );
 
   return (
@@ -124,7 +101,6 @@ export function usePwaInstall(): PwaInstallContextValue {
     return {
       isInstalled: false,
       canNativeInstall: false,
-      shouldOfferInstall: false,
       isIos: false,
       busy: false,
       install: async () => "unavailable",

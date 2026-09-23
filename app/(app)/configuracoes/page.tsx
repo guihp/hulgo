@@ -10,10 +10,16 @@ import {
 import { listParceiros, type Parceiro } from "@/lib/actions/parceiros";
 import { ConfiguracoesUi } from "@/components/configuracoes/configuracoes-ui";
 
-export default async function ConfiguracoesPage() {
+export default async function ConfiguracoesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>;
+}) {
   const user = await getAppUser();
   if (!user) redirect("/login");
   if (user.papel !== "advogado") redirect("/");
+
+  const { tab } = await searchParams;
 
   let config = {
     whatsapp_instancia: process.env.EVOGO_INSTANCE_NAME ?? "",
@@ -49,6 +55,7 @@ export default async function ConfiguracoesPage() {
       equipe={equipe}
       agente={agente}
       parceiros={parceiros}
+      initialTab={tab}
     />
   );
 }
