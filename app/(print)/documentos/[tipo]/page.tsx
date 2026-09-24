@@ -51,7 +51,9 @@ export default async function DocumentoPage({
     const cpf = normalizeCpf(cpfParam);
     const { data: processo } = await supabase
       .from("processos_clientes")
-      .select("nome, cpf, data_nascimento, telefone, descricao_caso")
+      .select(
+        "nome, cpf, data_nascimento, telefone, beneficio_identificado, descricao_caso"
+      )
       .eq("cpf", cpf)
       .limit(1)
       .single();
@@ -60,7 +62,10 @@ export default async function DocumentoPage({
     clienteCpf = processo.cpf;
     clienteNascimento = processo.data_nascimento;
     clienteTelefone = processo.telefone ?? "";
-    beneficio = processo.descricao_caso ?? beneficio;
+    beneficio =
+      processo.beneficio_identificado ??
+      processo.descricao_caso ??
+      beneficio;
     voltarHref = `/clientes/${cpf}`;
   } else {
     notFound();

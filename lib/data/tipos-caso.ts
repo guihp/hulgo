@@ -48,6 +48,11 @@ export async function listTiposCaso(opts?: {
   includeInactive?: boolean;
   /** service role — rotas de integração / cron */
   service?: boolean;
+  /**
+   * Quando false e a tabela estiver vazia, devolve [] (útil para selects
+   * que pedem cadastro em Configurações). Default: true.
+   */
+  allowFallback?: boolean;
 }): Promise<TipoCasoMatch[]> {
   const supabase = opts?.service
     ? createServiceClient()
@@ -67,6 +72,7 @@ export async function listTiposCaso(opts?: {
   if (error) throw new Error(error.message);
 
   if (!data || data.length === 0) {
+    if (opts?.allowFallback === false) return [];
     return fallbackTipos().filter((t) => opts?.includeInactive || t.ativo);
   }
 

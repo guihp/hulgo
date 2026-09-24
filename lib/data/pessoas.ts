@@ -7,6 +7,12 @@ import type { Tables } from "@/types/database";
 type Processo = Tables<"processos_clientes">;
 type Caso = Tables<"casos_novos">;
 
+export type PessoaParceiroRef = {
+  id: string;
+  nome: string;
+  cidade: string;
+};
+
 export type PessoaListaItem = {
   key: string;
   href: string;
@@ -15,7 +21,14 @@ export type PessoaListaItem = {
   telefone: string | null;
   nProcessos: number;
   nCasos: number;
+  /** Benefício principal (caso tem prioridade sobre processo). */
   beneficio: string | null;
+  /** Todos os benefícios distintos (caso + processos). */
+  beneficios: string[];
+  /** Cidades dos parceiros vinculados aos processos. */
+  cidades: string[];
+  /** IDs de app_parceiros vinculados aos processos. */
+  parceiroIds: string[];
   statusCaso: string | null;
 };
 
@@ -23,10 +36,19 @@ function statusLabel(status: string | null | undefined) {
   return CASO_STATUS.find((s) => s.value === status)?.label ?? status ?? null;
 }
 
+function pushUnique(list: string[], value: string | null | undefined) {
+  const v = value?.trim();
+  if (!v) return;
+  if (!list.includes(v)) list.push(v);
+}
+
 export function agruparPessoas(
   processos: Processo[],
-  casos: Caso[]
+  casos: Caso[],
+  parceiros: PessoaParceiroRef[] = []
 ): PessoaListaItem[] {
+  const parceirosById = new Map(parceiros.map((p) => [p.id, p]));
+
   const phoneToCpf = new Map<string, string>();
   for (const p of processos) {
     const cpf = normalizeCpf(p.cpf);
@@ -41,16 +63,27 @@ export function agruparPessoas(
 
   const byKey = new Map<string, PessoaListaItem>();
 
-  function upsert(partial: Omit<PessoaListaItem, "nProcessos" | "nCasos"> & {
-    nProcessos?: number;
-    nCasos?: number;
-  }) {
+  function upsert(
+    partial: Omit<
+      PessoaListaItem,
+      "nProcessos" | "nCasos" | "beneficios" | "cidades" | "parceiroIds"
+    > & {
+      nProcessos?: number;
+      nCasos?: number;
+      beneficios?: string[];
+      cidades?: string[];
+      parceiroIds?: string[];
+    }
+  ) {
     const existing = byKey.get(partial.key);
     if (!existing) {
       byKey.set(partial.key, {
         ...partial,
         nProcessos: partial.nProcessos ?? 0,
         nCasos: partial.nCasos ?? 0,
+        beneficios: [...(partial.beneficios ?? [])],
+        cidades: [...(partial.cidades ?? [])],
+        parceiroIds: [...(partial.parceiroIds ?? [])],
       });
       return;
     }
@@ -66,6 +99,11 @@ export function agruparPessoas(
     if (!existing.beneficio && partial.beneficio) {
       existing.beneficio = partial.beneficio;
     }
+    for (const b of partial.beneficios ?? []) pushUnique(existing.beneficios, b);
+    for (const c of partial.cidades ?? []) pushUnique(existing.cidades, c);
+    for (const id of partial.parceiroIds ?? []) {
+      pushUnique(existing.parceiroIds, id);
+    }
     if (!existing.statusCaso && partial.statusCaso) {
       existing.statusCaso = partial.statusCaso;
     }
@@ -74,25 +112,15 @@ export function agruparPessoas(
     }
   }
 
-  for (const p of processos) {
-    const cpf = normalizeCpf(p.cpf);
-    const phone = phoneToContactNorm(p.telefone);
-    upsert({
-      key: `cpf:${cpf}`,
-      href: fichaPessoaHref({ cpf, contactNorm: phone }),
-      nome: p.nome?.trim() || "Sem nome",
-      cpf,
-      telefone: p.telefone,
-      nProcessos: 1,
-      beneficio: null,
-      statusCaso: null,
-    });
-  }
-
+  // Casos primeiro: benefício do caso tem prioridade; processo preenche se ainda vazio.
   for (const c of casos) {
     const phone = phoneToContactNorm(c.telefone);
-    const cpf = (c.cpf ? normalizeCpf(c.cpf) : "") || (phone ? phoneToCpf.get(phone) : "") || "";
+    const cpf =
+      (c.cpf ? normalizeCpf(c.cpf) : "") ||
+      (phone ? phoneToCpf.get(phone) : "") ||
+      "";
     const key = cpf ? `cpf:${cpf}` : phone ? `tel:${phone}` : `caso:${c.id}`;
+    const beneficio = c.beneficio_identificado?.trim() || null;
     upsert({
       key,
       href: fichaPessoaHref({
@@ -103,8 +131,34 @@ export function agruparPessoas(
       cpf: cpf || null,
       telefone: c.telefone,
       nCasos: 1,
-      beneficio: c.beneficio_identificado,
+      beneficio,
+      beneficios: beneficio ? [beneficio] : [],
+      cidades: [],
+      parceiroIds: [],
       statusCaso: statusLabel(c.status),
+    });
+  }
+
+  for (const p of processos) {
+    const cpf = normalizeCpf(p.cpf);
+    const phone = phoneToContactNorm(p.telefone);
+    const beneficio = p.beneficio_identificado?.trim() || null;
+    const parceiro = p.parceiro_id
+      ? parceirosById.get(p.parceiro_id)
+      : undefined;
+    const cidade = parceiro?.cidade?.trim() || null;
+    upsert({
+      key: `cpf:${cpf}`,
+      href: fichaPessoaHref({ cpf, contactNorm: phone }),
+      nome: p.nome?.trim() || "Sem nome",
+      cpf,
+      telefone: p.telefone,
+      nProcessos: 1,
+      beneficio,
+      beneficios: beneficio ? [beneficio] : [],
+      cidades: cidade ? [cidade] : [],
+      parceiroIds: p.parceiro_id ? [p.parceiro_id] : [],
+      statusCaso: null,
     });
   }
 

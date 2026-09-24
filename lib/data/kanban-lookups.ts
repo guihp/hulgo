@@ -11,18 +11,30 @@ const LEGACY_STATUS_MAP: Record<string, CasoStatus> = {
   arquivado: "processo_finalizado",
 };
 
+/**
+ * Normaliza status para chave de coluna.
+ * Legado → mapeia; sistema/custom → mantém; vazio → em_atendimento.
+ * Não força status desconhecido para "em_atendimento" (quebraria colunas personalizadas).
+ */
 export function normalizeCasoStatus(
   status: string | null | undefined
-): CasoStatus {
-  if (status && CASO_STATUS.some((s) => s.value === status)) {
-    return status as CasoStatus;
-  }
-  return LEGACY_STATUS_MAP[status ?? ""] ?? "em_atendimento";
+): string {
+  if (!status?.trim()) return "em_atendimento";
+  const trimmed = status.trim();
+  if (LEGACY_STATUS_MAP[trimmed]) return LEGACY_STATUS_MAP[trimmed];
+  return trimmed;
 }
 
-function casoStatusRank(status: string | null | undefined): number {
+function casoStatusRank(
+  status: string | null | undefined,
+  ordemPorChave?: Record<string, number>
+): number {
   const normalized = normalizeCasoStatus(status);
-  return CASO_STATUS.findIndex((s) => s.value === normalized);
+  if (ordemPorChave && ordemPorChave[normalized] != null) {
+    return ordemPorChave[normalized];
+  }
+  const idx = CASO_STATUS.findIndex((s) => s.value === normalized);
+  return idx >= 0 ? (idx + 1) * 10 : 0;
 }
 
 /** Chave de agrupamento por cliente: telefone > CPF > id do caso. */
@@ -41,7 +53,8 @@ export function casoClientKey(caso: CasoLookup): string {
  * guarda todos os ids do grupo para mover o cliente inteiro de coluna.
  */
 export function dedupeCasosPorCliente<T extends CasoLookup & { status: string | null }>(
-  casos: T[]
+  casos: T[],
+  ordemPorChave?: Record<string, number>
 ): { casos: T[]; idsPorCliente: Record<string, number[]> } {
   const cardPorCliente = new Map<string, T>();
   const idsPorCliente: Record<string, number[]> = {};
@@ -50,7 +63,11 @@ export function dedupeCasosPorCliente<T extends CasoLookup & { status: string | 
     const key = casoClientKey(caso);
     (idsPorCliente[key] ??= []).push(caso.id);
     const atual = cardPorCliente.get(key);
-    if (!atual || casoStatusRank(caso.status) > casoStatusRank(atual.status)) {
+    if (
+      !atual ||
+      casoStatusRank(caso.status, ordemPorChave) >
+        casoStatusRank(atual.status, ordemPorChave)
+    ) {
       cardPorCliente.set(key, caso);
     }
   }

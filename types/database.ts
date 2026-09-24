@@ -616,6 +616,39 @@ export type Database = {
         };
         Relationships: [];
       };
+      app_kanban_colunas: {
+        Row: {
+          id: string;
+          chave: string;
+          label: string;
+          ordem: number;
+          ativo: boolean;
+          is_system: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          chave: string;
+          label: string;
+          ordem?: number;
+          ativo?: boolean;
+          is_system?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          chave?: string;
+          label?: string;
+          ordem?: number;
+          ativo?: boolean;
+          is_system?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       casos_novos: {
         Row: {
           area: string | null;
@@ -833,6 +866,7 @@ export type Database = {
         Row: {
           area: string | null;
           ativo: boolean | null;
+          beneficio_identificado: string | null;
           cpf: string;
           created_at: string | null;
           data_nascimento: string | null;
@@ -850,6 +884,7 @@ export type Database = {
         Insert: {
           area?: string | null;
           ativo?: boolean | null;
+          beneficio_identificado?: string | null;
           cpf: string;
           created_at?: string | null;
           data_nascimento?: string | null;
@@ -867,6 +902,7 @@ export type Database = {
         Update: {
           area?: string | null;
           ativo?: boolean | null;
+          beneficio_identificado?: string | null;
           cpf?: string;
           created_at?: string | null;
           data_nascimento?: string | null;
@@ -968,7 +1004,8 @@ export type Database = {
 export type Tables<T extends keyof Database["public"]["Tables"]> =
   Database["public"]["Tables"][T]["Row"];
 
-export type CasoStatus =
+/** Status de sistema (IA/n8n). Colunas personalizadas usam outras chaves em `casos_novos.status`. */
+export type SystemCasoStatus =
   | "em_atendimento"
   | "consultar_processo"
   | "abertura_processo"
@@ -976,6 +1013,9 @@ export type CasoStatus =
   | "aguardando_aprovacao"
   | "atendimento_humano"
   | "processo_finalizado";
+
+/** Qualquer chave de coluna do funil (sistema ou personalizada). */
+export type CasoStatus = SystemCasoStatus | (string & {});
 
 export type AprovacaoStatus =
   | "pendente"

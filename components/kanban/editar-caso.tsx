@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Pencil } from "lucide-react";
 import { updateCasoFields } from "@/lib/actions/casos";
 import type { Tables } from "@/types/database";
+import { BeneficioTipoSelect } from "@/components/casos/beneficio-tipo-select";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Dialog,
@@ -46,11 +47,8 @@ function strToBool(v: string): boolean | null {
   return null;
 }
 
-export function EditarCasoDialog({ caso }: { caso: Caso }) {
-  const router = useRouter();
-  const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [f, setF] = useState({
+function formFromCaso(caso: Caso) {
+  return {
     nome: caso.nome ?? "",
     cpf: caso.cpf ?? "",
     data_nascimento: caso.data_nascimento ?? "",
@@ -65,7 +63,22 @@ export function EditarCasoDialog({ caso }: { caso: Caso }) {
     requisitos_pendentes: caso.requisitos_pendentes ?? "",
     pontos_analise_juridica: caso.pontos_analise_juridica ?? "",
     beneficios_alternativos: caso.beneficios_alternativos ?? "",
-  });
+  };
+}
+
+export function EditarCasoDialog({
+  caso,
+  triggerSize = "default",
+  triggerLabel = "Editar dados",
+}: {
+  caso: Caso;
+  triggerSize?: "default" | "sm";
+  triggerLabel?: string;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [f, setF] = useState(() => formFromCaso(caso));
 
   const set =
     (k: keyof typeof f) =>
@@ -102,11 +115,20 @@ export function EditarCasoDialog({ caso }: { caso: Caso }) {
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (next) setF(formFromCaso(caso));
+      }}
+    >
       <DialogTrigger
-        className={cn(buttonVariants({ variant: "outline" }), "gap-2")}
+        className={cn(
+          buttonVariants({ variant: "outline", size: triggerSize }),
+          "gap-2"
+        )}
       >
-        <Pencil className="h-4 w-4" /> Editar dados
+        <Pencil className="h-4 w-4" /> {triggerLabel}
       </DialogTrigger>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
@@ -129,12 +151,13 @@ export function EditarCasoDialog({ caso }: { caso: Caso }) {
               onChange={set("data_nascimento")}
             />
           </div>
-          <div className="space-y-1">
-            <Label>Benefício</Label>
-            <Input
+          <div className="space-y-1 sm:col-span-2">
+            <Label>Benefício / tipo de caso</Label>
+            <BeneficioTipoSelect
               value={f.beneficio_identificado}
-              onChange={set("beneficio_identificado")}
-              placeholder="Ex.: Aposentadoria por Idade Rural"
+              onChange={(label) =>
+                setF((s) => ({ ...s, beneficio_identificado: label ?? "" }))
+              }
             />
           </div>
           <div className="space-y-1">

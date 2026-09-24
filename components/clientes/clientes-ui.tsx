@@ -6,13 +6,20 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { differenceInDays } from "date-fns";
 import { Eye, EyeOff, Pencil, Plus, Search, Users } from "lucide-react";
-import { upsertProcesso } from "@/lib/actions/casos";
+import { upsertProcesso, criarCasoNaFicha, updateCasoFields, updateCasoStatus } from "@/lib/actions/casos";
 import type { AppUser } from "@/lib/actions/auth";
 import {
   listParceiros,
   type Parceiro,
 } from "@/lib/actions/parceiros";
 import type { Tables } from "@/types/database";
+import { BeneficioTipoSelect } from "@/components/casos/beneficio-tipo-select";
+import { ColunaKanbanSelect } from "@/components/casos/coluna-kanban-select";
+import { EditarCasoDialog } from "@/components/kanban/editar-caso";
+import {
+  listarKanbanColunasAction,
+  type KanbanColunaMatch,
+} from "@/lib/actions/kanban-colunas";
 import { CpfDisplay } from "@/components/shared/cpf-display";
 import { EmptyState } from "@/components/shared/empty-state";
 import { LinkButton } from "@/components/ui/link-button";
@@ -39,6 +46,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { CASO_STATUS } from "@/lib/constants";
 import {
   cpfCnpjDocumentLabel,
   formatCpfCnpj,
@@ -74,6 +82,11 @@ const clientesListGrid =
   "grid grid-cols-1 gap-3 px-4 sm:grid-cols-[minmax(0,1fr)_14rem_10rem_7.5rem] sm:items-center sm:gap-4 sm:px-5";
 
 type ClienteFiltro = "todos" | "com_processo" | "so_atendimento" | "sem_cpf";
+
+const FILTER_ALL = "__all__";
+
+const filterSelectTriggerClass =
+  "h-9 min-w-[9.5rem] rounded-full border-[#e2e8f0] bg-white px-3 text-sm font-medium text-[#64748B] shadow-none hover:border-[#0b2148]/30 hover:text-[#0b2148] data-placeholder:text-[#64748B]";
 
 function initialsFromName(name: string | null | undefined): string {
   const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
@@ -126,6 +139,7 @@ type ProcessoFormState = {
   tribunal: string;
   area: string;
   data_nascimento: string;
+  beneficio_identificado: string;
   descricao_caso: string;
   parceiro_id: string;
   id?: number;
@@ -140,6 +154,7 @@ const EMPTY_FORM: ProcessoFormState = {
   tribunal: "",
   area: "",
   data_nascimento: "",
+  beneficio_identificado: "",
   descricao_caso: "",
   parceiro_id: "",
 };
@@ -154,6 +169,7 @@ function processoToForm(processo: Processo): ProcessoFormState {
     tribunal: processo.tribunal ?? "",
     area: processo.area ?? "",
     data_nascimento: isoToBrazilianDate(processo.data_nascimento),
+    beneficio_identificado: processo.beneficio_identificado ?? "",
     descricao_caso: processo.descricao_caso ?? "",
     parceiro_id: processo.parceiro_id ?? "",
     ativo: processo.ativo ?? true,
@@ -266,6 +282,16 @@ function ProcessoFormFields({
         />
       </div>
       <div className="space-y-1">
+        <Label htmlFor={fieldId("beneficio")}>Benefício</Label>
+        <BeneficioTipoSelect
+          id={fieldId("beneficio")}
+          value={form.beneficio_identificado || null}
+          onChange={(label) =>
+            setForm((f) => ({ ...f, beneficio_identificado: label ?? "" }))
+          }
+        />
+      </div>
+      <div className="space-y-1">
         <Label htmlFor={fieldId("descricao_caso")}>Descrição</Label>
         <Input
           id={fieldId("descricao_caso")}
@@ -301,7 +327,14 @@ function ProcessoFormFields({
             }
           >
             <SelectTrigger id={fieldId("parceiro")} className="w-full">
-              <SelectValue placeholder="Sem parceiro" />
+              <SelectValue placeholder="Sem parceiro">
+                {(v) => {
+                  if (!v || v === PARCEIRO_NENHUM) return "Sem parceiro";
+                  const p = parceiros.find((x) => x.id === v);
+                  if (!p) return "Parceiro";
+                  return p.cidade ? `${p.nome} · ${p.cidade}` : p.nome;
+                }}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={PARCEIRO_NENHUM}>Sem parceiro</SelectItem>
@@ -403,6 +436,7 @@ function ProcessoDialog({
         tribunal: form.tribunal || null,
         area: form.area || null,
         data_nascimento: dataIso,
+        beneficio_identificado: form.beneficio_identificado.trim() || null,
         descricao_caso: form.descricao_caso || null,
         parceiro_id: form.parceiro_id || null,
         ativo: form.ativo ?? true,
@@ -441,20 +475,30 @@ export function ClientesList({
   processos,
   casosAbertura = [],
   pessoas,
+  parceiros = [],
   abrirCaso = null,
 }: {
   processos: Processo[];
   casosAbertura?: Tables<"casos_novos">[];
   pessoas: PessoaListaItem[];
+  parceiros?: Parceiro[];
   abrirCaso?: Tables<"casos_novos"> | null;
   user?: AppUser;
 }) {
   const [search, setSearch] = useState("");
   const [filtro, setFiltro] = useState<ClienteFiltro>("todos");
+  const [filtroCidade, setFiltroCidade] = useState(FILTER_ALL);
+  const [filtroBeneficio, setFiltroBeneficio] = useState(FILTER_ALL);
+  const [filtroParceiro, setFiltroParceiro] = useState(FILTER_ALL);
   const [revealCpfs, setRevealCpfs] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [abrindoCaso, setAbrindoCaso] = useState<Tables<"casos_novos"> | null>(
     abrirCaso
+  );
+
+  const parceirosById = useMemo(
+    () => new Map(parceiros.map((p) => [p.id, p])),
+    [parceiros]
   );
 
   // Clientes do Kanban em etapas de abertura que ainda não têm processo
@@ -487,6 +531,50 @@ export function ClientesList({
     return { total, comProcesso, soAtendimento, semCpf };
   }, [pessoas]);
 
+  const cidadeOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const p of pessoas) {
+      for (const c of p.cidades) {
+        counts.set(c, (counts.get(c) ?? 0) + 1);
+      }
+    }
+    return [...counts.entries()]
+      .sort(([a], [b]) => a.localeCompare(b, "pt-BR"))
+      .map(([value, count]) => ({ value, count }));
+  }, [pessoas]);
+
+  const beneficioOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const p of pessoas) {
+      for (const b of p.beneficios) {
+        counts.set(b, (counts.get(b) ?? 0) + 1);
+      }
+    }
+    return [...counts.entries()]
+      .sort(([a], [b]) => a.localeCompare(b, "pt-BR"))
+      .map(([value, count]) => ({ value, count }));
+  }, [pessoas]);
+
+  const parceiroOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const p of pessoas) {
+      for (const id of p.parceiroIds) {
+        counts.set(id, (counts.get(id) ?? 0) + 1);
+      }
+    }
+    return [...counts.entries()]
+      .map(([id, count]) => {
+        const ref = parceirosById.get(id);
+        const label = ref
+          ? ref.cidade
+            ? `${ref.nome} · ${ref.cidade}`
+            : ref.nome
+          : "Parceiro removido";
+        return { value: id, label, count };
+      })
+      .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
+  }, [pessoas, parceirosById]);
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
     const qDigits = q.replace(/\D/g, "");
@@ -495,6 +583,21 @@ export function ClientesList({
       if (filtro === "so_atendimento" && !(p.nProcessos === 0 && p.nCasos > 0))
         return false;
       if (filtro === "sem_cpf" && p.cpf) return false;
+      if (filtroCidade !== FILTER_ALL && !p.cidades.includes(filtroCidade)) {
+        return false;
+      }
+      if (
+        filtroBeneficio !== FILTER_ALL &&
+        !p.beneficios.includes(filtroBeneficio)
+      ) {
+        return false;
+      }
+      if (
+        filtroParceiro !== FILTER_ALL &&
+        !p.parceiroIds.includes(filtroParceiro)
+      ) {
+        return false;
+      }
       if (!q) return true;
       return (
         p.nome.toLowerCase().includes(q) ||
@@ -502,10 +605,18 @@ export function ClientesList({
         (p.telefone != null &&
           qDigits.length > 0 &&
           p.telefone.replace(/\D/g, "").includes(qDigits)) ||
-        (p.beneficio?.toLowerCase().includes(q) ?? false)
+        (p.beneficio?.toLowerCase().includes(q) ?? false) ||
+        p.beneficios.some((b) => b.toLowerCase().includes(q))
       );
     });
-  }, [pessoas, search, filtro]);
+  }, [
+    pessoas,
+    search,
+    filtro,
+    filtroCidade,
+    filtroBeneficio,
+    filtroParceiro,
+  ]);
 
   const pills: { key: ClienteFiltro; label: string; count: number }[] = [
     { key: "todos", label: "Todos", count: kpis.total },
@@ -559,7 +670,8 @@ export function ClientesList({
                 data_nascimento: isoToBrazilianDate(
                   abrindoCaso.data_nascimento
                 ),
-                descricao_caso: abrindoCaso.beneficio_identificado ?? "",
+                beneficio_identificado:
+                  abrindoCaso.beneficio_identificado ?? "",
               }
             : undefined
         }
@@ -666,52 +778,162 @@ export function ClientesList({
         </section>
       )}
 
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-        <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-[#94a3b8]" />
-          <Input
-            placeholder="Buscar por nome, CPF ou telefone..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className={cn(inputShell, "h-11 pl-9")}
-          />
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {pills.map((p) => (
-            <button
-              key={p.key}
+      <div className="flex flex-col gap-3 rounded-2xl border border-[#c5d4e8]/80 bg-white p-3 sm:p-3.5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+          <div className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-[#94a3b8]" />
+            <Input
+              placeholder="Buscar por nome, CPF ou telefone..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className={cn(inputShell, "h-11 rounded-full pl-9")}
+            />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {pills.map((p) => (
+              <button
+                key={p.key}
+                type="button"
+                onClick={() => setFiltro(p.key)}
+                className={cn(
+                  "rounded-full border px-3.5 py-1.5 text-sm font-medium transition",
+                  filtro === p.key
+                    ? "border-[#0b2148] bg-[#0b2148] text-white shadow-sm"
+                    : "border-[#e2e8f0] bg-[#F8FAFC] text-[#64748B] hover:border-[#0b2148]/30 hover:text-[#0b2148]"
+                )}
+              >
+                {p.label} ({p.count})
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-3 lg:ml-auto">
+            <Button
               type="button"
-              onClick={() => setFiltro(p.key)}
+              variant="outline"
+              size="sm"
+              className="rounded-full border-[#e2e8f0] bg-[#F8FAFC] text-[#0b2148] hover:bg-[#0b2148]/5"
+              onClick={() => setRevealCpfs((v) => !v)}
+            >
+              {revealCpfs ? (
+                <EyeOff className="size-3.5" />
+              ) : (
+                <Eye className="size-3.5" />
+              )}
+              {revealCpfs ? "Ocultar CPFs" : "Revelar CPFs"}
+            </Button>
+            <span className="text-sm tabular-nums text-[#64748B]">
+              <span className="font-semibold text-[#0b2148]">
+                {filtered.length}
+              </span>
+              /{kpis.total}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2 border-t border-[#e2e8f0] pt-3">
+          <Select
+            value={filtroCidade}
+            onValueChange={(v) => setFiltroCidade(v ?? FILTER_ALL)}
+          >
+            <SelectTrigger
               className={cn(
-                "rounded-full border px-3.5 py-1.5 text-sm font-medium transition",
-                filtro === p.key
-                  ? "border-[#0b2148] bg-[#0b2148] text-white shadow-sm"
-                  : "border-[#e2e8f0] bg-white text-[#64748B] hover:border-[#0b2148]/30 hover:text-[#0b2148]"
+                filterSelectTriggerClass,
+                filtroCidade !== FILTER_ALL &&
+                  "border-[#0b2148] bg-[#0b2148] text-white hover:border-[#0b2148] hover:text-white"
               )}
             >
-              {p.label} ({p.count})
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-3 lg:ml-auto">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="border-[#e2e8f0] text-[#0b2148] hover:bg-[#0b2148]/5"
-            onClick={() => setRevealCpfs((v) => !v)}
+              <SelectValue placeholder="Cidade">
+                {(v) => {
+                  if (!v || v === FILTER_ALL) return "Cidade";
+                  const opt = cidadeOptions.find((o) => o.value === v);
+                  return opt ? `${opt.value} (${opt.count})` : v;
+                }}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={FILTER_ALL}>Todas as cidades</SelectItem>
+              {cidadeOptions.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.value} ({o.count})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select
+            value={filtroBeneficio}
+            onValueChange={(v) => setFiltroBeneficio(v ?? FILTER_ALL)}
           >
-            {revealCpfs ? (
-              <EyeOff className="size-3.5" />
-            ) : (
-              <Eye className="size-3.5" />
-            )}
-            {revealCpfs ? "Ocultar CPFs" : "Revelar CPFs"}
-          </Button>
-          <span className="text-sm tabular-nums text-[#64748B]">
-            <span className="font-semibold text-[#0b2148]">{filtered.length}</span>
-            /{kpis.total}
-          </span>
+            <SelectTrigger
+              className={cn(
+                filterSelectTriggerClass,
+                filtroBeneficio !== FILTER_ALL &&
+                  "border-[#0b2148] bg-[#0b2148] text-white hover:border-[#0b2148] hover:text-white"
+              )}
+            >
+              <SelectValue placeholder="Benefício">
+                {(v) => {
+                  if (!v || v === FILTER_ALL) return "Benefício";
+                  const opt = beneficioOptions.find((o) => o.value === v);
+                  return opt ? `${opt.value} (${opt.count})` : v;
+                }}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={FILTER_ALL}>Todos os benefícios</SelectItem>
+              {beneficioOptions.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.value} ({o.count})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select
+            value={filtroParceiro}
+            onValueChange={(v) => setFiltroParceiro(v ?? FILTER_ALL)}
+          >
+            <SelectTrigger
+              className={cn(
+                filterSelectTriggerClass,
+                "min-w-[11rem]",
+                filtroParceiro !== FILTER_ALL &&
+                  "border-[#0b2148] bg-[#0b2148] text-white hover:border-[#0b2148] hover:text-white"
+              )}
+            >
+              <SelectValue placeholder="Parceiros">
+                {(v) => {
+                  if (!v || v === FILTER_ALL) return "Parceiros";
+                  const opt = parceiroOptions.find((o) => o.value === v);
+                  return opt ? `${opt.label} (${opt.count})` : "Parceiro";
+                }}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={FILTER_ALL}>Todos os parceiros</SelectItem>
+              {parceiroOptions.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label} ({o.count})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {(filtroCidade !== FILTER_ALL ||
+            filtroBeneficio !== FILTER_ALL ||
+            filtroParceiro !== FILTER_ALL) && (
+            <button
+              type="button"
+              onClick={() => {
+                setFiltroCidade(FILTER_ALL);
+                setFiltroBeneficio(FILTER_ALL);
+                setFiltroParceiro(FILTER_ALL);
+              }}
+              className="rounded-full border border-transparent px-3 py-1.5 text-sm font-medium text-[#64748B] hover:text-[#0b2148]"
+            >
+              Limpar filtros
+            </button>
+          )}
         </div>
       </div>
 
@@ -873,6 +1095,213 @@ export function FichaHeader({
   );
 }
 
+function statusCasoLabel(
+  status: string | null | undefined,
+  colunas?: KanbanColunaMatch[]
+) {
+  if (!status) return "—";
+  if (colunas?.length) {
+    return colunas.find((c) => c.chave === status)?.label ?? status;
+  }
+  return CASO_STATUS.find((s) => s.value === status)?.label ?? status;
+}
+
+function NovoCasoFichaDialog({
+  cpf,
+  telefone,
+  nome,
+}: {
+  cpf: string | null;
+  telefone: string | null;
+  nome: string;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [beneficio, setBeneficio] = useState<string | null>(null);
+  const [coluna, setColuna] = useState<string>("em_atendimento");
+  const [loading, setLoading] = useState(false);
+
+  async function criar() {
+    if (!coluna.trim()) {
+      toast.error("Escolha a coluna do funil");
+      return;
+    }
+    setLoading(true);
+    try {
+      await criarCasoNaFicha({
+        nome: nome.trim() || "Cliente",
+        cpf,
+        telefone,
+        beneficio_identificado: beneficio,
+        status: coluna,
+      });
+      toast.success("Caso criado e colocado no funil");
+      setOpen(false);
+      setBeneficio(null);
+      setColuna("em_atendimento");
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao criar caso");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) {
+          setBeneficio(null);
+          setColuna("em_atendimento");
+        }
+      }}
+    >
+      <DialogTrigger
+        className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1")}
+      >
+        <Plus className="h-3.5 w-3.5" />
+        Adicionar ao funil
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Cadastrar no funil</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Cria um caso de triagem neste cliente e coloca na coluna escolhida.
+          </p>
+          <div className="space-y-1">
+            <Label>Coluna do funil</Label>
+            <ColunaKanbanSelect value={coluna} onChange={setColuna} />
+          </div>
+          <div className="space-y-1">
+            <Label>Benefício / tipo de caso</Label>
+            <BeneficioTipoSelect value={beneficio} onChange={setBeneficio} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button disabled={loading || !coluna} onClick={criar}>
+            {loading ? "Cadastrando…" : "Cadastrar na coluna"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CasoResumoCard({
+  caso,
+  cpf,
+  contactNorm,
+  onAbrirCaso,
+  colunas,
+}: {
+  caso: Tables<"casos_novos">;
+  cpf: string | null;
+  contactNorm: string;
+  onAbrirCaso?: (casoId: number) => void;
+  colunas?: KanbanColunaMatch[];
+}) {
+  const router = useRouter();
+  const [saving, setSaving] = useState(false);
+  const [moving, setMoving] = useState(false);
+
+  async function salvarBeneficio(label: string | null) {
+    if ((caso.beneficio_identificado ?? null) === label) return;
+    setSaving(true);
+    try {
+      await updateCasoFields(caso.id, { beneficio_identificado: label });
+      toast.success("Benefício do caso atualizado");
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao salvar");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function moverColuna(chave: string) {
+    if ((caso.status ?? "") === chave) return;
+    setMoving(true);
+    try {
+      await updateCasoStatus(caso.id, chave);
+      toast.success("Caso movido no funil");
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao mover");
+    } finally {
+      setMoving(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardContent className="space-y-3 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-xs text-muted-foreground">Caso #{caso.id}</p>
+            <p className="text-sm text-muted-foreground">
+              {statusCasoLabel(caso.status, colunas)}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <EditarCasoDialog
+              caso={caso}
+              triggerSize="sm"
+              triggerLabel="Editar"
+            />
+            {onAbrirCaso ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onAbrirCaso(caso.id)}
+              >
+                Abrir
+              </Button>
+            ) : (
+              <LinkButton
+                href={fichaPessoaHref({
+                  cpf,
+                  contactNorm,
+                  aba: "caso",
+                  casoId: caso.id,
+                })}
+                size="sm"
+                variant="outline"
+              >
+                Abrir
+              </LinkButton>
+            )}
+          </div>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">
+            Coluna do funil
+          </Label>
+          <ColunaKanbanSelect
+            value={caso.status}
+            onChange={moverColuna}
+            colunas={colunas}
+            disabled={moving}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">
+            Benefício deste caso
+          </Label>
+          <BeneficioTipoSelect
+            value={caso.beneficio_identificado}
+            onChange={salvarBeneficio}
+            disabled={saving}
+          />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function Cliente360({
   cpf,
   contactNorm: contactNormProp,
@@ -903,9 +1332,13 @@ export function Cliente360({
 }) {
   const [editingProcesso, setEditingProcesso] = useState<Processo | null>(null);
   const [parceiros, setParceiros] = useState<Parceiro[]>([]);
+  const [colunas, setColunas] = useState<KanbanColunaMatch[]>([]);
   const contactNorm =
     contactNormProp ||
     phoneToContactNorm(processos[0]?.telefone ?? casos[0]?.telefone);
+  const nomeHint = processos[0]?.nome ?? casos[0]?.nome ?? "Cliente";
+  const telefoneHint =
+    processos[0]?.telefone ?? casos[0]?.telefone ?? (contactNorm || null);
 
   useEffect(() => {
     let cancelled = false;
@@ -915,6 +1348,13 @@ export function Cliente360({
       })
       .catch(() => {
         if (!cancelled) setParceiros([]);
+      });
+    listarKanbanColunasAction(false)
+      .then((list) => {
+        if (!cancelled) setColunas(list);
+      })
+      .catch(() => {
+        if (!cancelled) setColunas([]);
       });
     return () => {
       cancelled = true;
@@ -965,6 +1405,11 @@ export function Cliente360({
                     <p className="text-muted-foreground">
                       {p.tribunal} · {p.area} · {formatDate(p.created_at)}
                     </p>
+                    {p.beneficio_identificado ? (
+                      <p className="mt-1 text-muted-foreground">
+                        Benefício: {p.beneficio_identificado}
+                      </p>
+                    ) : null}
                     {parceiroNome ? (
                       <p className="mt-1 text-muted-foreground">
                         Parceiro: {parceiroNome}
@@ -993,42 +1438,33 @@ export function Cliente360({
       </section>
 
       <section>
-        <h2 className="mb-3 text-lg font-semibold">Casos de triagem ({casos.length})</h2>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-semibold">
+            Funil / casos ({casos.length})
+          </h2>
+          <NovoCasoFichaDialog
+            cpf={cpf}
+            telefone={telefoneHint}
+            nome={nomeHint}
+          />
+        </div>
         {casos.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nenhum caso</p>
+          <p className="text-sm text-muted-foreground">
+            Nenhum caso no funil. Use{" "}
+            <span className="font-medium text-[#0b2148]">Adicionar ao funil</span>{" "}
+            para criar um caso e escolher a coluna.
+          </p>
         ) : (
           <div className="space-y-2">
             {casos.map((c) => (
-              <Card key={c.id}>
-                <CardContent className="flex items-center justify-between p-4">
-                  <div>
-                    <p className="font-medium">{c.beneficio_identificado}</p>
-                    <p className="text-sm text-muted-foreground">{c.status}</p>
-                  </div>
-                  {onAbrirCaso ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => onAbrirCaso(c.id)}
-                    >
-                      Abrir
-                    </Button>
-                  ) : (
-                    <LinkButton
-                      href={fichaPessoaHref({
-                        cpf,
-                        contactNorm,
-                        aba: "caso",
-                        casoId: c.id,
-                      })}
-                      size="sm"
-                      variant="outline"
-                    >
-                      Abrir
-                    </LinkButton>
-                  )}
-                </CardContent>
-              </Card>
+              <CasoResumoCard
+                key={c.id}
+                caso={c}
+                cpf={cpf}
+                contactNorm={contactNorm}
+                onAbrirCaso={onAbrirCaso}
+                colunas={colunas}
+              />
             ))}
           </div>
         )}

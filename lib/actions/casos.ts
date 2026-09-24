@@ -37,7 +37,7 @@ async function logEvent(
   });
 }
 
-export async function updateCasoStatus(id: number, status: CasoStatus) {
+export async function updateCasoStatus(id: number, status: string) {
   return updateCasoStatusCliente([id], status);
 }
 
@@ -45,25 +45,52 @@ export async function updateCasoStatus(id: number, status: CasoStatus) {
  * Move todas as linhas do cliente de uma vez (o n8n pode ter criado mais de
  * um caso para o mesmo telefone). Ao entrar em "Aguardando aprovação", cria a
  * pendência em aprovacoes_pendentes se ainda não houver uma pendente.
+ * `status` = chave de coluna (sistema ou personalizada em app_kanban_colunas).
  */
-export async function updateCasoStatusCliente(ids: number[], status: CasoStatus) {
+export async function updateCasoStatusCliente(ids: number[], status: string) {
   if (!ids.length) throw new Error("Nenhum caso para mover");
+  const statusKey = status.trim();
+  if (!statusKey) throw new Error("Status inválido");
 
   const supabase = await createClient();
+
+  const { data: col } = await supabase
+    .from("app_kanban_colunas")
+    .select("chave")
+    .eq("chave", statusKey)
+    .eq("ativo", true)
+    .maybeSingle();
+
+  // Fallback: colunas de sistema conhecidas se a tabela ainda não existir
+  const SYSTEM_KEYS = new Set([
+    "em_atendimento",
+    "consultar_processo",
+    "abertura_processo",
+    "aguardando_analise",
+    "aguardando_aprovacao",
+    "atendimento_humano",
+    "processo_finalizado",
+  ]);
+  const systemOk = SYSTEM_KEYS.has(statusKey);
+
+  if (!col && !systemOk) {
+    throw new Error(`Coluna inválida ou inativa: ${statusKey}`);
+  }
+
   const { error } = await supabase
     .from("casos_novos")
-    .update({ status })
+    .update({ status: statusKey })
     .in("id", ids);
 
   if (error) throw new Error(error.message);
 
   let aprovacaoCriada = false;
-  if (status === "aguardando_aprovacao") {
+  if (statusKey === "aguardando_aprovacao") {
     aprovacaoCriada = await criarPendenciaSeFaltar(ids[0]);
   }
 
   let encaminhamento: { enviada: boolean; warning?: string } | undefined;
-  if (status === "aguardando_analise") {
+  if (statusKey === "aguardando_analise") {
     encaminhamento = await enviarEncaminhamentoAnaliseSePendente(ids);
   }
 
@@ -151,6 +178,8 @@ export async function updateCasoFields(
   const { error } = await supabase.from("casos_novos").update(fields).eq("id", id);
   if (error) throw new Error(error.message);
   revalidatePath(`/kanban/${id}`);
+  revalidatePath("/kanban");
+  revalidatePath("/clientes");
   return { success: true };
 }
 
@@ -200,7 +229,7 @@ export async function marcarProcessoCriado(
       telefone: caso.telefone,
       numero_processo: normalizeNumeroProcesso(numeroProcesso),
       area: caso.area,
-      descricao_caso: caso.beneficio_identificado,
+      beneficio_identificado: caso.beneficio_identificado,
       ativo: true,
     });
 
@@ -321,6 +350,7 @@ export async function upsertProcesso(
     numero_processo: string;
     tribunal?: string | null;
     area?: string | null;
+    beneficio_identificado?: string | null;
     descricao_caso?: string | null;
     parceiro_id?: string | null;
     ativo?: boolean;
@@ -338,6 +368,7 @@ export async function upsertProcesso(
     numero_processo: normalizeNumeroProcesso(data.numero_processo),
     telefone: data.telefone ? normalizePhoneBrStorage(data.telefone) : data.telefone,
     data_nascimento: dataNascimento,
+    beneficio_identificado: data.beneficio_identificado?.trim() || null,
     parceiro_id: data.parceiro_id || null,
   };
 
@@ -364,6 +395,19 @@ export async function upsertProcesso(
       ? casosQuery.or(`cpf.eq.${payload.cpf},telefone.eq.${telefone}`)
       : casosQuery.eq("cpf", payload.cpf);
     await casosQuery;
+    revalidatePath("/kanban");
+  }
+
+  // Espelha benefício no caso vinculado (mesmo CPF/telefone) para a lista /clientes
+  if (payload.beneficio_identificado) {
+    const telefone = payload.telefone?.replace(/\D/g, "") ?? "";
+    let syncQuery = supabase
+      .from("casos_novos")
+      .update({ beneficio_identificado: payload.beneficio_identificado });
+    syncQuery = telefone
+      ? syncQuery.or(`cpf.eq.${payload.cpf},telefone.eq.${telefone}`)
+      : syncQuery.eq("cpf", payload.cpf);
+    await syncQuery;
     revalidatePath("/kanban");
   }
 
@@ -601,4 +645,104 @@ export async function criarClienteCaso(
     status: created.status ?? status,
     beneficio_identificado: beneficio,
   };
+}
+
+/**
+ * Cria um novo caso na ficha (sempre INSERT — não reusa caso existente).
+ * Cada caso guarda o próprio `beneficio_identificado`.
+ */
+export async function criarCasoNaFicha(input: {
+  nome: string;
+  telefone?: string | null;
+  cpf?: string | null;
+  beneficio_identificado?: string | null;
+  status?: CasoStatus;
+}): Promise<{ success: true; casoId: number; href: string }> {
+  const user = await getAppUser();
+  if (!user) throw new Error("Não autenticado");
+
+  const nome = input.nome?.trim() ?? "";
+  if (!nome) throw new Error("Nome é obrigatório");
+
+  const telefoneRaw = input.telefone?.trim() ?? "";
+  const telefone = telefoneRaw ? normalizePhoneBrStorage(telefoneRaw) : null;
+  if (telefone && phoneToContactNorm(telefone).length < 10) {
+    throw new Error("Telefone inválido");
+  }
+
+  const cpfRaw = input.cpf?.trim() ? normalizeCpf(input.cpf) : "";
+  if (cpfRaw) {
+    if (cpfRaw.length !== 11 || !isValidCpf(cpfRaw)) {
+      throw new Error("CPF inválido");
+    }
+  }
+
+  if (!telefone && !cpfRaw) {
+    throw new Error("Informe CPF ou telefone para vincular o caso");
+  }
+
+  const beneficio = input.beneficio_identificado?.trim() || null;
+  const statusKey = (input.status ?? "em_atendimento").trim();
+  if (!statusKey) throw new Error("Coluna do funil é obrigatória");
+
+  const supabase = await createClient();
+
+  const { data: col } = await supabase
+    .from("app_kanban_colunas")
+    .select("chave")
+    .eq("chave", statusKey)
+    .eq("ativo", true)
+    .maybeSingle();
+
+  const SYSTEM_KEYS = new Set([
+    "em_atendimento",
+    "consultar_processo",
+    "abertura_processo",
+    "aguardando_analise",
+    "aguardando_aprovacao",
+    "atendimento_humano",
+    "processo_finalizado",
+  ]);
+  if (!col && !SYSTEM_KEYS.has(statusKey)) {
+    throw new Error(`Coluna inválida ou inativa: ${statusKey}`);
+  }
+
+  const status: CasoStatus = statusKey;
+
+  const { data: created, error } = await supabase
+    .from("casos_novos")
+    .insert({
+      nome,
+      telefone,
+      cpf: cpfRaw || null,
+      beneficio_identificado: beneficio,
+      status,
+    })
+    .select("id")
+    .single();
+
+  if (error || !created) {
+    throw new Error(error?.message ?? "Falha ao criar caso");
+  }
+
+  await logEvent("casos_novos", created.id, "caso_criado_ficha", {
+    origem: "criarCasoNaFicha",
+    telefone,
+    cpf: cpfRaw || null,
+    beneficio_identificado: beneficio,
+  });
+
+  const href = fichaPessoaHref({
+    cpf: cpfRaw || null,
+    contactNorm: telefone ? phoneToContactNorm(telefone) : null,
+    aba: "resumo",
+    casoId: created.id,
+  });
+
+  revalidatePath("/kanban");
+  revalidatePath("/clientes");
+  revalidatePath(href);
+  revalidatePath(`/kanban/${created.id}`);
+
+  return { success: true, casoId: created.id, href };
 }

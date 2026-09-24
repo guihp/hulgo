@@ -1,4 +1,5 @@
 import { getAppUser } from "@/lib/actions/auth";
+import { listParceiros } from "@/lib/actions/parceiros";
 import { ClientesList } from "@/components/clientes/clientes-ui";
 import { agruparPessoas } from "@/lib/data/pessoas";
 import { createClient } from "@/lib/supabase/server";
@@ -11,9 +12,10 @@ export default async function ClientesPage({
   const supabase = await createClient();
   const user = await getAppUser();
   const { caso: casoParam } = await searchParams;
-  const [{ data: processos }, { data: casos }] = await Promise.all([
+  const [{ data: processos }, { data: casos }, parceiros] = await Promise.all([
     supabase.from("processos_clientes").select("*").order("nome"),
     supabase.from("casos_novos").select("*").order("created_at", { ascending: false }),
+    listParceiros().catch(() => []),
   ]);
 
   const casosAbertura = (casos ?? []).filter((c) =>
@@ -25,7 +27,7 @@ export default async function ClientesPage({
     ].includes(c.status ?? "")
   );
 
-  const pessoas = agruparPessoas(processos ?? [], casos ?? []);
+  const pessoas = agruparPessoas(processos ?? [], casos ?? [], parceiros);
 
   const casoId = Number(casoParam);
   const abrirCaso = Number.isInteger(casoId)
@@ -44,6 +46,7 @@ export default async function ClientesPage({
       processos={processos ?? []}
       casosAbertura={casosAbertura}
       pessoas={pessoas}
+      parceiros={parceiros}
       abrirCaso={abrirCaso}
       user={user!}
     />

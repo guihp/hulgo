@@ -59,6 +59,13 @@ export async function listarTiposCasoAction(includeInactive = true) {
   return listTiposCaso({ includeInactive });
 }
 
+/** Tipos ativos para selects do painel (qualquer usuário autenticado). */
+export async function listarTiposCasoAtivosAction(): Promise<TipoCasoMatch[]> {
+  const user = await getAppUser();
+  if (!user) throw new Error("Não autenticado");
+  return listTiposCaso({ includeInactive: false, allowFallback: false });
+}
+
 export async function resolverChecklistBeneficioAction(
   beneficio: string | null | undefined
 ) {

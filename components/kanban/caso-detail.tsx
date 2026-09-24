@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -51,6 +51,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { CASO_STATUS } from "@/lib/constants";
+import { listarKanbanColunasAction } from "@/lib/actions/kanban-colunas";
+import type { KanbanColunaMatch } from "@/lib/data/kanban-colunas";
 import { parseDocumentList } from "@/lib/utils/messages";
 import { formatDate, formatDateTime } from "@/lib/utils/dates";
 import { formatNumeroProcesso } from "@/lib/utils/processo";
@@ -64,8 +66,11 @@ import { normalizeCpf } from "@/lib/utils/cpf";
 import { phoneToContactNorm } from "@/lib/utils/phone";
 import Link from "next/link";
 
-function statusLabel(status: string | null | undefined) {
-  return CASO_STATUS.find((s) => s.value === status)?.label ?? status ?? "—";
+function statusLabel(
+  status: string | null | undefined,
+  colunas: { chave: string; label: string }[]
+) {
+  return colunas.find((s) => s.chave === status)?.label ?? status ?? "—";
 }
 
 type Caso = Tables<"casos_novos">;
@@ -95,11 +100,29 @@ export function CasoDetail({
   const [nota, setNota] = useState("");
   const [numeroProcesso, setNumeroProcesso] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [colunas, setColunas] = useState<KanbanColunaMatch[]>(() =>
+    CASO_STATUS.map((s, i) => ({
+      id: null,
+      chave: s.value,
+      label: s.label,
+      ordem: (i + 1) * 10,
+      ativo: true,
+      is_system: true,
+    }))
+  );
   const [consultas, setConsultas] = useState({
     consulta_tse: caso.consulta_tse ?? "",
     consulta_dap_caf: caso.consulta_dap_caf ?? "",
     consulta_jf: caso.consulta_jf ?? "",
   });
+
+  useEffect(() => {
+    listarKanbanColunasAction(false)
+      .then(setColunas)
+      .catch(() => {
+        /* fallback CASO_STATUS já no state */
+      });
+  }, []);
 
   const recebidos = parseDocumentList(caso.documentos_recebidos);
   const faltantes = parseDocumentList(caso.documentos_faltantes);
@@ -225,7 +248,7 @@ export function CasoDetail({
             Criado em {formatDateTime(caso.created_at)}
           </p>
         </div>
-        <Badge>{statusLabel(caso.status)}</Badge>
+        <Badge>{statusLabel(caso.status, colunas)}</Badge>
       </div>
 
       {requisito && (
@@ -253,13 +276,16 @@ export function CasoDetail({
       )}
 
       <div className="flex flex-wrap gap-2">
-        <Select value={caso.status ?? "em_atendimento"} onValueChange={(v) => handleStatusChange(v as CasoStatus)}>
+        <Select
+          value={caso.status ?? "em_atendimento"}
+          onValueChange={(v) => handleStatusChange(v as CasoStatus)}
+        >
           <SelectTrigger className="w-48">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {CASO_STATUS.map((s) => (
-              <SelectItem key={s.value} value={s.value}>
+            {colunas.map((s) => (
+              <SelectItem key={s.chave} value={s.chave}>
                 {s.label}
               </SelectItem>
             ))}

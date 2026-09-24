@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getAppUser } from "@/lib/actions/auth";
 import { getAppConfig } from "@/lib/config/app-config";
 import { listTiposCaso } from "@/lib/data/tipos-caso";
+import { listKanbanColunas } from "@/lib/data/kanban-colunas";
 import {
   getAgenteConfig,
   listEquipe,
@@ -27,20 +28,23 @@ export default async function ConfiguracoesPage({
     n8n_integracao_token: "",
   };
   let tipos: Awaited<ReturnType<typeof listTiposCaso>> = [];
+  let colunas: Awaited<ReturnType<typeof listKanbanColunas>> = [];
   let equipe: Awaited<ReturnType<typeof listEquipe>> = [];
   let agente: AgenteConfig | null = null;
   let parceiros: Parceiro[] = [];
 
   try {
-    const [cfg, list, members, agenteCfg, parceirosList] = await Promise.all([
+    const [cfg, list, cols, members, agenteCfg, parceirosList] = await Promise.all([
       getAppConfig(),
       listTiposCaso({ includeInactive: true }),
+      listKanbanColunas({ includeInactive: true }),
       listEquipe().catch(() => [] as Awaited<ReturnType<typeof listEquipe>>),
       getAgenteConfig().catch(() => null),
       listParceiros().catch(() => [] as Parceiro[]),
     ]);
     config = cfg;
     tipos = list;
+    colunas = cols;
     equipe = members;
     agente = agenteCfg;
     parceiros = parceirosList;
@@ -52,6 +56,7 @@ export default async function ConfiguracoesPage({
     <ConfiguracoesUi
       config={config}
       tipos={tipos}
+      colunas={colunas}
       equipe={equipe}
       agente={agente}
       parceiros={parceiros}

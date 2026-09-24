@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -14,14 +14,24 @@ import {
 import { useDroppable } from "@dnd-kit/core";
 import { useDraggable } from "@dnd-kit/core";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle, FolderOpen, Kanban, MessageSquare, User } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle,
+  FolderOpen,
+  Kanban,
+  MessageSquare,
+  Plus,
+  User,
+} from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { updateCasoStatusCliente } from "@/lib/actions/casos";
-import { CASO_STATUS } from "@/lib/constants";
-import type { CasoStatus, Tables } from "@/types/database";
+import { criarKanbanColuna } from "@/lib/actions/kanban-colunas";
+import type { KanbanColunaMatch } from "@/lib/data/kanban-colunas";
+import type { Tables } from "@/types/database";
 import { CpfDisplay } from "@/components/shared/cpf-display";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { LinkButton } from "@/components/ui/link-button";
 import { Input } from "@/components/ui/input";
 import {
@@ -31,6 +41,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { caseAgeLabel } from "@/lib/utils/dates";
 import { normalizeCpf } from "@/lib/utils/cpf";
 import { fichaPessoaHref } from "@/lib/utils/ficha";
@@ -47,9 +65,12 @@ import { cn } from "@/lib/utils";
 
 type Caso = Tables<"casos_novos">;
 
-function statusLabel(status: string | null | undefined) {
+function statusLabel(
+  status: string | null | undefined,
+  colunas: KanbanColunaMatch[]
+) {
   const normalized = normalizeCasoStatus(status);
-  return CASO_STATUS.find((s) => s.value === normalized)?.label ?? status ?? "—";
+  return colunas.find((c) => c.chave === normalized)?.label ?? status ?? "—";
 }
 
 function displayName(caso: Caso, displayNames: Record<string, string>) {
@@ -61,12 +82,14 @@ function displayName(caso: Caso, displayNames: Record<string, string>) {
 
 function CasoCard({
   caso,
+  colunas,
   displayNames,
   aprovacaoPorContato,
   clientePorTelefone,
   isDragging,
 }: {
   caso: Caso;
+  colunas: KanbanColunaMatch[];
   displayNames: Record<string, string>;
   aprovacaoPorContato: Record<string, number>;
   clientePorTelefone: Record<string, string>;
@@ -109,7 +132,7 @@ function CasoCard({
         {caso.beneficio_identificado ?? "Benefício não identificado"}
       </p>
       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-        <Badge variant="secondary">{statusLabel(caso.status)}</Badge>
+        <Badge variant="secondary">{statusLabel(caso.status, colunas)}</Badge>
         <CpfDisplay value={caso.cpf} />
         <Badge variant="outline">{caseAgeLabel(caso.created_at)}</Badge>
       </div>
@@ -194,11 +217,13 @@ function CasoCard({
 
 function DraggableCasoCard({
   caso,
+  colunas,
   displayNames,
   aprovacaoPorContato,
   clientePorTelefone,
 }: {
   caso: Caso;
+  colunas: KanbanColunaMatch[];
   displayNames: Record<string, string>;
   aprovacaoPorContato: Record<string, number>;
   clientePorTelefone: Record<string, string>;
@@ -216,6 +241,7 @@ function DraggableCasoCard({
     <div ref={setNodeRef} style={style} {...listeners} {...attributes} className="touch-none">
       <CasoCard
         caso={caso}
+        colunas={colunas}
         displayNames={displayNames}
         aprovacaoPorContato={aprovacaoPorContato}
         clientePorTelefone={clientePorTelefone}
@@ -229,15 +255,17 @@ function KanbanColumn({
   status,
   label,
   casos,
+  colunas,
   onMove,
   displayNames,
   aprovacaoPorContato,
   clientePorTelefone,
 }: {
-  status: CasoStatus;
+  status: string;
   label: string;
   casos: Caso[];
-  onMove: (casoId: number, newStatus: CasoStatus) => void;
+  colunas: KanbanColunaMatch[];
+  onMove: (casoId: number, newStatus: string) => void;
   displayNames: Record<string, string>;
   aprovacaoPorContato: Record<string, number>;
   clientePorTelefone: Record<string, string>;
@@ -261,20 +289,21 @@ function KanbanColumn({
           <div key={caso.id} className="space-y-1">
             <DraggableCasoCard
               caso={caso}
+              colunas={colunas}
               displayNames={displayNames}
               aprovacaoPorContato={aprovacaoPorContato}
               clientePorTelefone={clientePorTelefone}
             />
             <Select
               value={normalizeCasoStatus(caso.status)}
-              onValueChange={(v) => onMove(caso.id, v as CasoStatus)}
+              onValueChange={(v) => onMove(caso.id, v ?? status)}
             >
               <SelectTrigger className="h-7 text-xs lg:hidden">
                 <SelectValue placeholder="Mover para..." />
               </SelectTrigger>
               <SelectContent>
-                {CASO_STATUS.map((s) => (
-                  <SelectItem key={s.value} value={s.value}>
+                {colunas.map((s) => (
+                  <SelectItem key={s.chave} value={s.chave}>
                     {s.label}
                   </SelectItem>
                 ))}
@@ -289,16 +318,24 @@ function KanbanColumn({
 
 export function KanbanBoard({
   initialCasos,
+  initialColunas,
   displayNames = {},
   initialAprovacaoPorContato = {},
   initialClientePorTelefone = {},
+  canManageColunas = false,
+  processosCount = 0,
 }: {
   initialCasos: Caso[];
+  initialColunas: KanbanColunaMatch[];
   displayNames?: Record<string, string>;
   initialAprovacaoPorContato?: Record<string, number>;
   initialClientePorTelefone?: Record<string, string>;
+  canManageColunas?: boolean;
+  /** Clientes só em processos_clientes (fora do funil). */
+  processosCount?: number;
 }) {
   const [casos, setCasos] = useState(initialCasos);
+  const [colunas, setColunas] = useState(initialColunas);
   const [aprovacaoPorContato, setAprovacaoPorContato] = useState(
     initialAprovacaoPorContato
   );
@@ -309,8 +346,17 @@ export function KanbanBoard({
   const [search, setSearch] = useState("");
   const [beneficioFilter, setBeneficioFilter] = useState("all");
   const [areaFilter, setAreaFilter] = useState("all");
+  const [novaColunaOpen, setNovaColunaOpen] = useState(false);
+  const [novaColunaLabel, setNovaColunaLabel] = useState("");
+  const [pendingColuna, startColunaTransition] = useTransition();
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+
+  const ordemPorChave = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const c of colunas) map[c.chave] = c.ordem;
+    return map;
+  }, [colunas]);
 
   const beneficios = useMemo(
     () => [...new Set(casos.map((c) => c.beneficio_identificado).filter(Boolean))] as string[],
@@ -321,10 +367,9 @@ export function KanbanBoard({
     [casos]
   );
 
-  // 1 cliente = 1 card (n8n pode ter mais de uma linha por telefone)
   const { casos: casosUnicos, idsPorCliente } = useMemo(
-    () => dedupeCasosPorCliente(casos),
-    [casos]
+    () => dedupeCasosPorCliente(casos, ordemPorChave),
+    [casos, ordemPorChave]
   );
 
   const filtered = useMemo(() => {
@@ -343,21 +388,42 @@ export function KanbanBoard({
 
   const refresh = useCallback(async () => {
     const supabase = createClient();
-    const [{ data: casosData }, { data: aprovData }, { data: processosData }] =
-      await Promise.all([
-        supabase
-          .from("casos_novos")
-          .select("*")
-          .order("created_at", { ascending: false }),
-        supabase
-          .from("aprovacoes_pendentes")
-          .select("id, telefone_cliente, cpf, status")
-          .order("created_at", { ascending: false }),
-        supabase.from("processos_clientes").select("telefone, cpf"),
-      ]);
+    const [
+      { data: casosData },
+      { data: aprovData },
+      { data: processosData },
+      { data: colunasData },
+    ] = await Promise.all([
+      supabase
+        .from("casos_novos")
+        .select("*")
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("aprovacoes_pendentes")
+        .select("id, telefone_cliente, cpf, status")
+        .order("created_at", { ascending: false }),
+      supabase.from("processos_clientes").select("telefone, cpf"),
+      supabase
+        .from("app_kanban_colunas")
+        .select("*")
+        .eq("ativo", true)
+        .order("ordem", { ascending: true }),
+    ]);
     if (casosData) setCasos(casosData);
     if (aprovData) setAprovacaoPorContato(buildAprovacaoPorContato(aprovData));
     if (processosData) setClientePorTelefone(buildClientePorTelefone(processosData));
+    if (colunasData?.length) {
+      setColunas(
+        colunasData.map((c) => ({
+          id: c.id,
+          chave: c.chave,
+          label: c.label,
+          ordem: c.ordem,
+          ativo: c.ativo,
+          is_system: c.is_system,
+        }))
+      );
+    }
   }, []);
 
   useEffect(() => {
@@ -374,6 +440,11 @@ export function KanbanBoard({
         { event: "*", schema: "public", table: "aprovacoes_pendentes" },
         () => refresh()
       )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "app_kanban_colunas" },
+        () => refresh()
+      )
       .subscribe();
 
     const interval = setInterval(refresh, 45000);
@@ -383,10 +454,8 @@ export function KanbanBoard({
     };
   }, [refresh]);
 
-  async function moveCaso(casoId: number, newStatus: CasoStatus) {
+  async function moveCaso(casoId: number, newStatus: string) {
     const caso = casos.find((c) => c.id === casoId);
-    // Move todas as linhas do mesmo cliente, senão outra linha "puxa" o card
-    // de volta para a coluna antiga no próximo refresh
     const ids = caso ? idsPorCliente[casoClientKey(caso)] ?? [casoId] : [casoId];
     const prev = casos;
     setCasos((list) =>
@@ -416,25 +485,71 @@ export function KanbanBoard({
   function handleDragEnd(event: DragEndEvent) {
     setActiveCaso(null);
     const caso = event.active.data.current?.caso as Caso | undefined;
-    const newStatus = event.over?.id as CasoStatus | undefined;
+    const newStatus = event.over?.id as string | undefined;
     if (caso && newStatus && normalizeCasoStatus(caso.status) !== newStatus) {
       moveCaso(caso.id, newStatus);
     }
   }
 
+  function handleCriarColuna() {
+    const label = novaColunaLabel.trim();
+    if (!label) {
+      toast.error("Informe o nome da coluna");
+      return;
+    }
+    startColunaTransition(async () => {
+      try {
+        const created = await criarKanbanColuna({ label });
+        setColunas((list) =>
+          [...list, created].sort((a, b) => a.ordem - b.ordem || a.label.localeCompare(b.label))
+        );
+        setNovaColunaLabel("");
+        setNovaColunaOpen(false);
+        toast.success(`Coluna "${created.label}" criada`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Erro ao criar coluna");
+      }
+    });
+  }
+
   if (casos.length === 0) {
     return (
-      <EmptyState
-        icon={Kanban}
-        title="Nenhum caso na fila"
-        description="Quando a IA triar um novo caso pelo WhatsApp, ele aparecerá aqui automaticamente."
-      />
+      <div className="space-y-4">
+        <EmptyState
+          icon={Kanban}
+          title="Nenhum caso na fila"
+          description={
+            processosCount > 0
+              ? `Há ${processosCount} cliente(s) em /clientes com processo judicial, mas o funil usa a tabela de triagem (casos_novos). Cadastre pelo WhatsApp/IA, pelo assistente, ou em Clientes → criar caso de atendimento.`
+              : "Quando a IA triar um novo caso pelo WhatsApp, ele aparecerá aqui automaticamente."
+          }
+        />
+        {canManageColunas ? (
+          <div className="flex justify-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => setNovaColunaOpen(true)}>
+              <Plus className="mr-1 h-4 w-4" />
+              Nova coluna
+            </Button>
+            <LinkButton href="/configuracoes?tab=funil" size="sm" variant="outline">
+              Gerenciar colunas
+            </LinkButton>
+          </div>
+        ) : null}
+        <NovaColunaDialog
+          open={novaColunaOpen}
+          onOpenChange={setNovaColunaOpen}
+          label={novaColunaLabel}
+          onLabelChange={setNovaColunaLabel}
+          pending={pendingColuna}
+          onConfirm={handleCriarColuna}
+        />
+      </div>
     );
   }
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row">
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
         <Input
           placeholder="Buscar por nome ou CPF..."
           value={search}
@@ -467,6 +582,17 @@ export function KanbanBoard({
             ))}
           </SelectContent>
         </Select>
+        {canManageColunas ? (
+          <div className="flex gap-2 sm:ml-auto">
+            <Button variant="outline" size="sm" onClick={() => setNovaColunaOpen(true)}>
+              <Plus className="mr-1 h-4 w-4" />
+              Nova coluna
+            </Button>
+            <LinkButton href="/configuracoes?tab=funil" size="sm" variant="outline">
+              Colunas
+            </LinkButton>
+          </div>
+        ) : null}
       </div>
 
       <DndContext
@@ -476,14 +602,15 @@ export function KanbanBoard({
         onDragEnd={handleDragEnd}
       >
         <div className="flex gap-4 overflow-x-auto pb-4">
-          {CASO_STATUS.map((col) => (
+          {colunas.map((col) => (
             <KanbanColumn
-              key={col.value}
-              status={col.value}
+              key={col.chave}
+              status={col.chave}
               label={col.label}
               casos={filtered.filter(
-                (c) => normalizeCasoStatus(c.status) === col.value
+                (c) => normalizeCasoStatus(c.status) === col.chave
               )}
+              colunas={colunas}
               onMove={moveCaso}
               displayNames={displayNames}
               aprovacaoPorContato={aprovacaoPorContato}
@@ -495,6 +622,7 @@ export function KanbanBoard({
           {activeCaso ? (
             <CasoCard
               caso={activeCaso}
+              colunas={colunas}
               displayNames={displayNames}
               aprovacaoPorContato={aprovacaoPorContato}
               clientePorTelefone={clientePorTelefone}
@@ -502,6 +630,65 @@ export function KanbanBoard({
           ) : null}
         </DragOverlay>
       </DndContext>
+
+      <NovaColunaDialog
+        open={novaColunaOpen}
+        onOpenChange={setNovaColunaOpen}
+        label={novaColunaLabel}
+        onLabelChange={setNovaColunaLabel}
+        pending={pendingColuna}
+        onConfirm={handleCriarColuna}
+      />
     </div>
+  );
+}
+
+function NovaColunaDialog({
+  open,
+  onOpenChange,
+  label,
+  onLabelChange,
+  pending,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  label: string;
+  onLabelChange: (v: string) => void;
+  pending: boolean;
+  onConfirm: () => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Nova coluna do funil</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-2">
+          <Label htmlFor="nova-coluna-label">Nome</Label>
+          <Input
+            id="nova-coluna-label"
+            placeholder="Ex.: Aguardando documentos"
+            value={label}
+            onChange={(e) => onLabelChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onConfirm();
+            }}
+          />
+          <p className="text-xs text-muted-foreground">
+            Colunas do sistema (IA/n8n) não são afetadas. A chave é gerada
+            automaticamente (custom_…).
+          </p>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
+            Cancelar
+          </Button>
+          <Button onClick={onConfirm} disabled={pending || !label.trim()}>
+            {pending ? "Criando…" : "Criar coluna"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

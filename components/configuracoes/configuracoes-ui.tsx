@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { WhatsAppQrPanel } from "@/components/configuracoes/whatsapp-qr-panel";
 import { TiposCasoPanel } from "@/components/configuracoes/tipos-caso-panel";
+import { KanbanColunasPanel } from "@/components/configuracoes/kanban-colunas-panel";
 import { AgenteIaPanel } from "@/components/configuracoes/agente-ia-panel";
 import { TestarAgentePanel } from "@/components/configuracoes/testar-agente-panel";
 import { EscritorioPanel } from "@/components/configuracoes/escritorio-panel";
@@ -10,6 +11,7 @@ import { ParceirosPanel } from "@/components/configuracoes/parceiros-panel";
 import { AppCelularPanel } from "@/components/configuracoes/app-celular-panel";
 import type { AppConfigMap } from "@/lib/config/app-config";
 import type { TipoCasoMatch } from "@/lib/actions/tipos-caso";
+import type { KanbanColunaMatch } from "@/lib/data/kanban-colunas";
 import type { AgenteConfig, EquipeMember } from "@/lib/actions/configuracoes";
 import type { Parceiro } from "@/lib/actions/parceiros";
 import { cn } from "@/lib/utils";
@@ -24,6 +26,11 @@ const TABS = [
     value: "tipos",
     label: "Tipos de documentos",
     subtitle: "Benefícios e a lista de documentos que o agente pede.",
+  },
+  {
+    value: "funil",
+    label: "Colunas do funil",
+    subtitle: "Crie, renomeie e reordene colunas personalizadas do Kanban.",
   },
   {
     value: "agente",
@@ -64,6 +71,7 @@ function parseTab(value: string | null | undefined): TabValue | null {
 export function ConfiguracoesUi({
   config,
   tipos,
+  colunas,
   equipe,
   agente,
   parceiros,
@@ -71,6 +79,7 @@ export function ConfiguracoesUi({
 }: {
   config: AppConfigMap;
   tipos: TipoCasoMatch[];
+  colunas: KanbanColunaMatch[];
   equipe: EquipeMember[];
   agente: AgenteConfig | null;
   parceiros: Parceiro[];
@@ -153,6 +162,15 @@ export function ConfiguracoesUi({
             className={tab === "tipos" ? undefined : "hidden"}
           >
             <TiposCasoPanel initialTipos={tipos} />
+          </div>
+        ) : null}
+        {mounted.funil ? (
+          <div
+            role="tabpanel"
+            hidden={tab !== "funil"}
+            className={tab === "funil" ? undefined : "hidden"}
+          >
+            <KanbanColunasPanel initialColunas={colunas} />
           </div>
         ) : null}
         {mounted.agente ? (
