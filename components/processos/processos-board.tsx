@@ -14,13 +14,19 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { toast } from "sonner";
-import { ExternalLink, Plus, Scale, X } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Check, Columns3, ExternalLink, Plus, Scale, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
   atualizarSituacaoProcesso,
   moverProcessoColuna,
 } from "@/lib/actions/casos";
-import { criarProcessoColuna } from "@/lib/actions/processo-colunas";
+import {
+  arquivarProcessoColuna,
+  atualizarProcessoColuna,
+  criarProcessoColuna,
+  reordenarProcessoColunas,
+} from "@/lib/actions/processo-colunas";
 import type { ProcessoColunaMatch } from "@/lib/data/processo-colunas";
 import type { Parceiro } from "@/lib/actions/parceiros";
 import type { Tables } from "@/types/database";
@@ -38,7 +44,15 @@ import { fichaPessoaHref } from "@/lib/utils/ficha";
 import { phoneToContactNorm } from "@/lib/utils/phone";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -59,6 +73,7 @@ import {
 } from "@/components/ui/dialog";
 import { corBorder, corDot } from "@/components/processos/cores";
 import { ExcluirProcessoDialog } from "@/components/processos/excluir-processo-dialog";
+import { ProcessoColunaMenu } from "@/components/processos/processo-coluna-menu";
 import { cn } from "@/lib/utils";
 
 type Processo = Tables<"processos_clientes">;
@@ -105,6 +120,9 @@ function ProcessoCard({
   isDragging,
   overlayCount,
   onDeleted,
+  colunaAtual,
+  colunas,
+  onMove,
 }: {
   processo: Processo;
   parceiroNome?: string | null;
@@ -115,7 +133,11 @@ function ProcessoCard({
   overlayCount?: number;
   /** Presente só quando o usuário pode excluir (advogado). */
   onDeleted?: (id: number) => void;
+  colunaAtual?: string;
+  colunas?: ProcessoColunaMatch[];
+  onMove?: (ids: number[], chave: string) => void;
 }) {
+  const podeMover = Boolean(onMove && colunas && colunas.length > 1);
   const cpf = processo.cpf ? normalizeCpf(processo.cpf) : "";
   const contactNorm = phoneToContactNorm(processo.telefone) || null;
   const temAndamento = Boolean(
@@ -200,8 +222,41 @@ function ProcessoCard({
         <span className="truncate text-[11px] text-muted-foreground">
           {parceiroNome ? `Parceiro: ${parceiroNome}` : ""}
         </span>
-        {cpf || contactNorm || onDeleted ? (
+        {cpf || contactNorm || onDeleted || podeMover ? (
           <div onPointerDown={stopDrag} className="flex shrink-0 items-center gap-1">
+            {podeMover ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  className={cn(
+                    buttonVariants({ variant: "outline", size: "icon-sm" }),
+                    "hidden lg:inline-flex"
+                  )}
+                  title="Mudar coluna"
+                  aria-label="Mudar coluna"
+                >
+                  <Columns3 className="h-3.5 w-3.5" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-52">
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>Mudar coluna</DropdownMenuLabel>
+                    {colunas!.map((c) => (
+                      <DropdownMenuItem
+                        key={c.chave}
+                        disabled={c.chave === colunaAtual}
+                        onClick={() => onMove!([processo.id], c.chave)}
+                      >
+                        <span
+                          className={cn("size-2 rounded-full", corDot(c.cor))}
+                          aria-hidden
+                        />
+                        {c.label}
+                        {c.chave === colunaAtual ? <Check className="ml-auto" /> : null}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
             {cpf || contactNorm ? (
               <LinkButton
                 href={fichaPessoaHref({ cpf: cpf || null, contactNorm, aba: "resumo" })}
@@ -241,6 +296,87 @@ function DraggableProcessoCard(
   );
 }
 
+type ColunaEditHandlers = {
+  index: number;
+  total: number;
+  processosCount: number;
+  onRename: (label: string) => void;
+  onCor: (cor: string | null) => void;
+  onMoveColuna: (dir: -1 | 1) => void;
+  onArchive: (destino: string | null) => Promise<boolean>;
+};
+
+function ColunaTitulo({
+  coluna,
+  colunas,
+  edit,
+}: {
+  coluna: ProcessoColunaMatch;
+  colunas: ProcessoColunaMatch[];
+  edit?: ColunaEditHandlers;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(coluna.label);
+
+  function start() {
+    setDraft(coluna.label);
+    setEditing(true);
+  }
+
+  function commit() {
+    setEditing(false);
+    const label = draft.trim();
+    if (label && label !== coluna.label) edit?.onRename(label);
+  }
+
+  if (editing && edit) {
+    return (
+      <Input
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onFocus={(e) => e.currentTarget.select()}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+          if (e.key === "Escape") setEditing(false);
+        }}
+        aria-label="Nome da coluna"
+        className="h-7 min-w-0 flex-1 text-sm font-semibold"
+      />
+    );
+  }
+
+  return (
+    <>
+      <h3
+        className={cn(
+          "min-w-0 flex-1 truncate text-sm font-semibold",
+          edit && "cursor-text"
+        )}
+        title={edit ? `${coluna.label} — clique duplo para renomear` : coluna.label}
+        onDoubleClick={edit ? start : undefined}
+      >
+        {coluna.label}
+      </h3>
+      {edit ? (
+        <ProcessoColunaMenu
+          coluna={coluna}
+          colunas={colunas}
+          processosCount={edit.processosCount}
+          canMoveLeft={edit.index > 0}
+          canMoveRight={edit.index < edit.total - 1}
+          canArchive={edit.total > 1}
+          onRename={start}
+          onCor={edit.onCor}
+          onMove={edit.onMoveColuna}
+          onArchive={edit.onArchive}
+        />
+      ) : null}
+    </>
+  );
+}
+
 function ProcessoColumn({
   coluna,
   colunas,
@@ -252,6 +388,7 @@ function ProcessoColumn({
   onToggleColumn,
   onMove,
   onDeleted,
+  edit,
 }: {
   coluna: ProcessoColunaMatch;
   colunas: ProcessoColunaMatch[];
@@ -263,6 +400,8 @@ function ProcessoColumn({
   onToggleColumn: (ids: number[], select: boolean) => void;
   onMove: (ids: number[], chave: string) => void;
   onDeleted?: (id: number) => void;
+  /** Presente só para advogados com a coluna persistida no banco. */
+  edit?: ColunaEditHandlers;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: coluna.chave });
   const ids = processos.map((p) => p.id);
@@ -288,9 +427,7 @@ function ProcessoColumn({
           aria-label={`Selecionar todos em ${coluna.label}`}
         />
         <span className={cn("size-2 shrink-0 rounded-full", corDot(coluna.cor))} aria-hidden />
-        <h3 className="min-w-0 flex-1 truncate text-sm font-semibold" title={coluna.label}>
-          {coluna.label}
-        </h3>
+        <ColunaTitulo coluna={coluna} colunas={colunas} edit={edit} />
         <Badge variant="secondary">{processos.length}</Badge>
       </div>
       {total > 0 ? (
@@ -308,6 +445,9 @@ function ProcessoColumn({
               selected={selected.has(p.id)}
               onToggleSelect={onToggleSelect}
               onDeleted={onDeleted}
+              colunaAtual={coluna.chave}
+              colunas={colunas}
+              onMove={onMove}
             />
             <Select
               value={coluna.chave}
@@ -363,6 +503,7 @@ export function ProcessosBoard({
   const [novaColunaLabel, setNovaColunaLabel] = useState("");
   const [pendingColuna, startColunaTransition] = useTransition();
   const [pendingBulk, startBulkTransition] = useTransition();
+  const router = useRouter();
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
@@ -618,6 +759,114 @@ export function ProcessosBoard({
     });
   }
 
+  const totalPorColuna = useMemo(() => {
+    const map: Record<string, number[]> = {};
+    for (const p of processos) {
+      const key = colunaDe(p);
+      (map[key] ??= []).push(p.id);
+    }
+    return map;
+  }, [processos, colunaDe]);
+
+  async function salvarColuna(
+    col: ProcessoColunaMatch,
+    patch: { label?: string; cor?: string | null },
+    sucesso: string
+  ) {
+    if (!col.id) return;
+    const prev = colunas;
+    setColunas((list) =>
+      list.map((c) => (c.chave === col.chave ? { ...c, ...patch } : c))
+    );
+    try {
+      const updated = await atualizarProcessoColuna({ id: col.id, ...patch });
+      setColunas((list) =>
+        list.map((c) => (c.chave === updated.chave ? updated : c))
+      );
+      toast.success(sucesso);
+      router.refresh();
+    } catch (err) {
+      setColunas(prev);
+      toast.error(err instanceof Error ? err.message : "Erro ao salvar coluna");
+    }
+  }
+
+  async function moverColuna(col: ProcessoColunaMatch, dir: -1 | 1) {
+    const idx = colunas.findIndex((c) => c.chave === col.chave);
+    const alvo = idx + dir;
+    if (idx < 0 || alvo < 0 || alvo >= colunas.length) return;
+    if (colunas.some((c) => !c.id)) {
+      toast.error("Colunas padrão ainda não salvas — ajuste em Configurações");
+      return;
+    }
+    const prev = colunas;
+    const next = [...colunas];
+    [next[idx], next[alvo]] = [next[alvo], next[idx]];
+    const reordered = next.map((c, i) => ({ ...c, ordem: (i + 1) * 10 }));
+    setColunas(reordered);
+    try {
+      await reordenarProcessoColunas(
+        funil,
+        reordered.map((c) => c.id!)
+      );
+      toast.success(`Coluna "${col.label}" movida`);
+      router.refresh();
+    } catch (err) {
+      setColunas(prev);
+      toast.error(err instanceof Error ? err.message : "Erro ao reordenar colunas");
+    }
+  }
+
+  async function arquivarColuna(
+    col: ProcessoColunaMatch,
+    destino: string | null
+  ): Promise<boolean> {
+    if (!col.id) return false;
+    const ids = totalPorColuna[col.chave] ?? [];
+    try {
+      if (destino && ids.length) {
+        await moverProcessoColuna(ids, destino);
+        setProcessos((list) =>
+          list.map((p) => (ids.includes(p.id) ? { ...p, funil_coluna: destino } : p))
+        );
+      }
+      await arquivarProcessoColuna(col.id);
+      setColunas((list) => list.filter((c) => c.chave !== col.chave));
+      const destinoLabel = destino
+        ? colunas.find((c) => c.chave === destino)?.label
+        : null;
+      toast.success(`Coluna "${col.label}" arquivada`, {
+        description:
+          destinoLabel && ids.length
+            ? `${ids.length} processo(s) movido(s) para "${destinoLabel}"`
+            : "Reative em Configurações → Funis de processos",
+      });
+      router.refresh();
+      return true;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao arquivar coluna");
+      void refresh();
+      return false;
+    }
+  }
+
+  function editHandlers(
+    col: ProcessoColunaMatch,
+    index: number
+  ): ColunaEditHandlers | undefined {
+    if (!canManageColunas || !col.id) return undefined;
+    return {
+      index,
+      total: colunas.length,
+      processosCount: totalPorColuna[col.chave]?.length ?? 0,
+      onRename: (label) =>
+        void salvarColuna(col, { label }, `Coluna renomeada para "${label}"`),
+      onCor: (cor) => void salvarColuna(col, { cor }, "Cor da coluna atualizada"),
+      onMoveColuna: (dir) => void moverColuna(col, dir),
+      onArchive: (destino) => arquivarColuna(col, destino),
+    };
+  }
+
   const colunaActions = canManageColunas ? (
     <div className="flex gap-2 sm:ml-auto">
       <Button variant="outline" size="sm" onClick={() => setNovaColunaOpen(true)}>
@@ -648,8 +897,8 @@ export function ProcessosBoard({
             }}
           />
           <p className="text-xs text-muted-foreground">
-            A coluna é adicionada ao final. Cor e ordem podem ser ajustadas em
-            Configurações → Funis de processos.
+            A coluna é adicionada ao final. Depois use o menu ⋮ no topo da
+            coluna para renomear, mudar a cor, reordenar ou arquivar.
           </p>
         </div>
         <DialogFooter>
@@ -685,6 +934,22 @@ export function ProcessosBoard({
           </LinkButton>
           {colunaActions}
         </div>
+        {canManageColunas && colunas.length ? (
+          <div className="-mx-4 flex snap-x snap-mandatory gap-4 overflow-x-auto px-4 pb-4 sm:mx-0 sm:snap-none sm:px-0">
+            {colunas.map((col, index) => (
+              <div
+                key={col.chave}
+                className={cn(
+                  "flex w-[85vw] max-w-72 shrink-0 snap-start items-center gap-2 rounded-xl border border-t-4 bg-muted/30 p-3 sm:w-72",
+                  corBorder(col.cor)
+                )}
+              >
+                <span className={cn("size-2 shrink-0 rounded-full", corDot(col.cor))} aria-hidden />
+                <ColunaTitulo coluna={col} colunas={colunas} edit={editHandlers(col, index)} />
+              </div>
+            ))}
+          </div>
+        ) : null}
         {novaColunaDialog}
       </div>
     );
@@ -817,8 +1082,9 @@ export function ProcessosBoard({
         onDragCancel={() => setActiveProcesso(null)}
       >
         <div className="-mx-4 flex snap-x snap-mandatory gap-4 overflow-x-auto px-4 pb-4 sm:mx-0 sm:snap-none sm:px-0">
-          {colunas.map((col) => (
+          {colunas.map((col, index) => (
             <ProcessoColumn
+              edit={editHandlers(col, index)}
               key={col.chave}
               coluna={col}
               colunas={colunas}
