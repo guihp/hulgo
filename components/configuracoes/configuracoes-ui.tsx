@@ -4,6 +4,7 @@ import { useState } from "react";
 import { WhatsAppQrPanel } from "@/components/configuracoes/whatsapp-qr-panel";
 import { TiposCasoPanel } from "@/components/configuracoes/tipos-caso-panel";
 import { KanbanColunasPanel } from "@/components/configuracoes/kanban-colunas-panel";
+import { ProcessoColunasPanel } from "@/components/configuracoes/processo-colunas-panel";
 import { AgenteIaPanel } from "@/components/configuracoes/agente-ia-panel";
 import { TestarAgentePanel } from "@/components/configuracoes/testar-agente-panel";
 import { EscritorioPanel } from "@/components/configuracoes/escritorio-panel";
@@ -12,6 +13,8 @@ import { AppCelularPanel } from "@/components/configuracoes/app-celular-panel";
 import type { AppConfigMap } from "@/lib/config/app-config";
 import type { TipoCasoMatch } from "@/lib/actions/tipos-caso";
 import type { KanbanColunaMatch } from "@/lib/data/kanban-colunas";
+import type { ProcessoColunaMatch } from "@/lib/data/processo-colunas";
+import type { FunilProcesso } from "@/lib/utils/processos";
 import type { AgenteConfig, EquipeMember } from "@/lib/actions/configuracoes";
 import type { Parceiro } from "@/lib/actions/parceiros";
 import { cn } from "@/lib/utils";
@@ -31,6 +34,11 @@ const TABS = [
     value: "funil",
     label: "Colunas do funil",
     subtitle: "Crie, renomeie e reordene colunas personalizadas do Kanban.",
+  },
+  {
+    value: "funis-processos",
+    label: "Funis de processos",
+    subtitle: "Colunas dos funis Previdenciário e Cível da página Processos.",
   },
   {
     value: "agente",
@@ -72,6 +80,7 @@ export function ConfiguracoesUi({
   config,
   tipos,
   colunas,
+  processoColunas,
   equipe,
   agente,
   parceiros,
@@ -80,6 +89,7 @@ export function ConfiguracoesUi({
   config: AppConfigMap;
   tipos: TipoCasoMatch[];
   colunas: KanbanColunaMatch[];
+  processoColunas: Record<FunilProcesso, ProcessoColunaMatch[]>;
   equipe: EquipeMember[];
   agente: AgenteConfig | null;
   parceiros: Parceiro[];
@@ -171,6 +181,15 @@ export function ConfiguracoesUi({
             className={tab === "funil" ? undefined : "hidden"}
           >
             <KanbanColunasPanel initialColunas={colunas} />
+          </div>
+        ) : null}
+        {mounted["funis-processos"] ? (
+          <div
+            role="tabpanel"
+            hidden={tab !== "funis-processos"}
+            className={tab === "funis-processos" ? undefined : "hidden"}
+          >
+            <ProcessoColunasPanel initialColunas={processoColunas} />
           </div>
         ) : null}
         {mounted.agente ? (

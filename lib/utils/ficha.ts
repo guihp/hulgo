@@ -1,7 +1,13 @@
 import { normalizeCpf } from "@/lib/utils/cpf";
 import { phoneToContactNorm } from "@/lib/utils/phone";
 
-export type FichaAba = "resumo" | "caso" | "arquivos" | "datajud" | "prazos";
+export type FichaAba =
+  | "resumo"
+  | "caso"
+  | "arquivos"
+  | "datajud"
+  | "prazos"
+  | "audiencias";
 
 export const FICHA_ABAS: FichaAba[] = [
   "resumo",
@@ -9,6 +15,7 @@ export const FICHA_ABAS: FichaAba[] = [
   "arquivos",
   "datajud",
   "prazos",
+  "audiencias",
 ];
 
 export function parseFichaAba(value: string | null | undefined): FichaAba | null {

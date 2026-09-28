@@ -542,6 +542,10 @@ export type Database = {
           hora_prazo: string | null;
           id: number;
           lembrar_em: string | null;
+          link_audiencia: string | null;
+          local: string | null;
+          /** presencial | virtual (audiências) */
+          modalidade: string | null;
           processo_id: number | null;
           tipo: string;
           titulo: string;
@@ -558,6 +562,9 @@ export type Database = {
           hora_prazo?: string | null;
           id?: never;
           lembrar_em?: string | null;
+          link_audiencia?: string | null;
+          local?: string | null;
+          modalidade?: string | null;
           processo_id?: number | null;
           tipo?: string;
           titulo: string;
@@ -574,6 +581,9 @@ export type Database = {
           hora_prazo?: string | null;
           id?: never;
           lembrar_em?: string | null;
+          link_audiencia?: string | null;
+          local?: string | null;
+          modalidade?: string | null;
           processo_id?: number | null;
           tipo?: string;
           titulo?: string;
@@ -644,6 +654,42 @@ export type Database = {
           ordem?: number;
           ativo?: boolean;
           is_system?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      app_processo_colunas: {
+        Row: {
+          id: string;
+          funil: string;
+          chave: string;
+          label: string;
+          ordem: number;
+          ativo: boolean;
+          cor: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          funil: string;
+          chave: string;
+          label: string;
+          ordem?: number;
+          ativo?: boolean;
+          cor?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          funil?: string;
+          chave?: string;
+          label?: string;
+          ordem?: number;
+          ativo?: boolean;
+          cor?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -871,15 +917,27 @@ export type Database = {
           created_at: string | null;
           data_nascimento: string | null;
           descricao_caso: string | null;
+          /** Chave de app_processo_colunas (funil = area) */
+          funil_coluna: string | null;
           id: number;
           monitorar_dias: number | null;
           nome: string;
           numero_processo: string;
+          observacao: string | null;
           parceiro_id: string | null;
+          polo_ativo: string | null;
+          polo_passivo: string | null;
+          processo_origem: string | null;
+          /** providencia_escritorio | cumprimento_pagamento | verificar_1grau | aguardando */
+          situacao: string | null;
           telefone: string | null;
+          tipo_acao: string | null;
           tribunal: string | null;
           ultima_consulta_datajud: string | null;
+          ultimo_andamento_data: string | null;
           ultimo_movimento: string | null;
+          valor_centavos: number | null;
+          vara_comarca: string | null;
         };
         Insert: {
           area?: string | null;
@@ -889,15 +947,25 @@ export type Database = {
           created_at?: string | null;
           data_nascimento?: string | null;
           descricao_caso?: string | null;
+          funil_coluna?: string | null;
           id?: number;
           monitorar_dias?: number | null;
           nome: string;
           numero_processo: string;
+          observacao?: string | null;
           parceiro_id?: string | null;
+          polo_ativo?: string | null;
+          polo_passivo?: string | null;
+          processo_origem?: string | null;
+          situacao?: string | null;
           telefone?: string | null;
+          tipo_acao?: string | null;
           tribunal?: string | null;
           ultima_consulta_datajud?: string | null;
+          ultimo_andamento_data?: string | null;
           ultimo_movimento?: string | null;
+          valor_centavos?: number | null;
+          vara_comarca?: string | null;
         };
         Update: {
           area?: string | null;
@@ -907,15 +975,25 @@ export type Database = {
           created_at?: string | null;
           data_nascimento?: string | null;
           descricao_caso?: string | null;
+          funil_coluna?: string | null;
           id?: number;
           monitorar_dias?: number | null;
           nome?: string;
           numero_processo?: string;
+          observacao?: string | null;
           parceiro_id?: string | null;
+          polo_ativo?: string | null;
+          polo_passivo?: string | null;
+          processo_origem?: string | null;
+          situacao?: string | null;
           telefone?: string | null;
+          tipo_acao?: string | null;
           tribunal?: string | null;
           ultima_consulta_datajud?: string | null;
+          ultimo_andamento_data?: string | null;
           ultimo_movimento?: string | null;
+          valor_centavos?: number | null;
+          vara_comarca?: string | null;
         };
         Relationships: [
           {

@@ -3,6 +3,7 @@ import { getAppUser } from "@/lib/actions/auth";
 import { getAppConfig } from "@/lib/config/app-config";
 import { listTiposCaso } from "@/lib/data/tipos-caso";
 import { listKanbanColunas } from "@/lib/data/kanban-colunas";
+import { listProcessoColunasTodas } from "@/lib/data/processo-colunas";
 import {
   getAgenteConfig,
   listEquipe,
@@ -32,16 +33,30 @@ export default async function ConfiguracoesPage({
   let equipe: Awaited<ReturnType<typeof listEquipe>> = [];
   let agente: AgenteConfig | null = null;
   let parceiros: Parceiro[] = [];
+  let processoColunas: Awaited<ReturnType<typeof listProcessoColunasTodas>> = {
+    previdenciario: [],
+    civel: [],
+  };
 
   try {
-    const [cfg, list, cols, members, agenteCfg, parceirosList] = await Promise.all([
+    const [
+      cfg,
+      list,
+      cols,
+      members,
+      agenteCfg,
+      parceirosList,
+      procCols,
+    ] = await Promise.all([
       getAppConfig(),
       listTiposCaso({ includeInactive: true }),
       listKanbanColunas({ includeInactive: true }),
       listEquipe().catch(() => [] as Awaited<ReturnType<typeof listEquipe>>),
       getAgenteConfig().catch(() => null),
       listParceiros().catch(() => [] as Parceiro[]),
+      listProcessoColunasTodas({ includeInactive: true }),
     ]);
+    processoColunas = procCols;
     config = cfg;
     tipos = list;
     colunas = cols;
@@ -57,6 +72,7 @@ export default async function ConfiguracoesPage({
       config={config}
       tipos={tipos}
       colunas={colunas}
+      processoColunas={processoColunas}
       equipe={equipe}
       agente={agente}
       parceiros={parceiros}

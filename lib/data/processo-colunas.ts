@@ -1,0 +1,117 @@
+import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
+import type { Tables } from "@/types/database";
+import type { FunilProcesso } from "@/lib/utils/processos";
+
+export type ProcessoColuna = Tables<"app_processo_colunas">;
+
+export type ProcessoColunaMatch = {
+  id: string | null;
+  funil: FunilProcesso;
+  chave: string;
+  label: string;
+  ordem: number;
+  ativo: boolean;
+  cor: string | null;
+};
+
+const FALLBACK: Record<FunilProcesso, [string, string, string][]> = {
+  previdenciario: [
+    ["ajuizado", "Ajuizado", "blue"],
+    ["pericia_audiencia", "Perícia / Audiência", "violet"],
+    ["sentenca", "Sentença", "amber"],
+    ["recurso", "Recurso", "rose"],
+    ["cumprimento_rpv", "Cumprimento / RPV", "emerald"],
+    ["arquivado", "Arquivado", "slate"],
+  ],
+  civel: [
+    ["novo_andamento", "Novo / Em andamento", "blue"],
+    ["providencia_escritorio", "Providência do escritório", "rose"],
+    ["cumprimento_sentenca", "Cumprimento de sentença", "amber"],
+    ["precatorio_aguardando", "Precatório aguardando pagamento", "violet"],
+    ["pago_arquivado", "Pago / Arquivado", "slate"],
+  ],
+};
+
+function fallbackColunas(funil: FunilProcesso): ProcessoColunaMatch[] {
+  return FALLBACK[funil].map(([chave, label, cor], i) => ({
+    id: null,
+    funil,
+    chave,
+    label,
+    ordem: (i + 1) * 10,
+    ativo: true,
+    cor,
+  }));
+}
+
+export function processoColunaRowToMatch(
+  row: ProcessoColuna
+): ProcessoColunaMatch {
+  return {
+    id: row.id,
+    funil: row.funil === "civel" ? "civel" : "previdenciario",
+    chave: row.chave,
+    label: row.label,
+    ordem: row.ordem,
+    ativo: row.ativo,
+    cor: row.cor,
+  };
+}
+
+/** Lista colunas de um funil (ativas por padrão). Fallback = seed em memória. */
+export async function listProcessoColunas(
+  funil: FunilProcesso,
+  opts?: {
+    includeInactive?: boolean;
+    service?: boolean;
+    allowFallback?: boolean;
+  }
+): Promise<ProcessoColunaMatch[]> {
+  const supabase = opts?.service
+    ? createServiceClient()
+    : await createClient();
+
+  let query = supabase
+    .from("app_processo_colunas")
+    .select("*")
+    .eq("funil", funil)
+    .order("ordem", { ascending: true })
+    .order("label", { ascending: true });
+
+  if (!opts?.includeInactive) {
+    query = query.eq("ativo", true);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    if (opts?.allowFallback === false) throw new Error(error.message);
+    return fallbackColunas(funil);
+  }
+
+  if (!data || data.length === 0) {
+    if (opts?.allowFallback === false) return [];
+    return fallbackColunas(funil);
+  }
+
+  return data.map(processoColunaRowToMatch);
+}
+
+/** Colunas dos dois funis de uma vez (formulários que trocam de área). */
+export async function listProcessoColunasTodas(opts?: {
+  includeInactive?: boolean;
+}): Promise<Record<FunilProcesso, ProcessoColunaMatch[]>> {
+  const [previdenciario, civel] = await Promise.all([
+    listProcessoColunas("previdenciario", opts),
+    listProcessoColunas("civel", opts),
+  ]);
+  return { previdenciario, civel };
+}
+
+export function labelDaColunaProcesso(
+  chave: string | null | undefined,
+  colunas: ProcessoColunaMatch[]
+): string {
+  if (!chave) return "—";
+  return colunas.find((c) => c.chave === chave)?.label ?? chave;
+}

@@ -42,7 +42,7 @@ export default async function KanbanPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Funil de atendimento</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Funil de vendas</h1>
         <p className="text-muted-foreground">
           Kanban do funil — arraste ou use os botões para mover
         </p>

@@ -12,6 +12,7 @@ export type LembreteNotificarResultado = {
   resultado: string;
   titulo?: string;
   quando?: string;
+  tipo?: string;
 };
 
 export type ProcessarLembretesResult = {
@@ -56,7 +57,7 @@ async function processarLembretesPrazosInner(): Promise<ProcessarLembretesResult
 
   const { data: prazosAbertos, error: errPrazos } = await service
     .from("app_prazos")
-    .select("id, titulo, data_prazo, hora_prazo")
+    .select("id, titulo, tipo, data_prazo, hora_prazo")
     .eq("concluido", false);
 
   if (errPrazos) {
@@ -128,11 +129,15 @@ async function processarLembretesPrazosInner(): Promise<ProcessarLembretesResult
     const quando =
       row.label?.trim() || labelForOffset(row.offset_minutes);
 
+    const isAudiencia = prazo.tipo === "audiencia";
+    const dataHora = formatPrazoDateTime(prazo.data_prazo, prazo.hora_prazo);
     const result = await emitPainelPush({
       kind: "prazo",
-      title: "🔔 Lembrete de prazo",
-      body: `${prazo.titulo} — ${quando} (vence ${formatPrazoDateTime(prazo.data_prazo, prazo.hora_prazo)})`,
-      href: "/prazos",
+      title: isAudiencia ? "⚖️ Audiência" : "🔔 Lembrete de prazo",
+      body: isAudiencia
+        ? `${prazo.titulo} — ${quando} (${dataHora})`
+        : `${prazo.titulo} — ${quando} (vence ${dataHora})`,
+      href: isAudiencia ? "/audiencias" : "/prazos",
       tag: `prazo-lembrete-${row.id}`,
     });
 
@@ -148,6 +153,7 @@ async function processarLembretesPrazosInner(): Promise<ProcessarLembretesResult
         lembrete_id: row.id,
         titulo: prazo.titulo,
         quando,
+        tipo: prazo.tipo,
         resultado: result.skipped
           ? "vapid skip (sem dedupe)"
           : `push sent=0 (sem dedupe) removed=${result.removed}`,
@@ -161,6 +167,7 @@ async function processarLembretesPrazosInner(): Promise<ProcessarLembretesResult
       lembrete_id: row.id,
       titulo: prazo.titulo,
       quando,
+      tipo: prazo.tipo,
       resultado: `push sent=${result.sent} removed=${result.removed}`,
     });
   }

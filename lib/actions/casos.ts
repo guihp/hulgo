@@ -16,6 +16,12 @@ import {
   isValidNumeroProcesso,
   normalizeNumeroProcesso,
 } from "@/lib/utils/processo";
+import {
+  isSituacaoProcesso,
+  normalizeAreaProcesso,
+  type FunilProcesso,
+  type SituacaoProcesso,
+} from "@/lib/utils/processos";
 
 async function logEvent(
   entidade: string,
@@ -340,27 +346,124 @@ export async function reenviarWebhookAprovacao(id: number, status: AprovacaoStat
   return webhook;
 }
 
-export async function upsertProcesso(
-  data: {
-    id?: number;
-    nome: string;
-    cpf: string;
-    data_nascimento?: string | null;
-    telefone?: string | null;
-    numero_processo: string;
-    tribunal?: string | null;
-    area?: string | null;
-    beneficio_identificado?: string | null;
-    descricao_caso?: string | null;
-    parceiro_id?: string | null;
-    ativo?: boolean;
+export type UpsertProcessoInput = {
+  id?: number;
+  nome: string;
+  cpf: string;
+  data_nascimento?: string | null;
+  telefone?: string | null;
+  numero_processo: string;
+  tribunal?: string | null;
+  /** Texto livre é normalizado para previdenciario | civel */
+  area?: string | null;
+  beneficio_identificado?: string | null;
+  descricao_caso?: string | null;
+  parceiro_id?: string | null;
+  ativo?: boolean;
+  /** Chave da coluna do funil da área; vazia/inválida → primeira coluna ativa */
+  funil_coluna?: string | null;
+  polo_ativo?: string | null;
+  polo_passivo?: string | null;
+  tipo_acao?: string | null;
+  vara_comarca?: string | null;
+  valor_centavos?: number | null;
+  processo_origem?: string | null;
+  situacao?: SituacaoProcesso | null;
+  /** yyyy-mm-dd ou dd/mm/aaaa */
+  ultimo_andamento_data?: string | null;
+  ultimo_movimento?: string | null;
+  observacao?: string | null;
+};
+
+function trimOrNull(v: string | null | undefined): string | null | undefined {
+  if (v === undefined) return undefined;
+  return v?.trim() || null;
+}
+
+function dateOrNull(v: string | null | undefined): string | null | undefined {
+  if (v === undefined) return undefined;
+  const s = v?.trim();
+  if (!s) return null;
+  if (s.includes("/")) {
+    const iso = brazilianDateToIso(s);
+    if (!iso) throw new Error(`Data inválida: ${s}`);
+    return iso;
   }
-) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) throw new Error(`Data inválida: ${s}`);
+  return s;
+}
+
+/** Retorna a chave se for coluna ativa do funil; senão a primeira ativa. */
+async function resolverFunilColuna(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  funil: FunilProcesso,
+  chave: string | null | undefined
+): Promise<string | null> {
+  const { data: colunas, error } = await supabase
+    .from("app_processo_colunas")
+    .select("chave")
+    .eq("funil", funil)
+    .eq("ativo", true)
+    .order("ordem", { ascending: true })
+    .order("label", { ascending: true });
+  if (error) throw new Error(error.message);
+  if (!colunas?.length) return null;
+  const k = chave?.trim();
+  if (k && colunas.some((c) => c.chave === k)) return k;
+  return colunas[0].chave;
+}
+
+export async function upsertProcesso(data: UpsertProcessoInput) {
   const supabase = await createClient();
   const dataNascimento =
     data.data_nascimento && data.data_nascimento.includes("/")
       ? brazilianDateToIso(data.data_nascimento) ?? data.data_nascimento
       : data.data_nascimento;
+
+  if (
+    data.situacao !== undefined &&
+    data.situacao !== null &&
+    !isSituacaoProcesso(data.situacao)
+  ) {
+    throw new Error(`Situação inválida: ${data.situacao}`);
+  }
+  if (
+    data.valor_centavos !== undefined &&
+    data.valor_centavos !== null &&
+    (!Number.isInteger(data.valor_centavos) || data.valor_centavos < 0)
+  ) {
+    throw new Error("Valor inválido");
+  }
+
+  const origemRaw = trimOrNull(data.processo_origem);
+  const processoOrigem =
+    origemRaw && isValidNumeroProcesso(origemRaw)
+      ? normalizeNumeroProcesso(origemRaw)
+      : origemRaw;
+
+  // Área + coluna do funil: no update, só recalcula se área ou coluna vierem.
+  let area: FunilProcesso | undefined;
+  let funilColuna: string | null | undefined;
+  if (!data.id || data.area !== undefined || data.funil_coluna !== undefined) {
+    let existing: { area: string | null; funil_coluna: string | null } | null =
+      null;
+    if (data.id) {
+      const { data: row } = await supabase
+        .from("processos_clientes")
+        .select("area, funil_coluna")
+        .eq("id", data.id)
+        .maybeSingle();
+      existing = row;
+    }
+    area = normalizeAreaProcesso(
+      data.area !== undefined ? data.area : existing?.area
+    );
+    funilColuna = await resolverFunilColuna(
+      supabase,
+      area,
+      data.funil_coluna !== undefined ? data.funil_coluna : existing?.funil_coluna
+    );
+  }
 
   const payload = {
     ...data,
@@ -370,6 +473,17 @@ export async function upsertProcesso(
     data_nascimento: dataNascimento,
     beneficio_identificado: data.beneficio_identificado?.trim() || null,
     parceiro_id: data.parceiro_id || null,
+    area,
+    funil_coluna: funilColuna,
+    polo_ativo: trimOrNull(data.polo_ativo),
+    polo_passivo: trimOrNull(data.polo_passivo),
+    tipo_acao: trimOrNull(data.tipo_acao),
+    vara_comarca: trimOrNull(data.vara_comarca),
+    processo_origem: processoOrigem,
+    situacao: data.situacao === undefined ? undefined : data.situacao || null,
+    ultimo_andamento_data: dateOrNull(data.ultimo_andamento_data),
+    ultimo_movimento: trimOrNull(data.ultimo_movimento),
+    observacao: trimOrNull(data.observacao),
   };
 
   if (data.id) {
@@ -399,7 +513,7 @@ export async function upsertProcesso(
   }
 
   // Espelha benefício no caso vinculado (mesmo CPF/telefone) para a lista /clientes
-  if (payload.beneficio_identificado) {
+  if (payload.beneficio_identificado && area !== "civel") {
     const telefone = payload.telefone?.replace(/\D/g, "") ?? "";
     let syncQuery = supabase
       .from("casos_novos")
@@ -411,6 +525,7 @@ export async function upsertProcesso(
     revalidatePath("/kanban");
   }
 
+  revalidatePath("/processos");
   revalidatePath("/clientes");
   revalidatePath(`/clientes/${payload.cpf}`);
   return { success: true };
@@ -420,8 +535,105 @@ export async function deleteProcesso(id: number) {
   const supabase = await createClient();
   const { error } = await supabase.from("processos_clientes").delete().eq("id", id);
   if (error) throw new Error(error.message);
+  revalidatePath("/processos");
   revalidatePath("/clientes");
   return { success: true };
+}
+
+async function revalidateProcessosEFichas(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  ids: number[]
+) {
+  revalidatePath("/processos");
+  revalidatePath("/clientes");
+  const { data } = await supabase
+    .from("processos_clientes")
+    .select("cpf")
+    .in("id", ids);
+  for (const cpf of new Set((data ?? []).map((r) => r.cpf))) {
+    if (cpf) revalidatePath(`/clientes/${cpf}`);
+  }
+}
+
+/**
+ * Move processos (em lote) para a coluna `chave`. Todos precisam ser da mesma
+ * área, e a coluna precisa estar ativa no funil dessa área.
+ */
+export async function moverProcessoColuna(ids: number[], chave: string) {
+  const user = await getAppUser();
+  if (!user) throw new Error("Não autenticado");
+  const uniq = [...new Set(ids.filter((id) => Number.isInteger(id) && id > 0))];
+  if (!uniq.length) throw new Error("Nenhum processo selecionado");
+  const key = chave.trim();
+  if (!key) throw new Error("Coluna inválida");
+
+  const supabase = await createClient();
+  const { data: procs, error: procErr } = await supabase
+    .from("processos_clientes")
+    .select("id, area")
+    .in("id", uniq);
+  if (procErr) throw new Error(procErr.message);
+  if (!procs?.length) throw new Error("Processos não encontrados");
+
+  const areas = new Set(procs.map((p) => normalizeAreaProcesso(p.area)));
+  if (areas.size > 1) {
+    throw new Error("Selecione processos de um único funil para mover");
+  }
+  const [funil] = [...areas];
+
+  const { data: col } = await supabase
+    .from("app_processo_colunas")
+    .select("chave")
+    .eq("funil", funil)
+    .eq("chave", key)
+    .eq("ativo", true)
+    .maybeSingle();
+  if (!col) throw new Error(`Coluna inválida ou inativa: ${key}`);
+
+  const { error } = await supabase
+    .from("processos_clientes")
+    .update({ funil_coluna: key })
+    .in("id", uniq);
+  if (error) throw new Error(error.message);
+
+  await logEvent("processos_clientes", uniq[0], "processo_mover_coluna", {
+    ids: uniq,
+    funil,
+    funil_coluna: key,
+  });
+
+  await revalidateProcessosEFichas(supabase, uniq);
+  return { success: true, count: uniq.length };
+}
+
+/** Define (ou limpa, com null) a etiqueta de situação de vários processos. */
+export async function atualizarSituacaoProcesso(
+  ids: number[],
+  situacao: string | null
+) {
+  const user = await getAppUser();
+  if (!user) throw new Error("Não autenticado");
+  const uniq = [...new Set(ids.filter((id) => Number.isInteger(id) && id > 0))];
+  if (!uniq.length) throw new Error("Nenhum processo selecionado");
+  const value = situacao?.trim() || null;
+  if (value !== null && !isSituacaoProcesso(value)) {
+    throw new Error(`Situação inválida: ${value}`);
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("processos_clientes")
+    .update({ situacao: value })
+    .in("id", uniq);
+  if (error) throw new Error(error.message);
+
+  await logEvent("processos_clientes", uniq[0], "processo_situacao", {
+    ids: uniq,
+    situacao: value,
+  });
+
+  await revalidateProcessosEFichas(supabase, uniq);
+  return { success: true, count: uniq.length };
 }
 
 export type CriarClienteCasoInput = {

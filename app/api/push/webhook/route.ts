@@ -185,11 +185,12 @@ export async function POST(req: NextRequest) {
       const quando = dataPrazo
         ? formatPrazoDateTime(dataPrazo, horaPrazo)
         : "";
+      const isAudiencia = record.tipo === "audiencia";
       const result = await emitPainelPush({
         kind: "prazo",
-        title: "📅 Novo prazo",
+        title: isAudiencia ? "⚖️ Nova audiência" : "📅 Novo prazo",
         body: quando ? `${titulo} — ${quando}` : titulo,
-        href: "/prazos",
+        href: isAudiencia ? "/audiencias" : "/prazos",
         tag: `prazo-${id || Date.now()}`,
       });
       return NextResponse.json({ ok: true, ...result });

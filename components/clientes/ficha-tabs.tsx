@@ -1,12 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Cliente360, FichaHeader } from "@/components/clientes/clientes-ui";
 import { DataJudPanel } from "@/components/clientes/datajud-panel";
 import { FichaArquivos } from "@/components/clientes/ficha-arquivos";
 import { CasoDetail } from "@/components/kanban/caso-detail";
-import { NovoPrazoDialog, PrazosList } from "@/components/prazos/prazos-ui";
+import {
+  NovoPrazoDialog,
+  PrazosList,
+  type PrazoEnriched,
+  type PrazoProcessoOption,
+} from "@/components/prazos/prazos-ui";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
@@ -30,6 +35,7 @@ const ABA_LABEL: Record<FichaAba, string> = {
   arquivos: "Arquivos",
   datajud: "DataJud",
   prazos: "Prazos",
+  audiencias: "Audiências",
 };
 
 export function FichaTabs({
@@ -45,6 +51,33 @@ export function FichaTabs({
 }) {
   const router = useRouter();
   const [aba, setAba] = useState<FichaAba>(abaInicial);
+
+  const processoOptions = useMemo<PrazoProcessoOption[]>(
+    () =>
+      ficha.processos.map((p) => ({
+        id: p.id,
+        numero_processo: p.numero_processo,
+        nome: p.nome,
+        cpf: p.cpf,
+      })),
+    [ficha.processos]
+  );
+  const { audiencias, prazosSemAudiencia } = useMemo(() => {
+    const numeroPorId = new Map(
+      ficha.processos.map((p) => [p.id, p.numero_processo] as const)
+    );
+    const enriched: PrazoEnriched[] = ficha.prazos.map((p) => ({
+      ...p,
+      numero_processo: p.processo_id
+        ? (numeroPorId.get(p.processo_id) ?? null)
+        : null,
+    }));
+    return {
+      audiencias: enriched.filter((p) => p.tipo === "audiencia"),
+      prazosSemAudiencia: enriched.filter((p) => p.tipo !== "audiencia"),
+    };
+  }, [ficha.prazos, ficha.processos]);
+  const audienciasAbertas = audiencias.filter((p) => !p.concluido).length;
 
   // Navegações reais (trocar de caso, links de fora) mandam na aba ativa; trocas
   // locais usam replaceState e por isso não mexem em `abaInicial`. Na primeira
@@ -106,6 +139,11 @@ export function FichaTabs({
               {key === "caso" && ficha.casos.length > 1 ? (
                 <span className="text-xs text-muted-foreground">
                   ({ficha.casos.length})
+                </span>
+              ) : null}
+              {key === "audiencias" && audienciasAbertas > 0 ? (
+                <span className="text-xs text-muted-foreground">
+                  ({audienciasAbertas})
                 </span>
               ) : null}
             </TabsTrigger>
@@ -208,11 +246,32 @@ export function FichaTabs({
               triggerVariant="outline"
             />
           </div>
-          {ficha.prazos.length > 0 ? (
-            <PrazosList prazos={ficha.prazos} />
+          {prazosSemAudiencia.length > 0 ? (
+            <PrazosList prazos={prazosSemAudiencia} />
           ) : (
             <p className="text-sm text-muted-foreground">
               Nenhum prazo cadastrado para este cliente.
+            </p>
+          )}
+        </TabsContent>
+
+        <TabsContent value="audiencias" className="mt-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold">Audiências deste cliente</h2>
+            <NovoPrazoDialog
+              cpf={ficha.cpf}
+              fixedTipo="audiencia"
+              processos={processoOptions}
+              processoId={ficha.processos[0]?.id}
+              casoId={casoSelecionado?.caso.id ?? ficha.casos[0]?.id}
+              triggerVariant="outline"
+            />
+          </div>
+          {audiencias.length > 0 ? (
+            <PrazosList prazos={audiencias} processos={processoOptions} />
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Nenhuma audiência cadastrada para este cliente.
             </p>
           )}
         </TabsContent>

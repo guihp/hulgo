@@ -14,6 +14,8 @@ import {
   Search,
   Trash2,
   X,
+  MapPin,
+  Video,
 } from "lucide-react";
 import {
   atualizarPrazo,
@@ -67,6 +69,12 @@ import {
 } from "@/components/prazos/prazo-datetime-fields";
 import { fichaPessoaHref } from "@/lib/utils/ficha";
 import { brazilianDateToIso, isoToBrazilianDate } from "@/lib/utils/dates";
+import { formatNumeroProcesso } from "@/lib/utils/processo";
+import {
+  isModalidadeAudiencia,
+  MODALIDADES_AUDIENCIA,
+  type ModalidadeAudiencia,
+} from "@/lib/utils/processos";
 import { cn } from "@/lib/utils";
 
 type Prazo = Tables<"app_prazos">;
@@ -158,6 +166,9 @@ function initialsFromPrazo(prazo: PrazoEnriched) {
 
 function prazoHref(prazo: Prazo) {
   if (prazo.cpf) {
+    if (prazo.tipo === "audiencia") {
+      return fichaPessoaHref({ cpf: prazo.cpf, aba: "audiencias" });
+    }
     return fichaPessoaHref({
       cpf: prazo.cpf,
       aba: prazo.caso_id ? "caso" : undefined,
@@ -173,8 +184,42 @@ function metaLine(prazo: PrazoEnriched) {
   const parts: string[] = [];
   if (prazo.cliente_nome) parts.push(prazo.cliente_nome);
   else if (prazo.cpf) parts.push(`CPF ${prazo.cpf}`);
-  if (prazo.numero_processo) parts.push(prazo.numero_processo);
+  if (prazo.numero_processo) parts.push(formatNumeroProcesso(prazo.numero_processo));
   return parts.join(" · ") || prazo.descricao || "Sem vínculo de cliente";
+}
+
+function AudienciaInfo({ prazo }: { prazo: Prazo }) {
+  if (prazo.tipo !== "audiencia") return null;
+  const modalidade = MODALIDADES_AUDIENCIA.find(
+    (m) => m.value === prazo.modalidade
+  )?.label;
+  if (!modalidade && !prazo.local && !prazo.link_audiencia) return null;
+  return (
+    <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-[#64748B]">
+      {modalidade && (
+        <span className="inline-flex items-center gap-1">
+          {prazo.modalidade === "virtual" ? (
+            <Video className="size-3.5" />
+          ) : (
+            <MapPin className="size-3.5" />
+          )}
+          {modalidade}
+        </span>
+      )}
+      {prazo.local && <span className="truncate">{prazo.local}</span>}
+      {prazo.link_audiencia && (
+        <a
+          href={prazo.link_audiencia}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 font-medium text-[#0b2148] hover:underline"
+        >
+          Entrar na sala
+          <ExternalLink className="size-3" />
+        </a>
+      )}
+    </span>
+  );
 }
 
 function dateBlockParts(dataPrazo: string, horaPrazo?: string | null) {
@@ -246,6 +291,7 @@ function matchesBusca(prazo: PrazoEnriched, q: string) {
     prazo.cpf,
     prazo.cliente_nome,
     prazo.numero_processo,
+    prazo.local,
     tipoLabel(prazo.tipo),
   ]
     .filter(Boolean)
@@ -398,11 +444,59 @@ function LembretesEditor({
   );
 }
 
+export type PrazoProcessoOption = {
+  id: number;
+  numero_processo: string;
+  nome?: string | null;
+  cpf?: string | null;
+};
+
+const PROCESSO_NENHUM = "__none__";
+const MODALIDADE_NENHUMA = "__none__";
+
+export type AudienciaDraft = {
+  local: string;
+  modalidade: ModalidadeAudiencia | "";
+  link: string;
+};
+
+const EMPTY_AUDIENCIA: AudienciaDraft = { local: "", modalidade: "", link: "" };
+
+function audienciaFromPrazo(prazo: Prazo): AudienciaDraft {
+  return {
+    local: prazo.local ?? "",
+    modalidade: isModalidadeAudiencia(prazo.modalidade) ? prazo.modalidade : "",
+    link: prazo.link_audiencia ?? "",
+  };
+}
+
+function audienciaToInput(tipo: PrazoTipo, a: AudienciaDraft) {
+  if (tipo !== "audiencia") {
+    return { local: null, modalidade: null, link_audiencia: null };
+  }
+  return {
+    local: a.local.trim() || null,
+    modalidade: a.modalidade || null,
+    link_audiencia: a.link.trim() || null,
+  };
+}
+
+function linkAudienciaInvalido(tipo: PrazoTipo, a: AudienciaDraft) {
+  const link = a.link.trim();
+  return tipo === "audiencia" && !!link && !/^https?:\/\//i.test(link);
+}
+
+function processoOptionLabel(p: PrazoProcessoOption) {
+  const numero = formatNumeroProcesso(p.numero_processo);
+  return p.nome ? `${numero} · ${p.nome}` : numero;
+}
+
 function PrazoFormFields({
   titulo,
   setTitulo,
   tipo,
   setTipo,
+  tipoFixo = false,
   data,
   setData,
   hora,
@@ -414,11 +508,17 @@ function PrazoFormFields({
   showCpf,
   cpfManual,
   setCpfManual,
+  audiencia,
+  setAudiencia,
+  processos,
+  processoSel,
+  setProcessoSel,
 }: {
   titulo: string;
   setTitulo: (v: string) => void;
   tipo: PrazoTipo;
   setTipo: (v: PrazoTipo) => void;
+  tipoFixo?: boolean;
   data: string;
   setData: (v: string) => void;
   hora: string;
@@ -430,7 +530,13 @@ function PrazoFormFields({
   showCpf?: boolean;
   cpfManual?: string;
   setCpfManual?: (v: string) => void;
+  audiencia: AudienciaDraft;
+  setAudiencia: (v: AudienciaDraft) => void;
+  processos?: PrazoProcessoOption[];
+  processoSel?: string;
+  setProcessoSel?: (v: string) => void;
 }) {
+  const isAudiencia = tipo === "audiencia";
   return (
     <div className="space-y-4">
       <div className="space-y-1.5">
@@ -439,30 +545,67 @@ function PrazoFormFields({
           className={inputShell}
           value={titulo}
           onChange={(e) => setTitulo(e.target.value)}
-          placeholder="Ex.: Responder exigência do INSS — Maria Silva"
+          placeholder={
+            isAudiencia
+              ? "Ex.: Audiência de conciliação — Maria Silva"
+              : "Ex.: Responder exigência do INSS — Maria Silva"
+          }
         />
       </div>
+      {!tipoFixo && (
+        <div className="space-y-1.5">
+          <Label className={fieldLabel}>Tipo</Label>
+          <Select value={tipo} onValueChange={(v) => setTipo(v as PrazoTipo)}>
+            <SelectTrigger className={inputShell}>
+              <SelectValue>
+                {(v) =>
+                  PRAZO_TIPOS.find((t) => t.value === v)?.label ?? "Tipo"
+                }
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {PRAZO_TIPOS.map((t) => (
+                <SelectItem key={t.value} value={t.value}>
+                  {t.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+      {processos && processos.length > 0 && setProcessoSel && (
+        <div className="space-y-1.5">
+          <Label className={fieldLabel}>Processo</Label>
+          <Select
+            value={processoSel || PROCESSO_NENHUM}
+            onValueChange={(v) =>
+              setProcessoSel(!v || v === PROCESSO_NENHUM ? "" : String(v))
+            }
+          >
+            <SelectTrigger className={cn(inputShell, "w-full")}>
+              <SelectValue>
+                {(v) => {
+                  if (!v || v === PROCESSO_NENHUM) return "Sem processo";
+                  const p = processos.find((x) => String(x.id) === v);
+                  return p ? processoOptionLabel(p) : "Processo";
+                }}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={PROCESSO_NENHUM}>Sem processo</SelectItem>
+              {processos.map((p) => (
+                <SelectItem key={p.id} value={String(p.id)}>
+                  {processoOptionLabel(p)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
       <div className="space-y-1.5">
-        <Label className={fieldLabel}>Tipo</Label>
-        <Select value={tipo} onValueChange={(v) => setTipo(v as PrazoTipo)}>
-          <SelectTrigger className={inputShell}>
-            <SelectValue>
-              {(v) =>
-                PRAZO_TIPOS.find((t) => t.value === v)?.label ?? "Tipo"
-              }
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            {PRAZO_TIPOS.map((t) => (
-              <SelectItem key={t.value} value={t.value}>
-                {t.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="space-y-1.5">
-        <Label className={fieldLabel}>Data e horário do prazo</Label>
+        <Label className={fieldLabel}>
+          {isAudiencia ? "Data e horário da audiência" : "Data e horário do prazo"}
+        </Label>
         <div className="grid gap-3 sm:grid-cols-2">
           <PrazoDateInput value={data} onChange={setData} />
           <PrazoTimeInput value={hora} onChange={setHora} />
@@ -472,6 +615,68 @@ function PrazoFormFields({
           instante
         </p>
       </div>
+      {isAudiencia && (
+        <>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label className={fieldLabel}>Modalidade</Label>
+              <Select
+                value={audiencia.modalidade || MODALIDADE_NENHUMA}
+                onValueChange={(v) =>
+                  setAudiencia({
+                    ...audiencia,
+                    modalidade: isModalidadeAudiencia(v) ? v : "",
+                  })
+                }
+              >
+                <SelectTrigger className={cn(inputShell, "w-full")}>
+                  <SelectValue>
+                    {(v) =>
+                      MODALIDADES_AUDIENCIA.find((m) => m.value === v)?.label ??
+                      "Não informada"
+                    }
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={MODALIDADE_NENHUMA}>Não informada</SelectItem>
+                  {MODALIDADES_AUDIENCIA.map((m) => (
+                    <SelectItem key={m.value} value={m.value}>
+                      {m.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className={fieldLabel}>Local</Label>
+              <Input
+                className={inputShell}
+                value={audiencia.local}
+                onChange={(e) =>
+                  setAudiencia({ ...audiencia, local: e.target.value })
+                }
+                placeholder="Ex.: Fórum de Mirinzal, sala 2"
+              />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label className={fieldLabel}>Link da audiência</Label>
+            <Input
+              className={inputShell}
+              value={audiencia.link}
+              onChange={(e) => setAudiencia({ ...audiencia, link: e.target.value })}
+              placeholder="https://..."
+              inputMode="url"
+              aria-invalid={linkAudienciaInvalido(tipo, audiencia) || undefined}
+            />
+            {linkAudienciaInvalido(tipo, audiencia) && (
+              <p className="text-xs text-red-600">
+                O link deve começar com http:// ou https://
+              </p>
+            )}
+          </div>
+        </>
+      )}
       {showCpf && setCpfManual && (
         <div className="space-y-1.5">
           <Label className={fieldLabel}>Cliente</Label>
@@ -502,21 +707,32 @@ export function NovoPrazoDialog({
   cpf,
   casoId,
   processoId,
-  triggerLabel = "Novo prazo",
+  fixedTipo,
+  processos,
+  triggerLabel,
   triggerVariant = "default",
   triggerClassName,
 }: {
   cpf?: string | null;
   casoId?: number;
   processoId?: number;
+  /** Trava o tipo (ex.: "audiencia") e esconde o seletor. */
+  fixedTipo?: PrazoTipo;
+  /** Quando informado, mostra seletor de processo (default = `processoId`). */
+  processos?: PrazoProcessoOption[];
   triggerLabel?: string;
   triggerVariant?: "default" | "outline" | "secondary";
   triggerClassName?: string;
 }) {
   const router = useRouter();
+  const tipoInicial: PrazoTipo = fixedTipo ?? "outro";
+  const isAudienciaFixa = fixedTipo === "audiencia";
   const [open, setOpen] = useState(false);
   const [titulo, setTitulo] = useState("");
-  const [tipo, setTipo] = useState<PrazoTipo>("outro");
+  const [tipo, setTipo] = useState<PrazoTipo>(tipoInicial);
+  const [audiencia, setAudiencia] = useState<AudienciaDraft>(EMPTY_AUDIENCIA);
+  const processoInicial = processoId ? String(processoId) : "";
+  const [processoSel, setProcessoSel] = useState(processoInicial);
   const [data, setData] = useState(() =>
     isoToBrazilianDate(format(new Date(), "yyyy-MM-dd"))
   );
@@ -528,7 +744,17 @@ export function NovoPrazoDialog({
   const [cpfManual, setCpfManual] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const cpfFinal = cpf ?? (cpfManual.trim() || undefined);
+  const processoSelecionado = processos?.find(
+    (p) => String(p.id) === processoSel
+  );
+  const cpfFinal =
+    cpf ?? (processoSelecionado?.cpf || cpfManual.trim() || undefined);
+  const processoIdFinal = processos
+    ? processoSel
+      ? Number(processoSel)
+      : undefined
+    : processoId;
+  const substantivo = tipo === "audiencia" ? "Audiência" : "Prazo";
 
   function reset() {
     setTitulo("");
@@ -537,18 +763,24 @@ export function NovoPrazoDialog({
     setLembretes(DEFAULT_LEMBRETES.map((d) => ({ ...d })));
     setDescricao("");
     setCpfManual("");
-    setTipo("outro");
+    setTipo(tipoInicial);
+    setAudiencia(EMPTY_AUDIENCIA);
+    setProcessoSel(processoInicial);
   }
 
   async function salvar() {
     const dataIso = brazilianDateToIso(data);
     if (!dataIso) {
-      toast.error("Data do prazo inválida");
+      toast.error("Data inválida");
       return;
     }
     const horaNorm = horaPrazoForInput(hora);
     if (!horaNorm) {
       toast.error("Horário inválido (use HH:mm)");
+      return;
+    }
+    if (linkAudienciaInvalido(tipo, audiencia)) {
+      toast.error("Link da audiência deve começar com http:// ou https://");
       return;
     }
     setLoading(true);
@@ -562,9 +794,10 @@ export function NovoPrazoDialog({
         lembretes: draftsToInputs(lembretes),
         cpf: cpfFinal,
         caso_id: casoId,
-        processo_id: processoId,
+        processo_id: processoIdFinal,
+        ...(tipo === "audiencia" ? audienciaToInput(tipo, audiencia) : {}),
       });
-      toast.success("Prazo criado");
+      toast.success(`${substantivo} criad${tipo === "audiencia" ? "a" : "o"}`);
       setOpen(false);
       reset();
       router.refresh();
@@ -586,15 +819,18 @@ export function NovoPrazoDialog({
           triggerClassName
         )}
       >
-        <Plus className="h-4 w-4" /> {triggerLabel}
+        <Plus className="h-4 w-4" />{" "}
+        {triggerLabel ?? (isAudienciaFixa ? "Nova audiência" : "Novo prazo")}
       </DialogTrigger>
       <DialogContent className="gap-0 overflow-hidden border-[#e2e8f0] bg-white p-0 sm:max-w-md">
         <DialogHeader className="shrink-0 space-y-1 border-b border-[#e2e8f0] px-4 py-3 pr-12">
           <DialogTitle className="text-lg font-bold text-[#0b2148]">
-            Novo prazo
+            {isAudienciaFixa ? "Nova audiência" : "Novo prazo"}
           </DialogTitle>
           <DialogDescription className="text-[#64748B]">
-            Cadastre exigências, recursos, perícias e audiências.
+            {isAudienciaFixa
+              ? "Data, local ou link da audiência e lembretes por push."
+              : "Cadastre exigências, recursos, perícias e audiências."}
           </DialogDescription>
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3">
@@ -603,6 +839,7 @@ export function NovoPrazoDialog({
             setTitulo={setTitulo}
             tipo={tipo}
             setTipo={setTipo}
+            tipoFixo={!!fixedTipo}
             data={data}
             setData={setData}
             hora={hora}
@@ -611,9 +848,14 @@ export function NovoPrazoDialog({
             setLembretes={setLembretes}
             descricao={descricao}
             setDescricao={setDescricao}
-            showCpf={!cpf}
+            showCpf={!cpf && !processoSelecionado?.cpf}
             cpfManual={cpfManual}
             setCpfManual={setCpfManual}
+            audiencia={audiencia}
+            setAudiencia={setAudiencia}
+            processos={processos}
+            processoSel={processoSel}
+            setProcessoSel={setProcessoSel}
           />
         </div>
         <DialogFooter className="mx-0 mb-0 shrink-0 flex-row justify-stretch gap-2 rounded-none border-[#e2e8f0] bg-[#F8FAFC] pb-[max(1rem,env(safe-area-inset-bottom))] sm:justify-end">
@@ -644,12 +886,20 @@ export function EditarPrazoDialog({
   prazo,
   open,
   onOpenChange,
+  processos,
 }: {
   prazo: PrazoEnriched;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  processos?: PrazoProcessoOption[];
 }) {
   const router = useRouter();
+  const [audiencia, setAudiencia] = useState<AudienciaDraft>(() =>
+    audienciaFromPrazo(prazo)
+  );
+  const [processoSel, setProcessoSel] = useState(
+    prazo.processo_id ? String(prazo.processo_id) : ""
+  );
   const [titulo, setTitulo] = useState(prazo.titulo);
   const [tipo, setTipo] = useState<PrazoTipo>(
     (prazo.tipo as PrazoTipo) || "outro"
@@ -673,6 +923,12 @@ export function EditarPrazoDialog({
     setHora(horaPrazoForInput(prazo.hora_prazo) || "23:59");
     setLembretes(lembretesToDrafts(prazo.lembretes));
     setDescricao(prazo.descricao ?? "");
+    setAudiencia({
+      local: prazo.local ?? "",
+      modalidade: isModalidadeAudiencia(prazo.modalidade) ? prazo.modalidade : "",
+      link: prazo.link_audiencia ?? "",
+    });
+    setProcessoSel(prazo.processo_id ? String(prazo.processo_id) : "");
   }, [
     open,
     prazo.id,
@@ -682,17 +938,25 @@ export function EditarPrazoDialog({
     prazo.hora_prazo,
     prazo.descricao,
     prazo.lembretes,
+    prazo.local,
+    prazo.modalidade,
+    prazo.link_audiencia,
+    prazo.processo_id,
   ]);
 
   async function salvar() {
     const dataIso = brazilianDateToIso(data);
     if (!dataIso) {
-      toast.error("Data do prazo inválida");
+      toast.error("Data inválida");
       return;
     }
     const horaNorm = horaPrazoForInput(hora);
     if (!horaNorm) {
       toast.error("Horário inválido (use HH:mm)");
+      return;
+    }
+    if (linkAudienciaInvalido(tipo, audiencia)) {
+      toast.error("Link da audiência deve começar com http:// ou https://");
       return;
     }
     setLoading(true);
@@ -705,8 +969,12 @@ export function EditarPrazoDialog({
         hora_prazo: horaNorm,
         descricao,
         lembretes: draftsToInputs(lembretes),
+        ...(processos
+          ? { processo_id: processoSel ? Number(processoSel) : null }
+          : {}),
+        ...audienciaToInput(tipo, audiencia),
       });
-      toast.success("Prazo atualizado");
+      toast.success(tipo === "audiencia" ? "Audiência atualizada" : "Prazo atualizado");
       onOpenChange(false);
       router.refresh();
     } catch (err) {
@@ -723,7 +991,7 @@ export function EditarPrazoDialog({
       <DialogContent className="gap-0 overflow-hidden border-[#e2e8f0] bg-white p-0 sm:max-w-md">
         <DialogHeader className="shrink-0 space-y-1 border-b border-[#e2e8f0] px-4 py-3 pr-12">
           <DialogTitle className="text-lg font-bold text-[#0b2148]">
-            Editar prazo
+            {tipo === "audiencia" ? "Editar audiência" : "Editar prazo"}
           </DialogTitle>
           <DialogDescription className="text-[#64748B]">
             Ajuste data, horário e lembretes de notificação.
@@ -743,6 +1011,11 @@ export function EditarPrazoDialog({
             setLembretes={setLembretes}
             descricao={descricao}
             setDescricao={setDescricao}
+            audiencia={audiencia}
+            setAudiencia={setAudiencia}
+            processos={processos}
+            processoSel={processoSel}
+            setProcessoSel={setProcessoSel}
           />
         </div>
         <DialogFooter className="mx-0 mb-0 shrink-0 rounded-none border-[#e2e8f0] bg-[#F8FAFC]">
@@ -802,7 +1075,46 @@ function KpiCard({
   );
 }
 
-export function PrazosPageContent({ prazos }: { prazos: PrazoEnriched[] }) {
+const SECAO_CONFIG_AUDIENCIAS: Record<
+  PrazoSecao,
+  { title: string; borderAccent: string; dot: string }
+> = {
+  atrasados: {
+    title: "Passadas — marcar como concluídas",
+    borderAccent: "border-red-500",
+    dot: "bg-red-500",
+  },
+  hoje: { title: "Hoje", borderAccent: "border-amber-500", dot: "bg-amber-500" },
+  proximos7: {
+    title: "Esta semana",
+    borderAccent: "border-[#0b2148]",
+    dot: "bg-[#0b2148]",
+  },
+  maisAdiante: {
+    title: "Próximas",
+    borderAccent: "border-slate-400",
+    dot: "bg-slate-400",
+  },
+  concluidos: {
+    title: "Histórico",
+    borderAccent: "border-slate-400",
+    dot: "bg-slate-400",
+  },
+};
+
+export function PrazosPageContent({
+  prazos,
+  mode = "prazos",
+  processos,
+}: {
+  prazos: PrazoEnriched[];
+  /** "audiencias": textos/seções de audiência e "Nova audiência" com tipo fixo. */
+  mode?: "prazos" | "audiencias";
+  /** Opções do seletor de processo nos diálogos. */
+  processos?: PrazoProcessoOption[];
+}) {
+  const isAudiencias = mode === "audiencias";
+  const secaoConfig = isAudiencias ? SECAO_CONFIG_AUDIENCIAS : SECAO_CONFIG;
   const router = useRouter();
   const [busca, setBusca] = useState("");
   const [tipoFiltro, setTipoFiltro] = useState<string>("todos");
@@ -860,9 +1172,13 @@ export function PrazosPageContent({ prazos }: { prazos: PrazoEnriched[] }) {
     return map;
   }, [filtrados]);
 
+  const ordemAbertas: PrazoSecao[] = isAudiencias
+    ? ["hoje", "proximos7", "maisAdiante", "atrasados"]
+    : ["atrasados", "hoje", "proximos7", "maisAdiante"];
   const ordemSecoes: PrazoSecao[] = ocultarConcluidos
-    ? ["atrasados", "hoje", "proximos7", "maisAdiante"]
-    : ["atrasados", "hoje", "proximos7", "maisAdiante", "concluidos"];
+    ? ordemAbertas
+    : [...ordemAbertas, "concluidos"];
+  const substantivo = isAudiencias ? "Audiência" : "Prazo";
 
   async function toggle(prazo: Prazo) {
     try {
@@ -876,7 +1192,7 @@ export function PrazosPageContent({ prazos }: { prazos: PrazoEnriched[] }) {
   async function remover(id: number) {
     try {
       await excluirPrazo(id);
-      toast.success("Prazo excluído");
+      toast.success(`${substantivo} excluíd${isAudiencias ? "a" : "o"}`);
       router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro");
@@ -888,39 +1204,72 @@ export function PrazosPageContent({ prazos }: { prazos: PrazoEnriched[] }) {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-[#0b2148]">
-            Prazos
+            {isAudiencias ? "Audiências" : "Prazos"}
           </h1>
           <p className="mt-1 text-sm capitalize text-[#64748B]">{hojeLabel}</p>
         </div>
-        <NovoPrazoDialog triggerClassName="shadow-[0_8px_24px_rgba(11,33,72,0.18)]" />
+        <NovoPrazoDialog
+          fixedTipo={isAudiencias ? "audiencia" : undefined}
+          processos={processos}
+          triggerClassName="shadow-[0_8px_24px_rgba(11,33,72,0.18)]"
+        />
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard
-          dotClass="bg-red-500"
-          label="Atrasados"
-          value={kpis.atrasados}
-          sub="Precisam de ação imediata"
-        />
-        <KpiCard
-          dotClass="bg-amber-500"
-          label="Vencem hoje"
-          value={kpis.hoje}
-          sub="Data limite é hoje"
-        />
-        <KpiCard
-          dotClass="bg-[#0b2148]"
-          label="Próximos 7 dias"
-          value={kpis.prox7}
-          sub="Na semana que vem"
-        />
-        <KpiCard
-          dotClass="bg-slate-400"
-          label="Concluídos"
-          value={kpis.concluidos}
-          sub="Encerrados no sistema"
-        />
-      </div>
+      {isAudiencias ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <KpiCard
+            dotClass="bg-amber-500"
+            label="Hoje"
+            value={kpis.hoje}
+            sub="Audiências marcadas para hoje"
+          />
+          <KpiCard
+            dotClass="bg-[#0b2148]"
+            label="Esta semana"
+            value={kpis.prox7}
+            sub="Nos próximos 7 dias"
+          />
+          <KpiCard
+            dotClass="bg-red-500"
+            label="Passadas em aberto"
+            value={kpis.atrasados}
+            sub="Já ocorreram e não foram concluídas"
+          />
+          <KpiCard
+            dotClass="bg-slate-400"
+            label="Histórico"
+            value={kpis.concluidos}
+            sub="Audiências concluídas"
+          />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <KpiCard
+            dotClass="bg-red-500"
+            label="Atrasados"
+            value={kpis.atrasados}
+            sub="Precisam de ação imediata"
+          />
+          <KpiCard
+            dotClass="bg-amber-500"
+            label="Vencem hoje"
+            value={kpis.hoje}
+            sub="Data limite é hoje"
+          />
+          <KpiCard
+            dotClass="bg-[#0b2148]"
+            label="Próximos 7 dias"
+            value={kpis.prox7}
+            sub="Na semana que vem"
+          />
+          <KpiCard
+            dotClass="bg-slate-400"
+            label="Concluídos"
+            value={kpis.concluidos}
+            sub="Encerrados no sistema"
+          />
+        </div>
+      )}
 
       <div className="flex flex-col gap-3 rounded-xl border border-[#e2e8f0] bg-white p-3 shadow-sm sm:flex-row sm:flex-wrap sm:items-center">
         <div className="relative min-w-0 flex-1 sm:min-w-[220px]">
@@ -928,56 +1277,77 @@ export function PrazosPageContent({ prazos }: { prazos: PrazoEnriched[] }) {
           <Input
             value={busca}
             onChange={(e) => setBusca(e.target.value)}
-            placeholder="Buscar por prazo, cliente ou processo..."
+            placeholder={
+              isAudiencias
+                ? "Buscar por audiência, cliente, processo ou local..."
+                : "Buscar por prazo, cliente ou processo..."
+            }
             className={cn(inputShell, "h-10 pl-9")}
           />
         </div>
-        <Select
-          value={tipoFiltro}
-          onValueChange={(v) => setTipoFiltro(v ?? "todos")}
-        >
-          <SelectTrigger className={cn(inputShell, "h-10 w-full sm:w-[180px]")}>
-            <SelectValue placeholder="Todos os tipos" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todos">Todos os tipos</SelectItem>
-            {PRAZO_TIPOS.map((t) => (
-              <SelectItem key={t.value} value={t.value}>
-                {t.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {!isAudiencias && (
+          <Select
+            value={tipoFiltro}
+            onValueChange={(v) => setTipoFiltro(v ?? "todos")}
+          >
+            <SelectTrigger className={cn(inputShell, "h-10 w-full sm:w-[180px]")}>
+              <SelectValue placeholder="Todos os tipos">
+                {(v) =>
+                  !v || v === "todos" ? "Todos os tipos" : tipoLabel(String(v))
+                }
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todos os tipos</SelectItem>
+              {PRAZO_TIPOS.map((t) => (
+                <SelectItem key={t.value} value={t.value}>
+                  {t.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         <label className="flex cursor-pointer items-center gap-2 text-sm text-[#64748B]">
           <Switch
             checked={ocultarConcluidos}
             onCheckedChange={setOcultarConcluidos}
             className="data-checked:bg-[#0b2148]"
           />
-          Ocultar concluídos ({kpis.concluidos})
+          {isAudiencias ? "Ocultar histórico" : "Ocultar concluídos"} (
+          {kpis.concluidos})
         </label>
         <p className="text-sm text-[#64748B] sm:ml-auto">
           <span className="font-semibold text-[#0b2148]">{filtrados.length}</span>{" "}
-          prazos listados
+          {isAudiencias ? "audiências listadas" : "prazos listados"}
         </p>
       </div>
 
       {prazos.length === 0 ? (
-        <EmptyState
-          icon={CalendarClock}
-          title="Nenhum prazo cadastrado"
-          description="Crie prazos de exigência do INSS, recurso, perícia ou audiência para não perder datas."
-        />
+        isAudiencias ? (
+          <EmptyState
+            icon={CalendarClock}
+            title="Nenhuma audiência cadastrada"
+            description="Cadastre audiências com data, local ou link e receba lembretes por push."
+          />
+        ) : (
+          <EmptyState
+            icon={CalendarClock}
+            title="Nenhum prazo cadastrado"
+            description="Crie prazos de exigência do INSS, recurso, perícia ou audiência para não perder datas."
+          />
+        )
       ) : filtrados.length === 0 ? (
         <div className="rounded-xl border border-dashed border-[#e2e8f0] bg-white p-8 text-center text-sm text-[#64748B]">
-          Nenhum prazo corresponde aos filtros atuais.
+          {isAudiencias
+            ? "Nenhuma audiência corresponde aos filtros atuais."
+            : "Nenhum prazo corresponde aos filtros atuais."}
         </div>
       ) : (
         <div className="space-y-8">
           {ordemSecoes.map((secao) => {
             const items = porSecao[secao];
             if (!items.length) return null;
-            const cfg = SECAO_CONFIG[secao];
+            const cfg = secaoConfig[secao];
             return (
               <section key={secao}>
                 <div
@@ -1004,6 +1374,7 @@ export function PrazosPageContent({ prazos }: { prazos: PrazoEnriched[] }) {
                       prazo={p}
                       onToggle={toggle}
                       onRemove={remover}
+                      processos={processos}
                     />
                   ))}
                 </ul>
@@ -1020,10 +1391,12 @@ function PrazoRowFull({
   prazo,
   onToggle,
   onRemove,
+  processos,
 }: {
   prazo: PrazoEnriched;
   onToggle: (p: Prazo) => void;
   onRemove: (id: number) => void;
+  processos?: PrazoProcessoOption[];
 }) {
   const [editOpen, setEditOpen] = useState(false);
   const urg = prazoUrgencia(prazo.data_prazo, prazo.concluido);
@@ -1084,6 +1457,9 @@ function PrazoRowFull({
               {tipoLabel(prazo.tipo)}
             </Badge>
             <span className="truncate text-xs text-[#64748B]">{metaLine(prazo)}</span>
+          </div>
+          <div className="mt-1 empty:hidden">
+            <AudienciaInfo prazo={prazo} />
           </div>
         </div>
       </div>
@@ -1147,6 +1523,7 @@ function PrazoRowFull({
         prazo={prazo}
         open={editOpen}
         onOpenChange={setEditOpen}
+        processos={processos}
       />
     </li>
   );
@@ -1154,7 +1531,13 @@ function PrazoRowFull({
 
 /* ---------- Lista compacta (ficha cliente / caso) ---------- */
 
-export function PrazosList({ prazos }: { prazos: PrazoEnriched[] }) {
+export function PrazosList({
+  prazos,
+  processos,
+}: {
+  prazos: PrazoEnriched[];
+  processos?: PrazoProcessoOption[];
+}) {
   const router = useRouter();
   const [mostrarConcluidos, setMostrarConcluidos] = useState(false);
 
@@ -1201,7 +1584,13 @@ export function PrazosList({ prazos }: { prazos: PrazoEnriched[] }) {
     <div className="space-y-6">
       <div className="space-y-2">
         {abertos.map((p) => (
-          <PrazoRowCompact key={p.id} prazo={p} onToggle={toggle} onRemove={remover} />
+          <PrazoRowCompact
+            key={p.id}
+            prazo={p}
+            onToggle={toggle}
+            onRemove={remover}
+            processos={processos}
+          />
         ))}
         {abertos.length === 0 && (
           <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
@@ -1228,6 +1617,7 @@ export function PrazosList({ prazos }: { prazos: PrazoEnriched[] }) {
                   prazo={p}
                   onToggle={toggle}
                   onRemove={remover}
+                  processos={processos}
                 />
               ))}
             </div>
@@ -1242,10 +1632,12 @@ function PrazoRowCompact({
   prazo,
   onToggle,
   onRemove,
+  processos,
 }: {
   prazo: PrazoEnriched;
   onToggle: (p: Prazo) => void;
   onRemove: (id: number) => void;
+  processos?: PrazoProcessoOption[];
 }) {
   const [editOpen, setEditOpen] = useState(false);
   const urg = prazoUrgencia(prazo.data_prazo, prazo.concluido);
@@ -1274,6 +1666,11 @@ function PrazoRowCompact({
             <Badge variant="outline" className={tipoBadgeClasses(prazo.tipo)}>
               {tipoLabel(prazo.tipo)}
             </Badge>
+            {prazo.numero_processo && (
+              <span className="font-mono">
+                {formatNumeroProcesso(prazo.numero_processo)}
+              </span>
+            )}
             {prazo.caso_id && (
               <Link
                 href={prazoHref(prazo) ?? `/kanban/${prazo.caso_id}`}
@@ -1285,6 +1682,9 @@ function PrazoRowCompact({
             {prazo.descricao && (
               <span className="truncate">{prazo.descricao}</span>
             )}
+          </div>
+          <div className="mt-1 empty:hidden">
+            <AudienciaInfo prazo={prazo} />
           </div>
         </div>
         <Badge variant={urg.badge} className="shrink-0">
@@ -1313,6 +1713,7 @@ function PrazoRowCompact({
         prazo={prazo}
         open={editOpen}
         onOpenChange={setEditOpen}
+        processos={processos}
       />
     </Card>
   );

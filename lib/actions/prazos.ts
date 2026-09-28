@@ -6,6 +6,10 @@ import { getAppUser } from "@/lib/actions/auth";
 import { normalizeCpf } from "@/lib/utils/cpf";
 import type { PrazoTipo } from "@/types/database";
 import {
+  isModalidadeAudiencia,
+  type ModalidadeAudiencia,
+} from "@/lib/utils/processos";
+import {
   labelForOffset,
   normalizeHoraPrazo,
   type LembreteInput,
@@ -23,7 +27,7 @@ export type NovoPrazoInput = {
   cpf?: string;
   caso_id?: number;
   processo_id?: number;
-};
+} & AudienciaCamposInput;
 
 export type AtualizarPrazoInput = {
   id: number;
@@ -33,7 +37,40 @@ export type AtualizarPrazoInput = {
   hora_prazo: string;
   descricao?: string;
   lembretes?: LembreteInput[];
+  /** Omitido = mantém; null/0 = remove vínculo */
+  processo_id?: number | null;
+} & AudienciaCamposInput;
+
+/** Usados quando tipo = 'audiencia'. Omitido no update = mantém o valor atual. */
+export type AudienciaCamposInput = {
+  local?: string | null;
+  modalidade?: ModalidadeAudiencia | null;
+  link_audiencia?: string | null;
 };
+
+function audienciaCampos(input: AudienciaCamposInput) {
+  const out: {
+    local?: string | null;
+    modalidade?: ModalidadeAudiencia | null;
+    link_audiencia?: string | null;
+  } = {};
+  if (input.local !== undefined) out.local = input.local?.trim() || null;
+  if (input.modalidade !== undefined) {
+    const m = input.modalidade || null;
+    if (m !== null && !isModalidadeAudiencia(m)) {
+      throw new Error(`Modalidade inválida: ${m}`);
+    }
+    out.modalidade = m;
+  }
+  if (input.link_audiencia !== undefined) {
+    const link = input.link_audiencia?.trim() || null;
+    if (link && !/^https?:\/\//i.test(link)) {
+      throw new Error("Link da audiência deve começar com http:// ou https://");
+    }
+    out.link_audiencia = link;
+  }
+  return out;
+}
 
 const DEFAULT_LEMBRETE_INPUTS: LembreteInput[] = [
   { offset_minutes: 60, label: "1 hora antes" },
@@ -42,6 +79,7 @@ const DEFAULT_LEMBRETE_INPUTS: LembreteInput[] = [
 
 function revalidatePrazos() {
   revalidatePath("/prazos");
+  revalidatePath("/audiencias");
 }
 
 function assertDataPrazo(data: string) {
@@ -107,6 +145,7 @@ export async function criarPrazo(input: NovoPrazoInput) {
   assertDataPrazo(input.data_prazo);
   const horaPrazo = assertHoraPrazo(input.hora_prazo);
   const lembretes = normalizeLembretes(input.lembretes);
+  const audiencia = audienciaCampos(input);
 
   // Optional FKs: omit empty/0 so inserts without vínculo don't hit *_fkey.
   const cpfNorm = input.cpf?.trim() ? normalizeCpf(input.cpf) : null;
@@ -133,6 +172,7 @@ export async function criarPrazo(input: NovoPrazoInput) {
       caso_id: casoId,
       processo_id: processoId,
       criado_por: user.id,
+      ...audiencia,
     })
     .select("id")
     .single();
@@ -152,7 +192,7 @@ export async function criarPrazo(input: NovoPrazoInput) {
     throw e instanceof Error ? e : new Error("Falha ao salvar lembretes");
   }
 
-  revalidatePath("/prazos");
+  revalidatePrazos();
   return { success: true, id: criado.id };
 }
 
@@ -165,6 +205,16 @@ export async function atualizarPrazo(input: AtualizarPrazoInput) {
   assertDataPrazo(input.data_prazo);
   const horaPrazo = assertHoraPrazo(input.hora_prazo);
   const lembretes = normalizeLembretes(input.lembretes);
+  const audiencia = audienciaCampos(input);
+  const processoPatch =
+    input.processo_id === undefined
+      ? {}
+      : {
+          processo_id:
+            typeof input.processo_id === "number" && input.processo_id > 0
+              ? input.processo_id
+              : null,
+        };
 
   const supabase = await createClient();
   const { error } = await supabase
@@ -176,6 +226,8 @@ export async function atualizarPrazo(input: AtualizarPrazoInput) {
       hora_prazo: horaPrazo,
       descricao: input.descricao?.trim() || null,
       lembrar_em: null,
+      ...processoPatch,
+      ...audiencia,
     })
     .eq("id", input.id);
 

@@ -72,6 +72,24 @@ import {
   maskNumeroProcessoInput,
   normalizeNumeroProcesso,
 } from "@/lib/utils/processo";
+import {
+  FUNIS_PROCESSO,
+  formatValorCentavos,
+  isFunilProcesso,
+  isSituacaoProcesso,
+  labelFunilProcesso,
+  normalizeAreaProcesso,
+  parseValorReais,
+  SITUACOES_PROCESSO,
+  situacaoProcessoInfo,
+  type FunilProcesso,
+} from "@/lib/utils/processos";
+import {
+  listarProcessoColunasAction,
+  type ProcessoColunaMatch,
+} from "@/lib/actions/processo-colunas";
+import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 const inputShell =
@@ -131,17 +149,32 @@ type Processo = Tables<"processos_clientes">;
 
 const PARCEIRO_NENHUM = "__none__";
 
+const SITUACAO_NENHUMA = "__none__";
+
 type ProcessoFormState = {
   nome: string;
   cpf: string;
   numero_processo: string;
   telefone: string;
   tribunal: string;
-  area: string;
+  area: FunilProcesso;
   data_nascimento: string;
   beneficio_identificado: string;
   descricao_caso: string;
   parceiro_id: string;
+  funil_coluna: string;
+  polo_ativo: string;
+  polo_passivo: string;
+  tipo_acao: string;
+  vara_comarca: string;
+  /** Texto em reais (ex.: "1.234,56") */
+  valor: string;
+  processo_origem: string;
+  situacao: string;
+  /** dd/mm/aaaa */
+  ultimo_andamento_data: string;
+  ultimo_movimento: string;
+  observacao: string;
   id?: number;
   ativo?: boolean;
 };
@@ -152,14 +185,43 @@ const EMPTY_FORM: ProcessoFormState = {
   numero_processo: "",
   telefone: "",
   tribunal: "",
-  area: "",
+  area: "previdenciario",
   data_nascimento: "",
   beneficio_identificado: "",
   descricao_caso: "",
   parceiro_id: "",
+  funil_coluna: "",
+  polo_ativo: "",
+  polo_passivo: "",
+  tipo_acao: "",
+  vara_comarca: "",
+  valor: "",
+  processo_origem: "",
+  situacao: "",
+  ultimo_andamento_data: "",
+  ultimo_movimento: "",
+  observacao: "",
 };
 
+function valorCentavosToInput(centavos: number | null | undefined): string {
+  if (centavos === null || centavos === undefined) return "";
+  return (centavos / 100).toLocaleString("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+/** "NOME (CPF 000.000.000-00)" — texto padrão do polo ativo. */
+function poloAtivoPadrao(nome: string, cpf: string): string {
+  const n = maskNomeInput(nome).trim();
+  if (!n) return "";
+  const digits = normalizeCpf(cpf);
+  if (digits.length !== 11 && digits.length !== 14) return n.toUpperCase();
+  return `${n.toUpperCase()} (${cpfCnpjDocumentLabel(digits)} ${formatCpfCnpj(digits)})`;
+}
+
 function processoToForm(processo: Processo): ProcessoFormState {
+  const origem = processo.processo_origem ?? "";
   return {
     id: processo.id,
     nome: processo.nome ?? "",
@@ -167,13 +229,35 @@ function processoToForm(processo: Processo): ProcessoFormState {
     numero_processo: maskNumeroProcessoInput(processo.numero_processo),
     telefone: maskPhoneBrInput(processo.telefone ?? ""),
     tribunal: processo.tribunal ?? "",
-    area: processo.area ?? "",
+    area: normalizeAreaProcesso(processo.area),
     data_nascimento: isoToBrazilianDate(processo.data_nascimento),
     beneficio_identificado: processo.beneficio_identificado ?? "",
     descricao_caso: processo.descricao_caso ?? "",
     parceiro_id: processo.parceiro_id ?? "",
+    funil_coluna: processo.funil_coluna ?? "",
+    polo_ativo:
+      processo.polo_ativo ?? poloAtivoPadrao(processo.nome ?? "", processo.cpf),
+    polo_passivo: processo.polo_passivo ?? "",
+    tipo_acao: processo.tipo_acao ?? "",
+    vara_comarca: processo.vara_comarca ?? "",
+    valor: valorCentavosToInput(processo.valor_centavos),
+    processo_origem: isValidNumeroProcesso(normalizeNumeroProcesso(origem))
+      ? formatNumeroProcesso(origem)
+      : origem,
+    situacao: processo.situacao ?? "",
+    ultimo_andamento_data: isoToBrazilianDate(processo.ultimo_andamento_data),
+    ultimo_movimento: processo.ultimo_movimento ?? "",
+    observacao: processo.observacao ?? "",
     ativo: processo.ativo ?? true,
   };
+}
+
+function FormSectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="pt-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#64748B] sm:col-span-2">
+      {children}
+    </p>
+  );
 }
 
 function ProcessoFormFields({
@@ -182,18 +266,24 @@ function ProcessoFormFields({
   idPrefix = "",
   parceiros,
   parceirosLoading,
+  colunas,
+  colunasLoading,
 }: {
   form: ProcessoFormState;
   setForm: React.Dispatch<React.SetStateAction<ProcessoFormState>>;
   idPrefix?: string;
   parceiros: Parceiro[];
   parceirosLoading: boolean;
+  colunas: ProcessoColunaMatch[];
+  colunasLoading: boolean;
 }) {
   const cpfLabel = cpfCnpjDocumentLabel(form.cpf);
   const fieldId = (name: string) => (idPrefix ? `${idPrefix}-${name}` : name);
+  const poloPadrao = poloAtivoPadrao(form.nome, form.cpf);
 
   return (
-    <div className="grid gap-3">
+    <div className="grid gap-3 sm:grid-cols-2">
+      <FormSectionTitle>Cliente</FormSectionTitle>
       <div className="space-y-1">
         <Label htmlFor={fieldId("nome")}>Nome</Label>
         <Input
@@ -219,22 +309,6 @@ function ProcessoFormFields({
         />
       </div>
       <div className="space-y-1">
-        <Label htmlFor={fieldId("numero_processo")}>Nº processo CNJ</Label>
-        <Input
-          id={fieldId("numero_processo")}
-          value={form.numero_processo}
-          onChange={(e) =>
-            setForm((f) => ({
-              ...f,
-              numero_processo: maskNumeroProcessoInput(e.target.value),
-            }))
-          }
-          inputMode="numeric"
-          placeholder="0000000-00.0000.0.00.0000"
-          className="font-mono"
-        />
-      </div>
-      <div className="space-y-1">
         <Label htmlFor={fieldId("telefone")}>Telefone</Label>
         <Input
           id={fieldId("telefone")}
@@ -248,22 +322,6 @@ function ProcessoFormFields({
           inputMode="tel"
           autoComplete="tel"
           placeholder="(00) 9 0000-0000"
-        />
-      </div>
-      <div className="space-y-1">
-        <Label htmlFor={fieldId("tribunal")}>Tribunal</Label>
-        <Input
-          id={fieldId("tribunal")}
-          value={form.tribunal}
-          onChange={(e) => setForm((f) => ({ ...f, tribunal: e.target.value }))}
-        />
-      </div>
-      <div className="space-y-1">
-        <Label htmlFor={fieldId("area")}>Área</Label>
-        <Input
-          id={fieldId("area")}
-          value={form.area}
-          onChange={(e) => setForm((f) => ({ ...f, area: e.target.value }))}
         />
       </div>
       <div className="space-y-1">
@@ -281,26 +339,204 @@ function ProcessoFormFields({
           placeholder="DD/MM/AAAA"
         />
       </div>
+
+      <FormSectionTitle>Processo</FormSectionTitle>
       <div className="space-y-1">
-        <Label htmlFor={fieldId("beneficio")}>Benefício</Label>
-        <BeneficioTipoSelect
-          id={fieldId("beneficio")}
-          value={form.beneficio_identificado || null}
-          onChange={(label) =>
-            setForm((f) => ({ ...f, beneficio_identificado: label ?? "" }))
-          }
-        />
-      </div>
-      <div className="space-y-1">
-        <Label htmlFor={fieldId("descricao_caso")}>Descrição</Label>
+        <Label htmlFor={fieldId("numero_processo")}>Nº processo CNJ</Label>
         <Input
-          id={fieldId("descricao_caso")}
-          value={form.descricao_caso}
+          id={fieldId("numero_processo")}
+          value={form.numero_processo}
           onChange={(e) =>
-            setForm((f) => ({ ...f, descricao_caso: e.target.value }))
+            setForm((f) => ({
+              ...f,
+              numero_processo: maskNumeroProcessoInput(e.target.value),
+            }))
           }
+          inputMode="numeric"
+          placeholder="0000000-00.0000.0.00.0000"
+          className="font-mono"
         />
       </div>
+      <div className="space-y-1">
+        <Label htmlFor={fieldId("tribunal")}>Tribunal</Label>
+        <Input
+          id={fieldId("tribunal")}
+          value={form.tribunal}
+          onChange={(e) => setForm((f) => ({ ...f, tribunal: e.target.value }))}
+        />
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor={fieldId("area")}>Área</Label>
+        <Select
+          value={form.area}
+          onValueChange={(v) => {
+            if (!isFunilProcesso(v)) return;
+            setForm((f) =>
+              f.area === v ? f : { ...f, area: v, funil_coluna: "" }
+            );
+          }}
+        >
+          <SelectTrigger id={fieldId("area")} className="w-full">
+            <SelectValue>{(v) => labelFunilProcesso(v as string)}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {FUNIS_PROCESSO.map((f) => (
+              <SelectItem key={f.value} value={f.value}>
+                {f.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor={fieldId("funil_coluna")}>Coluna do funil</Label>
+        <Select
+          value={form.funil_coluna || null}
+          onValueChange={(v) =>
+            setForm((f) => ({ ...f, funil_coluna: (v as string | null) ?? "" }))
+          }
+          disabled={colunasLoading || colunas.length === 0}
+        >
+          <SelectTrigger id={fieldId("funil_coluna")} className="w-full">
+            <SelectValue placeholder={colunasLoading ? "Carregando…" : "Primeira coluna"}>
+              {(v) => {
+                if (!v) return colunasLoading ? "Carregando…" : "Primeira coluna";
+                return colunas.find((c) => c.chave === v)?.label ?? String(v);
+              }}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {colunas.map((c) => (
+              <SelectItem key={c.id} value={c.chave}>
+                {c.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor={fieldId("tipo_acao")}>Tipo de ação</Label>
+        <Input
+          id={fieldId("tipo_acao")}
+          value={form.tipo_acao}
+          onChange={(e) => setForm((f) => ({ ...f, tipo_acao: e.target.value }))}
+          placeholder="Ex.: Cumprimento de sentença (FGTS)"
+        />
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor={fieldId("vara_comarca")}>Vara / Comarca</Label>
+        <Input
+          id={fieldId("vara_comarca")}
+          value={form.vara_comarca}
+          onChange={(e) =>
+            setForm((f) => ({ ...f, vara_comarca: e.target.value }))
+          }
+          placeholder="Ex.: Vara Única de Mirinzal"
+        />
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor={fieldId("polo_ativo")}>Polo ativo</Label>
+        <Input
+          id={fieldId("polo_ativo")}
+          value={form.polo_ativo}
+          onChange={(e) => setForm((f) => ({ ...f, polo_ativo: e.target.value }))}
+          placeholder={poloPadrao || "Autor"}
+        />
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor={fieldId("polo_passivo")}>Polo passivo</Label>
+        <Input
+          id={fieldId("polo_passivo")}
+          value={form.polo_passivo}
+          onChange={(e) =>
+            setForm((f) => ({ ...f, polo_passivo: e.target.value }))
+          }
+          placeholder={form.area === "civel" ? "Ex.: Estado do Maranhão" : "Ex.: INSS"}
+        />
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor={fieldId("valor")}>Valor</Label>
+        <div className="relative">
+          <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-sm text-muted-foreground">
+            R$
+          </span>
+          <Input
+            id={fieldId("valor")}
+            value={form.valor}
+            onChange={(e) =>
+              setForm((f) => ({
+                ...f,
+                valor: e.target.value.replace(/[^\d.,]/g, ""),
+              }))
+            }
+            onBlur={() =>
+              setForm((f) => {
+                const c = parseValorReais(f.valor);
+                return { ...f, valor: c === null ? "" : valorCentavosToInput(c) };
+              })
+            }
+            inputMode="decimal"
+            placeholder="0,00"
+            className="pl-9 tabular-nums"
+          />
+        </div>
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor={fieldId("processo_origem")}>Processo de origem</Label>
+        <Input
+          id={fieldId("processo_origem")}
+          value={form.processo_origem}
+          onChange={(e) =>
+            setForm((f) => ({ ...f, processo_origem: e.target.value }))
+          }
+          placeholder="Nº CNJ de origem"
+          className="font-mono"
+        />
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor={fieldId("situacao")}>Situação</Label>
+        <Select
+          value={form.situacao || SITUACAO_NENHUMA}
+          onValueChange={(v) =>
+            setForm((f) => ({
+              ...f,
+              situacao: !v || v === SITUACAO_NENHUMA ? "" : String(v),
+            }))
+          }
+        >
+          <SelectTrigger id={fieldId("situacao")} className="w-full">
+            <SelectValue>
+              {(v) => situacaoProcessoInfo(v as string)?.label ?? "Nenhuma"}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={SITUACAO_NENHUMA}>Nenhuma</SelectItem>
+            {SITUACOES_PROCESSO.map((s) => (
+              <SelectItem key={s.value} value={s.value}>
+                <span
+                  className={cn(
+                    "inline-block size-2 shrink-0 self-center rounded-full",
+                    s.dotClassName
+                  )}
+                />
+                {s.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      {form.area === "previdenciario" ? (
+        <div className="space-y-1">
+          <Label htmlFor={fieldId("beneficio")}>Benefício</Label>
+          <BeneficioTipoSelect
+            id={fieldId("beneficio")}
+            value={form.beneficio_identificado || null}
+            onChange={(label) =>
+              setForm((f) => ({ ...f, beneficio_identificado: label ?? "" }))
+            }
+          />
+        </div>
+      ) : null}
       <div className="space-y-1">
         <Label htmlFor={fieldId("parceiro")}>Parceiro</Label>
         {parceirosLoading ? (
@@ -348,6 +584,56 @@ function ProcessoFormFields({
           </Select>
         )}
       </div>
+
+      <FormSectionTitle>Andamento</FormSectionTitle>
+      <div className="space-y-1">
+        <Label htmlFor={fieldId("ultimo_andamento_data")}>
+          Data do último andamento
+        </Label>
+        <Input
+          id={fieldId("ultimo_andamento_data")}
+          value={form.ultimo_andamento_data}
+          onChange={(e) =>
+            setForm((f) => ({
+              ...f,
+              ultimo_andamento_data: maskBrazilianDateInput(e.target.value),
+            }))
+          }
+          inputMode="numeric"
+          placeholder="DD/MM/AAAA"
+        />
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor={fieldId("ultimo_movimento")}>Último andamento</Label>
+        <Input
+          id={fieldId("ultimo_movimento")}
+          value={form.ultimo_movimento}
+          onChange={(e) =>
+            setForm((f) => ({ ...f, ultimo_movimento: e.target.value }))
+          }
+          placeholder="Ex.: Expedido precatório"
+        />
+      </div>
+      <div className="space-y-1 sm:col-span-2">
+        <Label htmlFor={fieldId("observacao")}>Observação</Label>
+        <Textarea
+          id={fieldId("observacao")}
+          value={form.observacao}
+          onChange={(e) => setForm((f) => ({ ...f, observacao: e.target.value }))}
+          rows={2}
+          className="min-h-[60px] resize-y"
+        />
+      </div>
+      <div className="space-y-1 sm:col-span-2">
+        <Label htmlFor={fieldId("descricao_caso")}>Descrição</Label>
+        <Input
+          id={fieldId("descricao_caso")}
+          value={form.descricao_caso}
+          onChange={(e) =>
+            setForm((f) => ({ ...f, descricao_caso: e.target.value }))
+          }
+        />
+      </div>
     </div>
   );
 }
@@ -371,15 +657,50 @@ function ProcessoDialog({
   const [form, setForm] = useState<ProcessoFormState>(EMPTY_FORM);
   const [parceiros, setParceiros] = useState<Parceiro[]>([]);
   const [parceirosLoading, setParceirosLoading] = useState(false);
+  const [colunasState, setColunasState] = useState<{
+    area: FunilProcesso | null;
+    list: ProcessoColunaMatch[];
+  }>({ area: null, list: [] });
   const cpfLabel = cpfCnpjDocumentLabel(form.cpf);
 
   useEffect(() => {
     if (open) {
-      setForm(
-        processo ? processoToForm(processo) : { ...EMPTY_FORM, ...prefill }
-      );
+      if (processo) {
+        setForm(processoToForm(processo));
+      } else {
+        const base = { ...EMPTY_FORM, ...prefill };
+        setForm({
+          ...base,
+          polo_ativo: base.polo_ativo || poloAtivoPadrao(base.nome, base.cpf),
+        });
+      }
     }
   }, [open, processo, prefill]);
+
+  const area = form.area;
+  const colunas = colunasState.area === area ? colunasState.list : [];
+  const colunasLoading = open && colunasState.area !== area;
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    listarProcessoColunasAction(area)
+      .then((list) => {
+        if (cancelled) return;
+        const doFunil = list.filter((c) => c.funil === area && c.ativo);
+        setColunasState({ area, list: doFunil });
+        setForm((f) =>
+          f.area !== area || doFunil.some((c) => c.chave === f.funil_coluna)
+            ? f
+            : { ...f, funil_coluna: doFunil[0]?.chave ?? "" }
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setColunasState({ area, list: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, area]);
 
   useEffect(() => {
     if (!open) return;
@@ -425,6 +746,19 @@ function ProcessoDialog({
       toast.error("Data de nascimento inválida");
       return;
     }
+    const andamentoIso = form.ultimo_andamento_data
+      ? brazilianDateToIso(form.ultimo_andamento_data)
+      : null;
+    if (form.ultimo_andamento_data && !andamentoIso) {
+      toast.error("Data do último andamento inválida");
+      return;
+    }
+    const valorCentavos = form.valor.trim() ? parseValorReais(form.valor) : null;
+    if (form.valor.trim() && valorCentavos === null) {
+      toast.error("Valor inválido");
+      return;
+    }
+    const situacao = isSituacaoProcesso(form.situacao) ? form.situacao : null;
 
     try {
       await upsertProcesso({
@@ -434,12 +768,26 @@ function ProcessoDialog({
         numero_processo: numero,
         telefone: telefone || null,
         tribunal: form.tribunal || null,
-        area: form.area || null,
+        area: form.area,
         data_nascimento: dataIso,
-        beneficio_identificado: form.beneficio_identificado.trim() || null,
+        beneficio_identificado:
+          form.area === "previdenciario"
+            ? form.beneficio_identificado.trim() || null
+            : null,
         descricao_caso: form.descricao_caso || null,
         parceiro_id: form.parceiro_id || null,
         ativo: form.ativo ?? true,
+        funil_coluna: form.funil_coluna || null,
+        polo_ativo: form.polo_ativo.trim() || poloAtivoPadrao(nome, cpf) || null,
+        polo_passivo: form.polo_passivo.trim() || null,
+        tipo_acao: form.tipo_acao.trim() || null,
+        vara_comarca: form.vara_comarca.trim() || null,
+        valor_centavos: valorCentavos,
+        processo_origem: form.processo_origem.trim() || null,
+        situacao,
+        ultimo_andamento_data: andamentoIso,
+        ultimo_movimento: form.ultimo_movimento.trim() || null,
+        observacao: form.observacao.trim() || null,
       });
       toast.success(form.id ? "Processo atualizado" : "Processo salvo");
       onOpenChange(false);
@@ -452,7 +800,7 @@ function ProcessoDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {trigger}
-      <DialogContent className="max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
@@ -462,6 +810,8 @@ function ProcessoDialog({
           idPrefix={form.id ? `edit-${form.id}` : "new"}
           parceiros={parceiros}
           parceirosLoading={parceirosLoading}
+          colunas={colunas}
+          colunasLoading={colunasLoading}
         />
         <DialogFooter>
           <Button onClick={handleSave}>Salvar</Button>
@@ -666,7 +1016,7 @@ export function ClientesList({
                 nome: abrindoCaso.nome ?? "",
                 cpf: maskCpfCnpjInput(abrindoCaso.cpf ?? ""),
                 telefone: maskPhoneBrInput(abrindoCaso.telefone ?? ""),
-                area: abrindoCaso.area ?? "",
+                area: normalizeAreaProcesso(abrindoCaso.area),
                 data_nascimento: isoToBrazilianDate(
                   abrindoCaso.data_nascimento
                 ),
@@ -1302,6 +1652,155 @@ function CasoResumoCard({
   );
 }
 
+function ProcessoCampo({
+  label,
+  children,
+  className,
+}: {
+  label: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cn("min-w-0", className)}>
+      <dt className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[#94a3b8]">
+        {label}
+      </dt>
+      <dd className="mt-0.5 break-words text-[#0b2148]">{children}</dd>
+    </div>
+  );
+}
+
+function ProcessoFichaCard({
+  processo: p,
+  parceiroNome,
+  colunaLabel,
+  onEdit,
+}: {
+  processo: Processo;
+  parceiroNome?: string;
+  colunaLabel: string | null;
+  onEdit: () => void;
+}) {
+  const funil = normalizeAreaProcesso(p.area);
+  const situacao = situacaoProcessoInfo(p.situacao);
+  const partes = [p.polo_ativo?.trim(), p.polo_passivo?.trim()].filter(Boolean);
+  const andamentoData = p.ultimo_andamento_data
+    ? formatDate(p.ultimo_andamento_data)
+    : null;
+  const andamento = [andamentoData, p.ultimo_movimento?.trim()]
+    .filter(Boolean)
+    .join(" — ");
+  const origem = p.processo_origem?.trim();
+
+  return (
+    <Card>
+      <CardContent className="space-y-3 p-4 text-sm">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0 space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge
+                variant="outline"
+                className={cn(
+                  "text-[11px]",
+                  funil === "civel"
+                    ? "border-violet-200 bg-violet-50 text-violet-800"
+                    : "border-[#0b2148]/20 bg-[#0b2148]/8 text-[#0b2148]"
+                )}
+              >
+                {labelFunilProcesso(funil)}
+              </Badge>
+              {situacao ? (
+                <Badge
+                  variant="outline"
+                  className={cn("text-[11px]", situacao.className)}
+                >
+                  {situacao.label}
+                </Badge>
+              ) : null}
+              {colunaLabel ? (
+                <span className="text-xs text-muted-foreground">
+                  Coluna: {colunaLabel}
+                </span>
+              ) : null}
+            </div>
+            <p className="font-mono">{formatNumeroProcesso(p.numero_processo)}</p>
+            <p className="text-xs text-muted-foreground">
+              {[p.tribunal, `cadastrado em ${formatDate(p.created_at)}`]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <LinkButton
+              href={`/processos?funil=${funil}`}
+              size="sm"
+              variant="outline"
+            >
+              Ver no funil
+            </LinkButton>
+            <Button size="sm" variant="outline" onClick={onEdit}>
+              <Pencil className="mr-1 h-3.5 w-3.5" />
+              Editar
+            </Button>
+          </div>
+        </div>
+
+        <dl className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
+          {partes.length ? (
+            <ProcessoCampo label="Partes" className="sm:col-span-2">
+              {partes.join(" × ")}
+            </ProcessoCampo>
+          ) : null}
+          {p.tipo_acao?.trim() ? (
+            <ProcessoCampo label="Tipo">{p.tipo_acao}</ProcessoCampo>
+          ) : null}
+          {p.vara_comarca?.trim() ? (
+            <ProcessoCampo label="Vara / Comarca">{p.vara_comarca}</ProcessoCampo>
+          ) : null}
+          {andamento ? (
+            <ProcessoCampo label="Último andamento" className="sm:col-span-2">
+              {andamento}
+            </ProcessoCampo>
+          ) : null}
+          {p.valor_centavos !== null && p.valor_centavos !== undefined ? (
+            <ProcessoCampo label="Valor">
+              <span className="tabular-nums">
+                {formatValorCentavos(p.valor_centavos)}
+              </span>
+            </ProcessoCampo>
+          ) : null}
+          {origem ? (
+            <ProcessoCampo label="Origem">
+              <span className="font-mono">
+                {isValidNumeroProcesso(normalizeNumeroProcesso(origem))
+                  ? formatNumeroProcesso(origem)
+                  : origem}
+              </span>
+            </ProcessoCampo>
+          ) : null}
+          {funil === "previdenciario" && p.beneficio_identificado ? (
+            <ProcessoCampo label="Benefício">{p.beneficio_identificado}</ProcessoCampo>
+          ) : null}
+          {parceiroNome ? (
+            <ProcessoCampo label="Parceiro">{parceiroNome}</ProcessoCampo>
+          ) : null}
+          {p.telefone ? (
+            <ProcessoCampo label="Telefone">
+              {maskPhoneBrInput(p.telefone)}
+            </ProcessoCampo>
+          ) : null}
+          {p.observacao?.trim() ? (
+            <ProcessoCampo label="Observação" className="sm:col-span-2">
+              <span className="whitespace-pre-line">{p.observacao}</span>
+            </ProcessoCampo>
+          ) : null}
+        </dl>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function Cliente360({
   cpf,
   contactNorm: contactNormProp,
@@ -1333,6 +1832,10 @@ export function Cliente360({
   const [editingProcesso, setEditingProcesso] = useState<Processo | null>(null);
   const [parceiros, setParceiros] = useState<Parceiro[]>([]);
   const [colunas, setColunas] = useState<KanbanColunaMatch[]>([]);
+  const [processoColunas, setProcessoColunas] = useState<ProcessoColunaMatch[]>(
+    []
+  );
+  const [novoProcessoOpen, setNovoProcessoOpen] = useState(false);
   const contactNorm =
     contactNormProp ||
     phoneToContactNorm(processos[0]?.telefone ?? casos[0]?.telefone);
@@ -1367,6 +1870,41 @@ export function Cliente360({
     return map;
   }, [parceiros]);
 
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all(
+      FUNIS_PROCESSO.map((f) =>
+        listarProcessoColunasAction(f.value, true).catch(
+          () => [] as ProcessoColunaMatch[]
+        )
+      )
+    ).then((lists) => {
+      if (!cancelled) setProcessoColunas(lists.flat());
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function colunaLabelFor(p: Processo): string | null {
+    if (!p.funil_coluna) return null;
+    const funil = normalizeAreaProcesso(p.area);
+    return (
+      processoColunas.find((c) => c.funil === funil && c.chave === p.funil_coluna)
+        ?.label ?? p.funil_coluna
+    );
+  }
+
+  const novoProcessoPrefill = useMemo<Partial<ProcessoFormState>>(() => {
+    const base = processos[0] ?? casos[0];
+    return {
+      nome: base?.nome ?? "",
+      cpf: maskCpfCnpjInput(cpf ?? base?.cpf ?? ""),
+      telefone: maskPhoneBrInput(base?.telefone ?? contactNorm ?? ""),
+      data_nascimento: isoToBrazilianDate(base?.data_nascimento),
+    };
+  }, [processos, casos, cpf, contactNorm]);
+
   return (
     <div className="space-y-6">
       {showHeader ? (
@@ -1387,52 +1925,41 @@ export function Cliente360({
         title="Editar processo"
       />
 
+      <ProcessoDialog
+        open={novoProcessoOpen}
+        onOpenChange={setNovoProcessoOpen}
+        title="Cadastrar processo"
+        prefill={novoProcessoPrefill}
+      />
+
       <section>
-        <h2 className="mb-3 text-lg font-semibold">Processos ({processos.length})</h2>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-semibold">Processos ({processos.length})</h2>
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1"
+            onClick={() => setNovoProcessoOpen(true)}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Novo processo
+          </Button>
+        </div>
         {processos.length === 0 ? (
           <p className="text-sm text-muted-foreground">Nenhum processo</p>
         ) : (
           <div className="space-y-2">
-            {processos.map((p) => {
-              const parceiroNome = p.parceiro_id
-                ? parceiroNomeById.get(p.parceiro_id)
-                : undefined;
-              return (
-              <Card key={p.id}>
-                <CardContent className="flex items-start justify-between gap-3 p-4 text-sm">
-                  <div className="min-w-0">
-                    <p className="font-mono">{formatNumeroProcesso(p.numero_processo)}</p>
-                    <p className="text-muted-foreground">
-                      {p.tribunal} · {p.area} · {formatDate(p.created_at)}
-                    </p>
-                    {p.beneficio_identificado ? (
-                      <p className="mt-1 text-muted-foreground">
-                        Benefício: {p.beneficio_identificado}
-                      </p>
-                    ) : null}
-                    {parceiroNome ? (
-                      <p className="mt-1 text-muted-foreground">
-                        Parceiro: {parceiroNome}
-                      </p>
-                    ) : null}
-                    {p.telefone ? (
-                      <p className="mt-1 text-muted-foreground">
-                        {maskPhoneBrInput(p.telefone)}
-                      </p>
-                    ) : null}
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setEditingProcesso(p)}
-                  >
-                    <Pencil className="mr-1 h-3.5 w-3.5" />
-                    Editar
-                  </Button>
-                </CardContent>
-              </Card>
-              );
-            })}
+            {processos.map((p) => (
+              <ProcessoFichaCard
+                key={p.id}
+                processo={p}
+                parceiroNome={
+                  p.parceiro_id ? parceiroNomeById.get(p.parceiro_id) : undefined
+                }
+                colunaLabel={colunaLabelFor(p)}
+                onEdit={() => setEditingProcesso(p)}
+              />
+            ))}
           </div>
         )}
       </section>

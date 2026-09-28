@@ -418,14 +418,16 @@ export function NotificationsProvider({
           const prazo = payload.new as {
             id: number;
             titulo: string;
+            tipo?: string | null;
             data_prazo: string;
             hora_prazo?: string | null;
           };
+          const isAudiencia = prazo.tipo === "audiencia";
           push({
             kind: "prazo",
-            title: "📅 Novo prazo",
+            title: isAudiencia ? "⚖️ Nova audiência" : "📅 Novo prazo",
             body: `${prazo.titulo} — ${formatPrazoDateTime(prazo.data_prazo, prazo.hora_prazo)}`,
-            href: "/prazos",
+            href: isAudiencia ? "/audiencias" : "/prazos",
           });
         }
       )
@@ -464,14 +466,16 @@ export function NotificationsProvider({
           } catch {
             /* private mode */
           }
-          const titulo = row.titulo ?? `Prazo #${row.id}`;
+          const isAudiencia = row.tipo === "audiencia";
+          const titulo =
+            row.titulo ?? `${isAudiencia ? "Audiência" : "Prazo"} #${row.id}`;
           const quando = row.quando ?? "lembrete";
           const body = `${titulo} — ${quando}`;
           pushRef.current({
             kind: "prazo",
-            title: "🔔 Lembrete de prazo",
+            title: isAudiencia ? "⚖️ Audiência" : "🔔 Lembrete de prazo",
             body,
-            href: "/prazos",
+            href: isAudiencia ? "/audiencias" : "/prazos",
           });
         }
         if (cancelled) return;
