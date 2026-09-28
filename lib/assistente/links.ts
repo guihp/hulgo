@@ -5,6 +5,7 @@
 
 import { fichaPessoaHref } from "@/lib/utils/ficha";
 import { phoneToContactNorm } from "@/lib/utils/phone";
+import type { FunilProcesso } from "@/lib/utils/processos";
 
 export function assistenteFichaHref(opts: {
   cpf?: string | null;
@@ -45,4 +46,13 @@ export function assistenteKanbanHref(casoId: number | string): string {
 
 export function assistenteAtendimentoHref(contactNorm: string): string {
   return `/atendimentos/${phoneToContactNorm(contactNorm)}`;
+}
+
+/** Funil de processos (previdenciario | civel). */
+export function processosFunilHref(funil?: FunilProcesso | null): string {
+  return funil ? `/processos?funil=${funil}` : "/processos";
+}
+
+export function audienciasHref(): string {
+  return "/audiencias";
 }

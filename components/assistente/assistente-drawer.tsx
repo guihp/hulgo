@@ -223,6 +223,16 @@ function toolLabel(name: string): string {
       return "Atualizar caso";
     case "criar_cliente_caso":
       return "Criar cliente/caso";
+    case "criar_processo":
+      return "Criar processo";
+    case "atualizar_processo":
+      return "Atualizar processo";
+    case "mover_processo":
+      return "Mover processo(s)";
+    case "definir_situacao_processo":
+      return "Definir situação";
+    case "excluir_processo":
+      return "Excluir processo";
     case "propor_alteracao_prompt_agente":
       return "Alterar prompt do agente";
     case "reverter_prompt_agente":
@@ -248,7 +258,55 @@ function readNormalizedArgs(data: unknown): Record<string, unknown> | null {
   return norm as Record<string, unknown>;
 }
 
+function readDetails(data: unknown): string[] {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return [];
+  const raw = (data as Record<string, unknown>).details;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((d): d is string => typeof d === "string" && !!d.trim());
+}
+
+type PrazoConfirmExtras = {
+  data: string | null;
+  hora: string;
+  lembretes: string;
+  audiencia: { modalidade: string | null; local: string | null; link: string | null } | null;
+};
+
+function argText(args: Record<string, unknown>, key: string): string | null {
+  const v = args[key];
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+}
+
 function criarPrazoConfirmExtras(
+  args: Record<string, unknown>
+): PrazoConfirmExtras {
+  const base = criarPrazoHoraLembretes(args);
+  const modalidadeRaw = argText(args, "modalidade");
+  const local = argText(args, "local");
+  const link = argText(args, "link_audiencia");
+  const isAudiencia =
+    args.tipo === "audiencia" || Boolean(modalidadeRaw || local || link);
+  const dataIso = argText(args, "data_prazo");
+  const dataMatch = dataIso?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return {
+    ...base,
+    data: dataMatch ? `${dataMatch[3]}/${dataMatch[2]}/${dataMatch[1]}` : dataIso,
+    audiencia: isAudiencia
+      ? {
+          modalidade:
+            modalidadeRaw === "virtual"
+              ? "Virtual"
+              : modalidadeRaw === "presencial"
+                ? "Presencial"
+                : modalidadeRaw,
+          local,
+          link,
+        }
+      : null,
+  };
+}
+
+function criarPrazoHoraLembretes(
   args: Record<string, unknown>
 ): { hora: string; lembretes: string } {
   const horaRaw =
@@ -464,6 +522,8 @@ function ConfirmCard({
           return args ? criarPrazoConfirmExtras(args) : null;
         })()
       : null;
+  const details = readDetails(item.result.data);
+  const destructive = item.name === "excluir_processo";
 
   if (status === "confirmed") {
     return (
@@ -484,16 +544,49 @@ function ConfirmCard({
   }
 
   return (
-    <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2.5">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-800">
-        Confirmação necessária
+    <div
+      className={cn(
+        "mt-2 rounded-xl border px-3 py-2.5",
+        destructive
+          ? "border-red-300 bg-red-50"
+          : "border-amber-200 bg-amber-50/80"
+      )}
+    >
+      <p
+        className={cn(
+          "text-[11px] font-semibold uppercase tracking-wide",
+          destructive ? "text-red-700" : "text-amber-800"
+        )}
+      >
+        {destructive ? "Ação destrutiva — confirme" : "Confirmação necessária"}
       </p>
-      <p className="mt-1 text-xs font-medium text-[#0b2148]">{label}</p>
-      <p className="mt-0.5 text-[11px] text-[#64748B]">
+      <p
+        className={cn(
+          "mt-1 text-xs font-medium",
+          destructive ? "text-red-900" : "text-[#0b2148]"
+        )}
+      >
+        {label}
+      </p>
+      <p
+        className={cn(
+          "mt-0.5 text-[11px]",
+          destructive ? "text-red-700/80" : "text-[#64748B]"
+        )}
+      >
         {toolLabel(item.name)}
       </p>
       {prazoExtras ? (
         <p className="mt-1 text-[11px] text-[#475569]">
+          {prazoExtras.data ? (
+            <>
+              Data:{" "}
+              <span className="font-medium text-[#0b2148]">
+                {prazoExtras.data}
+              </span>
+              {" · "}
+            </>
+          ) : null}
           Horário:{" "}
           <span className="font-medium text-[#0b2148]">{prazoExtras.hora}</span>
           {" · "}
@@ -502,6 +595,51 @@ function ConfirmCard({
             {prazoExtras.lembretes}
           </span>
         </p>
+      ) : null}
+      {prazoExtras?.audiencia ? (
+        <div className="mt-1 space-y-0.5 text-[11px] text-[#475569]">
+          <p>
+            Modalidade:{" "}
+            <span className="font-medium text-[#0b2148]">
+              {prazoExtras.audiencia.modalidade ?? "não informada"}
+            </span>
+          </p>
+          {prazoExtras.audiencia.local ? (
+            <p>
+              Local:{" "}
+              <span className="font-medium text-[#0b2148]">
+                {prazoExtras.audiencia.local}
+              </span>
+            </p>
+          ) : null}
+          {prazoExtras.audiencia.link ? (
+            <p className="truncate">
+              Link:{" "}
+              <a
+                href={prazoExtras.audiencia.link}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-[#0b2148] underline underline-offset-2"
+              >
+                {prazoExtras.audiencia.link}
+              </a>
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      {details.length ? (
+        <ul
+          className={cn(
+            "mt-1.5 max-h-40 space-y-0.5 overflow-y-auto text-[11px]",
+            destructive ? "text-red-900" : "text-[#475569]"
+          )}
+        >
+          {details.map((d, i) => (
+            <li key={i} className="break-words">
+              {d}
+            </li>
+          ))}
+        </ul>
       ) : null}
       {promptPreview ? (
         <div className="mt-2 max-h-64 space-y-2 overflow-y-auto pr-0.5">
@@ -531,12 +669,17 @@ function ConfirmCard({
         <Button
           type="button"
           size="sm"
-          className="h-8 bg-[#0b2148] text-white hover:bg-[#0b2148]/90"
+          className={cn(
+            "h-8 text-white",
+            destructive
+              ? "bg-destructive hover:bg-destructive/90"
+              : "bg-[#0b2148] hover:bg-[#0b2148]/90"
+          )}
           disabled={disabled}
           onClick={() => onConfirm(messageId, id)}
         >
           <Check className="size-3.5" />
-          Confirmar
+          {destructive ? "Excluir" : "Confirmar"}
         </Button>
         <Button
           type="button"

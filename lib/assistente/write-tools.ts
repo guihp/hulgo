@@ -6,9 +6,14 @@
 
 import { randomUUID } from "crypto";
 import {
+  atualizarSituacaoProcesso,
   criarClienteCaso,
+  excluirProcesso,
+  moverProcessoColuna,
   updateCasoFields,
   updateCasoStatus,
+  upsertProcesso,
+  type UpsertProcessoInput,
 } from "@/lib/actions/casos";
 import {
   getAgenteConfig,
@@ -39,12 +44,36 @@ import {
   assistenteFichaArquivosHref,
   assistenteFichaHref,
   assistenteKanbanHref,
+  audienciasHref,
+  processosFunilHref,
 } from "@/lib/assistente/links";
 import { CASO_STATUS } from "@/lib/constants";
+import { listKanbanColunas } from "@/lib/data/kanban-colunas";
+import {
+  listProcessoColunas,
+  type ProcessoColunaMatch,
+} from "@/lib/data/processo-colunas";
 import { createClient } from "@/lib/supabase/server";
 import { PRAZO_TIPOS } from "@/lib/utils/beneficios";
-import { isValidCpf, normalizeCpf } from "@/lib/utils/cpf";
+import { formatCpf, isValidCpf, normalizeCpf } from "@/lib/utils/cpf";
 import { phoneToContactNorm } from "@/lib/utils/phone";
+import {
+  formatNumeroProcesso,
+  isValidNumeroProcesso,
+  normalizeNumeroProcesso,
+} from "@/lib/utils/processo";
+import {
+  MODALIDADES_AUDIENCIA,
+  SITUACOES_PROCESSO,
+  formatValorCentavos,
+  isModalidadeAudiencia,
+  labelFunilProcesso,
+  normalizeAreaProcesso,
+  parseValorReais,
+  type FunilProcesso,
+  type ModalidadeAudiencia,
+  type SituacaoProcesso,
+} from "@/lib/utils/processos";
 import type {
   AssistentePendingAnexo,
   AssistenteToolResult,
@@ -58,6 +87,11 @@ export const WRITE_TOOL_NAMES = [
   "anexar_documento_ficha",
   "atualizar_caso",
   "criar_cliente_caso",
+  "criar_processo",
+  "atualizar_processo",
+  "mover_processo",
+  "definir_situacao_processo",
+  "excluir_processo",
   "propor_alteracao_prompt_agente",
   "reverter_prompt_agente",
 ] as const;
@@ -100,7 +134,7 @@ export const ASSISTENTE_WRITE_TOOL_DEFINITIONS = [
     function: {
       name: "criar_prazo",
       description:
-        "Propõe criar um prazo (app_prazos). Confirmação na UI. Vínculo com cliente/caso/processo é OPCIONAL — título + data bastam. Tipos: exigencia_inss, recurso, pericia, audiencia, outro.",
+        "Propõe criar um prazo (app_prazos). Confirmação na UI. Vínculo com cliente/caso/processo é OPCIONAL — título + data bastam. Tipos: exigencia_inss, recurso, pericia, audiencia, outro. Para audiência: informe modalidade (presencial|virtual) e local (presencial) ou link_audiencia (virtual).",
       parameters: {
         type: "object",
         properties: {
@@ -148,6 +182,20 @@ export const ASSISTENTE_WRITE_TOOL_DEFINITIONS = [
             description:
               "Opcional — ID do processo só se veio de busca. Omita se sem vínculo; nunca invente.",
           },
+          local: {
+            type: "string",
+            description:
+              "Opcional (audiência) — local/endereço/sala da audiência presencial.",
+          },
+          modalidade: {
+            type: "string",
+            description: "Opcional (audiência) — presencial | virtual",
+          },
+          link_audiencia: {
+            type: "string",
+            description:
+              "Opcional (audiência virtual) — URL da sala (http:// ou https://).",
+          },
         },
         required: ["titulo", "tipo", "data_prazo"],
       },
@@ -158,12 +206,16 @@ export const ASSISTENTE_WRITE_TOOL_DEFINITIONS = [
     function: {
       name: "mover_kanban",
       description:
-        "Propõe mover um caso no funil (casos_novos.status). Confirmação na UI. Status válidos: em_atendimento, consultar_processo, abertura_processo, aguardando_analise, aguardando_aprovacao, atendimento_humano, processo_finalizado.",
+        "Propõe mover um caso/atendimento no funil de VENDAS (casos_novos.status). Não serve para processos judiciais (use mover_processo). Confirmação na UI. Status = chave de coluna ativa do funil de vendas — use listar_colunas_funis para obter as chaves; nunca invente.",
       parameters: {
         type: "object",
         properties: {
           caso_id: { type: "number", description: "ID do caso (casos_novos.id)" },
-          status: { type: "string", description: "Novo status do kanban" },
+          status: {
+            type: "string",
+            description:
+              "Chave da coluna do funil de vendas (de listar_colunas_funis)",
+          },
         },
         required: ["caso_id", "status"],
       },
@@ -250,7 +302,7 @@ export const ASSISTENTE_WRITE_TOOL_DEFINITIONS = [
     function: {
       name: "criar_cliente_caso",
       description:
-        "Propõe criar cliente/pessoa + caso de triagem em casos_novos. OBRIGATÓRIO: nome, telefone WhatsApp e status do funil. Antes: confirme telefone e pergunte o estágio (liste os status). Confirmação na UI. Use buscar_pessoas antes para evitar duplicata.",
+        "Propõe criar cliente/pessoa + caso de triagem em casos_novos. OBRIGATÓRIO: nome, telefone WhatsApp e status do funil de vendas. Antes: confirme telefone e pergunte o estágio (use listar_colunas_funis para listar as colunas). Confirmação na UI. Use buscar_pessoas antes para evitar duplicata.",
       parameters: {
         type: "object",
         properties: {
@@ -272,10 +324,171 @@ export const ASSISTENTE_WRITE_TOOL_DEFINITIONS = [
           status: {
             type: "string",
             description:
-              "Status kanban inicial OBRIGATÓRIO. Valores: em_atendimento, consultar_processo, abertura_processo, aguardando_analise, aguardando_aprovacao, atendimento_humano, processo_finalizado.",
+              "Chave da coluna inicial do funil de vendas (OBRIGATÓRIO). Use listar_colunas_funis; nunca invente.",
           },
         },
         required: ["nome", "telefone", "status"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "criar_processo",
+      description:
+        "Propõe cadastrar um processo judicial (processos_clientes) num funil de processos (previdenciario | civel). Confirmação na UI. OBRIGATÓRIO: nome, cpf, numero_processo (CNJ, 20 dígitos) e area. Use buscar_pessoas antes. Coluna = chave de listar_colunas_funis do funil da área (omitida → primeira coluna). Benefício só no Previdenciário. No Cível, pergunte polo_passivo e tipo_acao se faltarem.",
+      parameters: {
+        type: "object",
+        properties: {
+          nome: { type: "string", description: "Nome do cliente" },
+          cpf: { type: "string", description: "CPF do cliente" },
+          numero_processo: {
+            type: "string",
+            description: "Número CNJ (com ou sem máscara)",
+          },
+          area: { type: "string", description: "previdenciario | civel" },
+          telefone: { type: "string" },
+          tribunal: { type: "string", description: "Ex.: TRF1, TJMA" },
+          coluna: {
+            type: "string",
+            description:
+              "Chave da coluna do funil de processos da área (listar_colunas_funis)",
+          },
+          polo_ativo: { type: "string" },
+          polo_passivo: { type: "string" },
+          tipo_acao: { type: "string" },
+          vara_comarca: { type: "string" },
+          valor: {
+            type: "string",
+            description: "Valor da causa em reais (ex.: 11.239,05)",
+          },
+          processo_origem: {
+            type: "string",
+            description: "Número do processo de origem (opcional)",
+          },
+          situacao: {
+            type: "string",
+            description: `Etiqueta de situação: ${SITUACOES_PROCESSO.map((s) => s.value).join(" | ")}`,
+          },
+          ultimo_andamento_data: {
+            type: "string",
+            description: "yyyy-mm-dd ou dd/mm/aaaa",
+          },
+          ultimo_movimento: { type: "string" },
+          observacao: { type: "string" },
+          beneficio_identificado: {
+            type: "string",
+            description: "Só Previdenciário",
+          },
+          parceiro_id: {
+            type: "string",
+            description: "UUID de app_parceiros (só se veio de consulta)",
+          },
+        },
+        required: ["nome", "cpf", "numero_processo", "area"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "atualizar_processo",
+      description:
+        "Propõe editar um processo existente. Confirmação na UI. Envie processo_id (de busca — nunca invente) e SÓ os campos que mudam; string vazia limpa o campo. Pode trocar a área (previdenciario ↔ civel). Para mover de coluna prefira mover_processo; para situação, definir_situacao_processo.",
+      parameters: {
+        type: "object",
+        properties: {
+          processo_id: { type: "number" },
+          nome: { type: "string" },
+          cpf: { type: "string" },
+          numero_processo: { type: "string" },
+          area: { type: "string", description: "previdenciario | civel" },
+          telefone: { type: "string" },
+          tribunal: { type: "string" },
+          coluna: {
+            type: "string",
+            description: "Chave da coluna do funil (listar_colunas_funis)",
+          },
+          polo_ativo: { type: "string" },
+          polo_passivo: { type: "string" },
+          tipo_acao: { type: "string" },
+          vara_comarca: { type: "string" },
+          valor: { type: "string", description: "Valor em reais" },
+          processo_origem: { type: "string" },
+          situacao: {
+            type: "string",
+            description: `${SITUACOES_PROCESSO.map((s) => s.value).join(" | ")} (vazio limpa)`,
+          },
+          ultimo_andamento_data: { type: "string" },
+          ultimo_movimento: { type: "string" },
+          observacao: { type: "string" },
+          beneficio_identificado: {
+            type: "string",
+            description: "Só Previdenciário",
+          },
+          parceiro_id: { type: "string" },
+        },
+        required: ["processo_id"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "mover_processo",
+      description:
+        "Propõe mover um ou vários processos judiciais para uma coluna do funil de processos. Todos precisam ser do mesmo funil (área). Coluna = chave de listar_colunas_funis. Confirmação na UI.",
+      parameters: {
+        type: "object",
+        properties: {
+          processo_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "IDs de processos_clientes (de busca — nunca invente)",
+          },
+          coluna: {
+            type: "string",
+            description: "Chave da coluna de destino",
+          },
+        },
+        required: ["processo_ids", "coluna"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "definir_situacao_processo",
+      description: `Propõe definir (ou limpar com null/vazio) a etiqueta de situação de um ou vários processos. Situações: ${SITUACOES_PROCESSO.map((s) => `${s.value} (${s.label})`).join("; ")}. Confirmação na UI.`,
+      parameters: {
+        type: "object",
+        properties: {
+          processo_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "IDs de processos_clientes",
+          },
+          situacao: {
+            type: ["string", "null"],
+            description: "Chave da situação; null ou vazio limpa",
+          },
+        },
+        required: ["processo_ids"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "excluir_processo",
+      description:
+        "Propõe EXCLUIR um processo judicial (irreversível). Só advogado. Prazos e documentos vinculados perdem o vínculo (documentos voltam para a pasta geral). Confirmação na UI.",
+      parameters: {
+        type: "object",
+        properties: {
+          processo_id: { type: "number" },
+        },
+        required: ["processo_id"],
       },
     },
   },
@@ -430,11 +643,171 @@ function bool(v: unknown): boolean | null {
   return null;
 }
 
-const CASO_STATUS_VALUES = new Set(CASO_STATUS.map((s) => s.value));
 const PRAZO_TIPO_VALUES = new Set(PRAZO_TIPOS.map((t) => t.value));
 
-function statusLabel(status: string): string {
-  return CASO_STATUS.find((s) => s.value === status)?.label ?? status;
+/** Active sales-funnel columns (app_kanban_colunas) + system keys as fallback. */
+async function loadKanbanColunasMap(): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  try {
+    for (const c of await listKanbanColunas()) map.set(c.chave, c.label);
+  } catch {
+    // fall through to system keys
+  }
+  for (const s of CASO_STATUS) {
+    if (!map.has(s.value)) map.set(s.value, s.label);
+  }
+  return map;
+}
+
+function kanbanColunasOptions(map: Map<string, string>): string {
+  return [...map].map(([chave, label]) => `${chave} (${label})`).join("; ");
+}
+
+function statusLabel(status: string, map?: Map<string, string>): string {
+  return (
+    map?.get(status) ??
+    CASO_STATUS.find((s) => s.value === status)?.label ??
+    status
+  );
+}
+
+function foldText(v: string): string {
+  return v
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+/** Strict area parse — unlike normalizeAreaProcesso, unknown text is rejected. */
+function parseAreaProcesso(raw: string): FunilProcesso | null {
+  const a = foldText(raw);
+  if (!a) return null;
+  if (a.includes("civ")) return "civel";
+  if (a.startsWith("prev")) return "previdenciario";
+  return null;
+}
+
+/** Accepts situação chave or label; "" / null / limpar → null. */
+function parseSituacao(
+  raw: unknown
+): { ok: true; value: SituacaoProcesso | null } | { ok: false } {
+  if (raw === null || raw === undefined) return { ok: true, value: null };
+  if (typeof raw !== "string") return { ok: false };
+  const f = foldText(raw);
+  if (!f || ["nenhuma", "limpar", "sem situacao", "null"].includes(f)) {
+    return { ok: true, value: null };
+  }
+  const hit = SITUACOES_PROCESSO.find(
+    (s) => s.value === f || foldText(s.label) === f
+  );
+  return hit ? { ok: true, value: hit.value } : { ok: false };
+}
+
+function situacaoLabel(v: string | null): string {
+  if (!v) return "sem situação";
+  return SITUACOES_PROCESSO.find((s) => s.value === v)?.label ?? v;
+}
+
+const SITUACOES_OPTIONS = SITUACOES_PROCESSO.map(
+  (s) => `${s.value} (${s.label})`
+).join("; ");
+
+function matchColunaProcesso(
+  raw: string,
+  colunas: ProcessoColunaMatch[]
+): ProcessoColunaMatch | null {
+  const f = foldText(raw);
+  if (!f) return null;
+  return (
+    colunas.find((c) => c.chave === raw.trim()) ??
+    colunas.find((c) => foldText(c.chave) === f || foldText(c.label) === f) ??
+    null
+  );
+}
+
+function colunasOptions(colunas: ProcessoColunaMatch[]): string {
+  return colunas.map((c) => `${c.chave} (${c.label})`).join("; ");
+}
+
+type ProcessoRow = {
+  id: number;
+  nome: string | null;
+  cpf: string | null;
+  telefone: string | null;
+  numero_processo: string | null;
+  area: string | null;
+  funil_coluna: string | null;
+  beneficio_identificado: string | null;
+  parceiro_id: string | null;
+};
+
+const PROCESSO_SELECT =
+  "id, nome, cpf, telefone, numero_processo, area, funil_coluna, beneficio_identificado, parceiro_id";
+
+async function fetchProcessos(ids: number[]): Promise<ProcessoRow[]> {
+  if (!ids.length) return [];
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("processos_clientes")
+    .select(PROCESSO_SELECT)
+    .in("id", ids);
+  if (error) throw new Error(error.message);
+  return (data ?? []) as ProcessoRow[];
+}
+
+function processoLine(p: ProcessoRow): string {
+  const numero = p.numero_processo
+    ? formatNumeroProcesso(p.numero_processo)
+    : "sem número";
+  return `#${p.id} · ${numero} · ${p.nome?.trim() || "sem nome"}`;
+}
+
+function parseIdList(args: Record<string, unknown>): number[] {
+  const raw = args.processo_ids ?? args.ids ?? args.processo_id;
+  const list = Array.isArray(raw) ? raw : raw != null ? [raw] : [];
+  const out = new Set<number>();
+  for (const v of list) {
+    const n = optionalPositiveId(v);
+    if (n != null) out.add(n);
+  }
+  return [...out];
+}
+
+async function loadProcessosOrErr(
+  ids: number[]
+): Promise<{ rows: ProcessoRow[] } | ProposeErr> {
+  if (!ids.length) {
+    return {
+      ok: false,
+      summary:
+        "Informe processo_ids (IDs de processos_clientes vindos de busca — nunca invente).",
+    };
+  }
+  const rows = await fetchProcessos(ids);
+  const found = new Set(rows.map((r) => r.id));
+  const missing = ids.filter((id) => !found.has(id));
+  if (missing.length) {
+    return {
+      ok: false,
+      summary: `Processo(s) não encontrado(s): ${missing.map((id) => `#${id}`).join(", ")}. Busque de novo (listar_processos / obter_ficha).`,
+    };
+  }
+  return { rows: ids.map((id) => rows.find((r) => r.id === id)!) };
+}
+
+async function parceiroExists(id: string): Promise<boolean> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("app_parceiros")
+    .select("id")
+    .eq("id", id)
+    .maybeSingle();
+  return Boolean(data);
+}
+
+function isDataAndamento(v: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(v) || /^\d{2}\/\d{2}\/\d{4}$/.test(v);
 }
 
 function prazoTipoLabel(tipo: string): string {
@@ -488,6 +861,8 @@ type ProposeOk = {
   normalizedArgs: Record<string, unknown>;
   label: string;
   summary: string;
+  /** Extra lines for the confirmation card (e.g. affected processos). */
+  details?: string[];
 };
 
 type ProposeErr = { ok: false; summary: string };
@@ -553,6 +928,34 @@ function proposeCriarPrazo(
   const processo_id = optionalPositiveId(args.processo_id);
   const descricao = str(args.descricao) || undefined;
 
+  const local = str(args.local) || undefined;
+  const modalidadeRaw = foldText(str(args.modalidade));
+  let modalidade: ModalidadeAudiencia | undefined;
+  if (modalidadeRaw) {
+    if (!isModalidadeAudiencia(modalidadeRaw)) {
+      return {
+        ok: false,
+        summary: `modalidade inválida. Use: ${MODALIDADES_AUDIENCIA.map((m) => m.value).join(" | ")}.`,
+      };
+    }
+    modalidade = modalidadeRaw;
+  }
+  const link_audiencia = str(args.link_audiencia) || undefined;
+  if (link_audiencia && !/^https?:\/\//i.test(link_audiencia)) {
+    return {
+      ok: false,
+      summary: "link_audiencia deve começar com http:// ou https://.",
+    };
+  }
+
+  const audienciaParts = [
+    modalidade
+      ? MODALIDADES_AUDIENCIA.find((m) => m.value === modalidade)?.label
+      : null,
+    local ? `local: ${local}` : null,
+    link_audiencia ? `link: ${link_audiencia}` : null,
+  ].filter(Boolean);
+
   return {
     ok: true,
     normalizedArgs: {
@@ -565,29 +968,50 @@ function proposeCriarPrazo(
       ...(caso_id != null ? { caso_id } : {}),
       ...(processo_id != null ? { processo_id } : {}),
       ...(lembretes?.length ? { lembretes } : {}),
+      ...(local ? { local } : {}),
+      ...(modalidade ? { modalidade } : {}),
+      ...(link_audiencia ? { link_audiencia } : {}),
     },
     label: `Prazo: ${titulo}`,
-    summary: `Criar prazo "${titulo}" (${prazoTipoLabel(tipo)}) em ${data_prazo} às ${String(hora_prazo).slice(0, 5)} · lembretes: ${lembretesSummaryLine(lembretes)}.`,
+    summary:
+      `Criar prazo "${titulo}" (${prazoTipoLabel(tipo)}) em ${data_prazo} às ${String(hora_prazo).slice(0, 5)} · lembretes: ${lembretesSummaryLine(lembretes)}` +
+      (audienciaParts.length ? ` · ${audienciaParts.join(" · ")}` : "") +
+      ".",
   };
 }
 
-function proposeMoverKanban(
+async function proposeMoverKanban(
   args: Record<string, unknown>
-): ProposeOk | ProposeErr {
+): Promise<ProposeOk | ProposeErr> {
   const caso_id = num(args.caso_id) ?? num(args.id);
   const status = str(args.status);
   if (caso_id == null) return { ok: false, summary: "Informe caso_id." };
-  if (!CASO_STATUS_VALUES.has(status as CasoStatus)) {
+  const colunas = await loadKanbanColunasMap();
+  if (!colunas.has(status)) {
     return {
       ok: false,
-      summary: `Status inválido. Use: ${[...CASO_STATUS_VALUES].join(", ")}.`,
+      summary: `Coluna inválida ou inativa no funil de vendas: "${status}". Use uma destas chaves: ${kanbanColunasOptions(colunas)}.`,
     };
   }
+  const supabase = await createClient();
+  const { data: caso } = await supabase
+    .from("casos_novos")
+    .select("id, nome")
+    .eq("id", caso_id)
+    .maybeSingle();
+  if (!caso) {
+    return {
+      ok: false,
+      summary: `Caso #${caso_id} não encontrado. Busque de novo — nunca invente caso_id.`,
+    };
+  }
+  const label = statusLabel(status, colunas);
+  const nome = caso.nome?.trim();
   return {
     ok: true,
-    normalizedArgs: { caso_id, status },
-    label: `Kanban #${caso_id} → ${statusLabel(status)}`,
-    summary: `Mover caso #${caso_id} para "${statusLabel(status)}".`,
+    normalizedArgs: { caso_id, status, status_label: label },
+    label: `Kanban #${caso_id}${nome ? ` (${nome})` : ""} → ${label}`,
+    summary: `Mover caso #${caso_id}${nome ? ` (${nome})` : ""} para "${label}".`,
   };
 }
 
@@ -750,9 +1174,9 @@ function proposeAtualizarCaso(
   };
 }
 
-function proposeCriarClienteCaso(
+async function proposeCriarClienteCaso(
   args: Record<string, unknown>
-): ProposeOk | ProposeErr {
+): Promise<ProposeOk | ProposeErr> {
   const nome = str(args.nome);
   const telefone = str(args.telefone);
   if (!nome) return { ok: false, summary: "Informe o nome do cliente." };
@@ -768,14 +1192,15 @@ function proposeCriarClienteCaso(
   }
 
   const statusRaw = str(args.status);
-  if (!statusRaw || !CASO_STATUS_VALUES.has(statusRaw as CasoStatus)) {
-    const opts = CASO_STATUS.map((s) => `${s.value} (${s.label})`).join("; ");
+  const colunas = await loadKanbanColunasMap();
+  if (!statusRaw || !colunas.has(statusRaw)) {
     return {
       ok: false,
-      summary: `Informe o status do funil antes de criar. Opções: ${opts}. Pergunte ao usuário e chame de novo com status.`,
+      summary: `Informe uma coluna válida do funil de vendas antes de criar. Opções: ${kanbanColunasOptions(colunas)}. Pergunte ao usuário e chame de novo com status.`,
     };
   }
   const status = statusRaw as CasoStatus;
+  const statusNome = statusLabel(status, colunas);
 
   const cpfRaw = str(args.cpf);
   const cpf = cpfRaw ? normalizeCpf(cpfRaw) : "";
@@ -797,7 +1222,7 @@ function proposeCriarClienteCaso(
     `tel ${phoneToContactNorm(telefone)}`,
     cpf ? `CPF ${cpf}` : null,
     beneficio ? `benefício ${beneficio}` : null,
-    `funil ${statusLabel(status)}`,
+    `funil ${statusNome}`,
   ].filter(Boolean);
 
   return {
@@ -806,13 +1231,465 @@ function proposeCriarClienteCaso(
       nome,
       telefone,
       status,
+      status_label: statusNome,
       ...(cpf ? { cpf } : {}),
       ...(beneficio ? { beneficio_identificado: beneficio } : {}),
       ...(tipo_segurado ? { tipo_segurado } : {}),
       ...(area ? { area } : {}),
     },
-    label: `Criar cliente: ${nome} → ${statusLabel(status)}`,
+    label: `Criar cliente: ${nome} → ${statusNome}`,
     summary: `Criar cliente/caso: ${parts.join(" · ")}.`,
+  };
+}
+
+const PROCESSO_TEXT_KEYS = [
+  "telefone",
+  "tribunal",
+  "polo_ativo",
+  "polo_passivo",
+  "tipo_acao",
+  "vara_comarca",
+  "processo_origem",
+  "ultimo_movimento",
+  "observacao",
+  "beneficio_identificado",
+] as const;
+
+const PROCESSO_FIELD_LABELS: Record<string, string> = {
+  nome: "Nome",
+  cpf: "CPF",
+  numero_processo: "Número",
+  area: "Área",
+  funil_coluna: "Coluna",
+  telefone: "Telefone",
+  tribunal: "Tribunal",
+  polo_ativo: "Polo ativo",
+  polo_passivo: "Polo passivo",
+  tipo_acao: "Tipo de ação",
+  vara_comarca: "Vara/comarca",
+  valor_centavos: "Valor",
+  processo_origem: "Processo de origem",
+  situacao: "Situação",
+  ultimo_andamento_data: "Último andamento",
+  ultimo_movimento: "Último movimento",
+  observacao: "Observação",
+  beneficio_identificado: "Benefício",
+  parceiro_id: "Parceiro",
+};
+
+type ProcessoFields = Partial<Omit<UpsertProcessoInput, "id">>;
+
+function hasArg(args: Record<string, unknown>, key: string): boolean {
+  return key in args && args[key] !== undefined;
+}
+
+/**
+ * Validates processo fields. `update` = only keys present in args, empty
+ * clears; create = empty values are skipped. Coluna is resolved by callers
+ * (depends on the target funil).
+ */
+async function parseProcessoFields(
+  args: Record<string, unknown>,
+  update: boolean
+): Promise<{ ok: true; fields: ProcessoFields } | ProposeErr> {
+  const fields: ProcessoFields = {};
+
+  if (!update || hasArg(args, "nome")) {
+    const nome = str(args.nome);
+    if (!nome) return { ok: false, summary: "Informe o nome do cliente." };
+    fields.nome = nome;
+  }
+  if (!update || hasArg(args, "cpf")) {
+    const cpf = normalizeCpf(str(args.cpf));
+    if (cpf.length !== 11 || !isValidCpf(cpf)) {
+      return {
+        ok: false,
+        summary:
+          "CPF inválido (dígitos verificadores). Peça o CPF correto ao usuário.",
+      };
+    }
+    fields.cpf = cpf;
+  }
+  if (!update || hasArg(args, "numero_processo")) {
+    const numero = str(args.numero_processo);
+    if (!isValidNumeroProcesso(numero)) {
+      return {
+        ok: false,
+        summary: "numero_processo inválido — o número CNJ tem 20 dígitos.",
+      };
+    }
+    fields.numero_processo = normalizeNumeroProcesso(numero);
+  }
+  if (!update || hasArg(args, "area")) {
+    const area = parseAreaProcesso(str(args.area));
+    if (!area) {
+      return { ok: false, summary: "area inválida. Use: previdenciario | civel." };
+    }
+    fields.area = area;
+  }
+
+  for (const key of PROCESSO_TEXT_KEYS) {
+    if (!hasArg(args, key)) continue;
+    const v = str(args[key]);
+    if (v) fields[key] = v;
+    else if (update) fields[key] = null;
+  }
+
+  const valorKey = hasArg(args, "valor")
+    ? "valor"
+    : hasArg(args, "valor_reais")
+      ? "valor_reais"
+      : null;
+  if (valorKey) {
+    const raw = args[valorKey];
+    const empty = raw === null || (typeof raw === "string" && !raw.trim());
+    if (empty) {
+      if (update) fields.valor_centavos = null;
+    } else {
+      const centavos =
+        typeof raw === "number" || typeof raw === "string"
+          ? parseValorReais(raw)
+          : null;
+      if (centavos == null) {
+        return {
+          ok: false,
+          summary: "valor inválido — informe em reais (ex.: 11.239,05).",
+        };
+      }
+      fields.valor_centavos = centavos;
+    }
+  }
+
+  if (hasArg(args, "situacao") || args.situacao === null) {
+    const sit = parseSituacao(args.situacao);
+    if (!sit.ok) {
+      return {
+        ok: false,
+        summary: `situacao inválida. Use: ${SITUACOES_OPTIONS} (ou vazio para limpar).`,
+      };
+    }
+    if (sit.value || update) fields.situacao = sit.value;
+  }
+
+  if (hasArg(args, "ultimo_andamento_data")) {
+    const d = str(args.ultimo_andamento_data);
+    if (d && !isDataAndamento(d)) {
+      return {
+        ok: false,
+        summary: "ultimo_andamento_data deve ser yyyy-mm-dd ou dd/mm/aaaa.",
+      };
+    }
+    if (d) fields.ultimo_andamento_data = d;
+    else if (update) fields.ultimo_andamento_data = null;
+  }
+
+  if (hasArg(args, "parceiro_id")) {
+    const pid = str(args.parceiro_id);
+    if (pid) {
+      if (!(await parceiroExists(pid))) {
+        return {
+          ok: false,
+          summary: `Parceiro ${pid} não encontrado — nunca invente parceiro_id.`,
+        };
+      }
+      fields.parceiro_id = pid;
+    } else if (update) {
+      fields.parceiro_id = null;
+    }
+  }
+
+  return { ok: true, fields };
+}
+
+function processoFieldDetails(
+  fields: ProcessoFields,
+  colunaLabel?: string | null
+): string[] {
+  const out: string[] = [];
+  for (const [key, value] of Object.entries(fields)) {
+    if (value === undefined) continue;
+    const label = PROCESSO_FIELD_LABELS[key] ?? key;
+    let text: string;
+    if (value === null || value === "") text = "(limpar)";
+    else if (key === "area") text = labelFunilProcesso(String(value));
+    else if (key === "funil_coluna") text = colunaLabel || String(value);
+    else if (key === "valor_centavos") text = formatValorCentavos(Number(value));
+    else if (key === "situacao") text = situacaoLabel(String(value));
+    else if (key === "numero_processo") text = formatNumeroProcesso(String(value));
+    else if (key === "cpf") text = formatCpf(String(value));
+    else text = String(value);
+    out.push(`${label}: ${text}`);
+  }
+  return out;
+}
+
+async function resolveColunaArg(
+  args: Record<string, unknown>,
+  funil: FunilProcesso
+): Promise<
+  { ok: true; coluna: ProcessoColunaMatch | null } | ProposeErr
+> {
+  const raw = str(args.coluna) || str(args.funil_coluna);
+  if (!raw) return { ok: true, coluna: null };
+  const colunas = await listProcessoColunas(funil);
+  const coluna = matchColunaProcesso(raw, colunas);
+  if (!coluna) {
+    return {
+      ok: false,
+      summary: `Coluna "${raw}" não existe no funil ${labelFunilProcesso(funil)}. Use: ${colunasOptions(colunas)}.`,
+    };
+  }
+  return { ok: true, coluna };
+}
+
+async function proposeCriarProcesso(
+  args: Record<string, unknown>
+): Promise<ProposeOk | ProposeErr> {
+  const parsed = await parseProcessoFields(args, false);
+  if (!parsed.ok) return parsed;
+  const fields = parsed.fields;
+  const funil = fields.area as FunilProcesso;
+
+  if (funil === "civel" && fields.beneficio_identificado) {
+    return {
+      ok: false,
+      summary:
+        "Benefício só se aplica ao funil Previdenciário. Remova beneficio_identificado ou use area=previdenciario.",
+    };
+  }
+
+  const col = await resolveColunaArg(args, funil);
+  if (!col.ok) return col;
+  if (col.coluna) fields.funil_coluna = col.coluna.chave;
+
+  const supabase = await createClient();
+  const { data: dup } = await supabase
+    .from("processos_clientes")
+    .select("id, nome")
+    .eq("numero_processo", fields.numero_processo!)
+    .limit(1)
+    .maybeSingle();
+  if (dup) {
+    return {
+      ok: false,
+      summary: `Já existe o processo #${dup.id} com este número (${dup.nome ?? "sem nome"}). Use atualizar_processo com processo_id=${dup.id}.`,
+    };
+  }
+
+  const numeroFmt = formatNumeroProcesso(fields.numero_processo!);
+  const details = processoFieldDetails(fields, col.coluna?.label);
+  if (!col.coluna) details.push("Coluna: primeira coluna do funil");
+
+  return {
+    ok: true,
+    normalizedArgs: {
+      fields,
+      funil,
+      ...(col.coluna ? { coluna_label: col.coluna.label } : {}),
+    },
+    label: `Criar processo ${numeroFmt} (${fields.nome}) · ${labelFunilProcesso(funil)}`,
+    summary: `Criar processo ${numeroFmt} para ${fields.nome} no funil ${labelFunilProcesso(funil)}${col.coluna ? ` → ${col.coluna.label}` : ""}.`,
+    details,
+  };
+}
+
+async function proposeAtualizarProcesso(
+  args: Record<string, unknown>
+): Promise<ProposeOk | ProposeErr> {
+  const processo_id = optionalPositiveId(args.processo_id ?? args.id);
+  if (processo_id == null) {
+    return { ok: false, summary: "Informe processo_id (de busca — nunca invente)." };
+  }
+  const loaded = await loadProcessosOrErr([processo_id]);
+  if ("ok" in loaded) return loaded;
+  const existing = loaded.rows[0]!;
+
+  const parsed = await parseProcessoFields(args, true);
+  if (!parsed.ok) return parsed;
+  const fields = parsed.fields;
+
+  const funil = fields.area ?? normalizeAreaProcesso(existing.area);
+  const col = await resolveColunaArg(args, funil as FunilProcesso);
+  if (!col.ok) return col;
+  if (col.coluna) fields.funil_coluna = col.coluna.chave;
+
+  if (funil === "civel" && fields.beneficio_identificado) {
+    return {
+      ok: false,
+      summary: "Benefício só se aplica ao funil Previdenciário.",
+    };
+  }
+
+  if (fields.numero_processo && fields.numero_processo !== existing.numero_processo) {
+    const supabase = await createClient();
+    const { data: dup } = await supabase
+      .from("processos_clientes")
+      .select("id")
+      .eq("numero_processo", fields.numero_processo)
+      .neq("id", processo_id)
+      .limit(1)
+      .maybeSingle();
+    if (dup) {
+      return {
+        ok: false,
+        summary: `O número informado já pertence ao processo #${dup.id}.`,
+      };
+    }
+  }
+
+  if (!Object.keys(fields).length) {
+    return { ok: false, summary: "Informe ao menos um campo para atualizar." };
+  }
+
+  const details = processoFieldDetails(fields, col.coluna?.label);
+  if (fields.area && fields.area !== normalizeAreaProcesso(existing.area) && !col.coluna) {
+    details.push("Coluna: primeira coluna do novo funil");
+  }
+
+  return {
+    ok: true,
+    normalizedArgs: { processo_id, fields },
+    label: `Atualizar processo ${processoLine(existing)}`,
+    summary: `Atualizar processo ${processoLine(existing)}: ${details.join("; ")}.`,
+    details,
+  };
+}
+
+async function proposeMoverProcesso(
+  args: Record<string, unknown>
+): Promise<ProposeOk | ProposeErr> {
+  const loaded = await loadProcessosOrErr(parseIdList(args));
+  if ("ok" in loaded) return loaded;
+  const rows = loaded.rows;
+
+  const funis = new Set(rows.map((r) => normalizeAreaProcesso(r.area)));
+  if (funis.size > 1) {
+    return {
+      ok: false,
+      summary:
+        "Os processos são de funis diferentes (Previdenciário e Cível). Mova cada funil em uma chamada separada.",
+    };
+  }
+  const [funil] = [...funis] as [FunilProcesso];
+
+  const raw = str(args.coluna) || str(args.funil_coluna);
+  if (!raw) return { ok: false, summary: "Informe a coluna de destino." };
+  const col = await resolveColunaArg({ coluna: raw }, funil);
+  if (!col.ok) return col;
+  const coluna = col.coluna!;
+
+  const details = rows.map(
+    (r) =>
+      processoLine(r) +
+      (r.funil_coluna === coluna.chave ? " (já está nesta coluna)" : "")
+  );
+  const n = rows.length;
+
+  return {
+    ok: true,
+    normalizedArgs: {
+      processo_ids: rows.map((r) => r.id),
+      coluna: coluna.chave,
+      coluna_label: coluna.label,
+      funil,
+    },
+    label:
+      n === 1
+        ? `Mover processo ${processoLine(rows[0]!)} → ${coluna.label}`
+        : `Mover ${n} processos → ${coluna.label}`,
+    summary: `Mover ${n} processo(s) do funil ${labelFunilProcesso(funil)} para "${coluna.label}": ${details.join("; ")}.`,
+    details,
+  };
+}
+
+async function proposeDefinirSituacaoProcesso(
+  args: Record<string, unknown>
+): Promise<ProposeOk | ProposeErr> {
+  if (!("situacao" in args)) {
+    return {
+      ok: false,
+      summary: `Informe situacao (${SITUACOES_OPTIONS}) ou null para limpar.`,
+    };
+  }
+  const sit = parseSituacao(args.situacao);
+  if (!sit.ok) {
+    return {
+      ok: false,
+      summary: `situacao inválida. Use: ${SITUACOES_OPTIONS} (ou null para limpar).`,
+    };
+  }
+  const loaded = await loadProcessosOrErr(parseIdList(args));
+  if ("ok" in loaded) return loaded;
+  const rows = loaded.rows;
+  const label = situacaoLabel(sit.value);
+  const details = rows.map(processoLine);
+  const n = rows.length;
+  const verb = sit.value ? `Definir situação "${label}"` : "Limpar situação";
+
+  return {
+    ok: true,
+    normalizedArgs: {
+      processo_ids: rows.map((r) => r.id),
+      situacao: sit.value,
+      situacao_label: label,
+    },
+    label:
+      n === 1
+        ? `${verb} · ${processoLine(rows[0]!)}`
+        : `${verb} · ${n} processos`,
+    summary: `${verb} em ${n} processo(s): ${details.join("; ")}.`,
+    details,
+  };
+}
+
+async function proposeExcluirProcesso(
+  args: Record<string, unknown>
+): Promise<ProposeOk | ProposeErr> {
+  let user;
+  try {
+    user = await getAppUser();
+  } catch {
+    return { ok: false, summary: "Não autenticado." };
+  }
+  if (!user) return { ok: false, summary: "Não autenticado." };
+  if (user.papel !== "advogado") {
+    return {
+      ok: false,
+      summary:
+        "Só advogado pode excluir processos. Explique isso ao usuário; não tente de novo.",
+    };
+  }
+
+  const ids = parseIdList(args);
+  if (ids.length > 1) {
+    return { ok: false, summary: "Exclua um processo por vez (processo_id)." };
+  }
+  const loaded = await loadProcessosOrErr(ids);
+  if ("ok" in loaded) return loaded;
+  const p = loaded.rows[0]!;
+  const numero = p.numero_processo
+    ? formatNumeroProcesso(p.numero_processo)
+    : `#${p.id}`;
+  const nome = p.nome?.trim() || "sem nome";
+  const funil = normalizeAreaProcesso(p.area);
+
+  return {
+    ok: true,
+    normalizedArgs: {
+      processo_id: p.id,
+      numero_processo: numero,
+      nome,
+      funil,
+      ...(p.cpf ? { cpf: p.cpf } : {}),
+    },
+    label: `Excluir processo ${numero} (${nome})`,
+    summary: `EXCLUIR definitivamente o processo ${numero} de ${nome} (${labelFunilProcesso(funil)}). Prazos e documentos vinculados perdem o vínculo.`,
+    details: [
+      `Processo: ${numero}`,
+      `Cliente: ${nome}${p.cpf ? ` · CPF ${formatCpf(p.cpf)}` : ""}`,
+      `Funil: ${labelFunilProcesso(funil)}`,
+      "Ação irreversível.",
+    ],
   };
 }
 
@@ -1004,14 +1881,14 @@ async function proposeAlteracaoPromptAgente(
   };
 }
 
-function proposeWrite(
+async function proposeWrite(
   name: Exclude<
     AssistenteWriteToolName,
     "propor_alteracao_prompt_agente" | "reverter_prompt_agente"
   >,
   args: Record<string, unknown>,
   pendingAnexo?: AssistentePendingAnexo | null
-): ProposeOk | ProposeErr {
+): Promise<ProposeOk | ProposeErr> {
   switch (name) {
     case "enviar_whatsapp":
       return proposeEnviarWhatsapp(args);
@@ -1025,6 +1902,16 @@ function proposeWrite(
       return proposeAtualizarCaso(args);
     case "criar_cliente_caso":
       return proposeCriarClienteCaso(args);
+    case "criar_processo":
+      return proposeCriarProcesso(args);
+    case "atualizar_processo":
+      return proposeAtualizarProcesso(args);
+    case "mover_processo":
+      return proposeMoverProcesso(args);
+    case "definir_situacao_processo":
+      return proposeDefinirSituacaoProcesso(args);
+    case "excluir_processo":
+      return proposeExcluirProcesso(args);
   }
 }
 
@@ -1162,7 +2049,13 @@ export async function proposeAssistenteWriteTool(
     };
   }
 
-  const proposed = proposeWrite(name, args, opts?.pendingAnexo);
+  let proposed: ProposeOk | ProposeErr;
+  try {
+    proposed = await proposeWrite(name, args, opts?.pendingAnexo);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Erro ao validar ação";
+    return { ok: false, summary: msg };
+  }
   if (!proposed.ok) {
     return { ok: false, summary: proposed.summary };
   }
@@ -1174,7 +2067,10 @@ export async function proposeAssistenteWriteTool(
     confirmationId,
     confirmationLabel: proposed.label,
     summary: `Aguardando confirmação: ${proposed.summary}`,
-    data: { normalizedArgs: proposed.normalizedArgs },
+    data: {
+      normalizedArgs: proposed.normalizedArgs,
+      ...(proposed.details?.length ? { details: proposed.details } : {}),
+    },
   };
 }
 
@@ -1259,6 +2155,12 @@ async function execCriarPrazo(
     caso_id: optionalPositiveId(args.caso_id),
     processo_id: optionalPositiveId(args.processo_id),
   });
+  const local = str(args.local) || undefined;
+  const modalidadeRaw = str(args.modalidade);
+  const modalidade = isModalidadeAudiencia(modalidadeRaw)
+    ? modalidadeRaw
+    : undefined;
+  const link_audiencia = str(args.link_audiencia) || undefined;
   await criarPrazo({
     titulo,
     tipo,
@@ -1268,14 +2170,21 @@ async function execCriarPrazo(
     ...(cpf ? { cpf } : {}),
     ...links,
     ...(lembretes?.length ? { lembretes } : {}),
+    ...(local ? { local } : {}),
+    ...(modalidade ? { modalidade } : {}),
+    ...(link_audiencia ? { link_audiencia } : {}),
   });
 
+  const isAudiencia = tipo === "audiencia";
   return {
     ok: true,
-    summary: `Prazo "${titulo}" criado para ${data_prazo} às ${hora_prazo.slice(0, 5)}.`,
+    summary: `${isAudiencia ? "Audiência" : "Prazo"} "${titulo}" ${isAudiencia ? "criada" : "criado"} para ${data_prazo} às ${hora_prazo.slice(0, 5)}.${isAudiencia ? ` Link: ${audienciasHref()}.` : ""}`,
     links: [
-      cpf
-        ? { label: "Abrir ficha", href: assistenteFichaHref({ cpf }) }
+      ...(cpf
+        ? [{ label: "Abrir ficha", href: assistenteFichaHref({ cpf }) }]
+        : []),
+      isAudiencia
+        ? { label: "Ver audiências", href: audienciasHref() }
         : { label: "Ver prazos", href: "/prazos" },
     ],
   };
@@ -1299,7 +2208,7 @@ async function execMoverKanban(
   return {
     ok: true,
     summary:
-      `Caso #${caso_id} movido para "${statusLabel(status)}".` +
+      `Caso #${caso_id} movido para "${str(args.status_label) || statusLabel(status)}".` +
       (extras.length ? ` (${extras.join("; ")})` : ""),
     links: [{ label: `Caso #${caso_id}`, href: assistenteKanbanHref(caso_id) }],
   };
@@ -1420,10 +2329,10 @@ async function execCriarClienteCaso(
   if (!nome || !telefone) {
     return { ok: false, summary: "Nome e telefone são obrigatórios." };
   }
-  if (!statusRaw || !CASO_STATUS_VALUES.has(statusRaw as CasoStatus)) {
+  if (!statusRaw || !(await loadKanbanColunasMap()).has(statusRaw)) {
     return {
       ok: false,
-      summary: `Status do funil obrigatório. Use: ${[...CASO_STATUS_VALUES].join(", ")}.`,
+      summary: `Coluna do funil de vendas inválida ou inativa: "${statusRaw}". Use listar_colunas_funis.`,
     };
   }
   const status = statusRaw as CasoStatus;
@@ -1441,7 +2350,7 @@ async function execCriarClienteCaso(
   const verb = result.created ? "Criado" : "Já existia — dados completados";
   return {
     ok: true,
-    summary: `${verb}: ${result.nome} (caso #${result.casoId}, ${statusLabel(result.status)}). Links: ficha ${result.href}, kanban ${assistenteKanbanHref(result.casoId)}.`,
+    summary: `${verb}: ${result.nome} (caso #${result.casoId}, ${result.status === status ? str(args.status_label) || statusLabel(result.status) : statusLabel(result.status)}). Links: ficha ${result.href}, kanban ${assistenteKanbanHref(result.casoId)}.`,
     links: [
       { label: "Abrir ficha", href: result.href },
       {
@@ -1454,6 +2363,144 @@ async function execCriarClienteCaso(
       { label: "Abrir no Kanban", href: assistenteKanbanHref(result.casoId) },
     ],
     data: result,
+  };
+}
+
+function processoLinks(
+  funil: FunilProcesso,
+  cpf?: string | null
+): { label: string; href: string }[] {
+  return [
+    ...(cpf ? [{ label: "Abrir ficha", href: assistenteFichaHref({ cpf }) }] : []),
+    {
+      label: `Processos ${labelFunilProcesso(funil)}`,
+      href: processosFunilHref(funil),
+    },
+  ];
+}
+
+async function execCriarProcesso(
+  args: Record<string, unknown>
+): Promise<AssistenteToolResult> {
+  const fields = asRecord(args.fields) as ProcessoFields;
+  if (!fields.nome || !fields.cpf || !fields.numero_processo) {
+    return { ok: false, summary: "Dados incompletos para criar o processo." };
+  }
+  await upsertProcesso({
+    ...fields,
+    nome: fields.nome,
+    cpf: fields.cpf,
+    numero_processo: fields.numero_processo,
+  });
+
+  const funil = normalizeAreaProcesso(fields.area);
+  const supabase = await createClient();
+  const { data: row } = await supabase
+    .from("processos_clientes")
+    .select("id, funil_coluna")
+    .eq("numero_processo", fields.numero_processo)
+    .order("id", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const numeroFmt = formatNumeroProcesso(fields.numero_processo);
+  const funilLinks = processoLinks(funil, fields.cpf);
+
+  return {
+    ok: true,
+    summary: `Processo ${numeroFmt} criado para ${fields.nome}${row ? ` (#${row.id})` : ""} no funil ${labelFunilProcesso(funil)}. Links: ${funilLinks.map((l) => l.href).join(", ")}.`,
+    links: funilLinks,
+    data: row ? { processo_id: row.id, funil_coluna: row.funil_coluna } : undefined,
+  };
+}
+
+async function execAtualizarProcesso(
+  args: Record<string, unknown>
+): Promise<AssistenteToolResult> {
+  const processo_id = optionalPositiveId(args.processo_id);
+  if (processo_id == null) return { ok: false, summary: "processo_id ausente." };
+  const [existing] = await fetchProcessos([processo_id]);
+  if (!existing) return { ok: false, summary: `Processo #${processo_id} não encontrado.` };
+
+  const fields = asRecord(args.fields) as ProcessoFields;
+  // upsertProcesso always rewrites beneficio/parceiro — keep current values unless changed.
+  await upsertProcesso({
+    id: processo_id,
+    nome: existing.nome ?? "",
+    cpf: existing.cpf ?? "",
+    numero_processo: existing.numero_processo ?? "",
+    beneficio_identificado: existing.beneficio_identificado,
+    parceiro_id: existing.parceiro_id,
+    ...fields,
+  });
+
+  const funil = normalizeAreaProcesso(fields.area ?? existing.area);
+  const cpf = fields.cpf ?? existing.cpf;
+  const funilLinks = processoLinks(funil, cpf);
+  return {
+    ok: true,
+    summary: `Processo ${processoLine({ ...existing, ...fields, id: processo_id } as ProcessoRow)} atualizado. Links: ${funilLinks.map((l) => l.href).join(", ")}.`,
+    links: funilLinks,
+  };
+}
+
+async function execMoverProcesso(
+  args: Record<string, unknown>
+): Promise<AssistenteToolResult> {
+  const ids = parseIdList(args);
+  const coluna = str(args.coluna);
+  if (!ids.length || !coluna) {
+    return { ok: false, summary: "processo_ids e coluna são obrigatórios." };
+  }
+  const result = await moverProcessoColuna(ids, coluna);
+  const funil = (str(args.funil) || "previdenciario") as FunilProcesso;
+  const label = str(args.coluna_label) || coluna;
+  return {
+    ok: true,
+    summary: `${result.count} processo(s) movido(s) para "${label}". Link: ${processosFunilHref(funil)}.`,
+    links: [
+      {
+        label: `Processos ${labelFunilProcesso(funil)}`,
+        href: processosFunilHref(funil),
+      },
+    ],
+  };
+}
+
+async function execDefinirSituacaoProcesso(
+  args: Record<string, unknown>
+): Promise<AssistenteToolResult> {
+  const ids = parseIdList(args);
+  if (!ids.length) return { ok: false, summary: "processo_ids ausente." };
+  const situacao = str(args.situacao) || null;
+  const result = await atualizarSituacaoProcesso(ids, situacao);
+  const rows = await fetchProcessos(ids.slice(0, 1));
+  const funil = normalizeAreaProcesso(rows[0]?.area);
+  return {
+    ok: true,
+    summary: situacao
+      ? `Situação "${situacaoLabel(situacao)}" definida em ${result.count} processo(s).`
+      : `Situação removida de ${result.count} processo(s).`,
+    links: [
+      {
+        label: `Processos ${labelFunilProcesso(funil)}`,
+        href: processosFunilHref(funil),
+      },
+    ],
+  };
+}
+
+async function execExcluirProcesso(
+  args: Record<string, unknown>
+): Promise<AssistenteToolResult> {
+  const processo_id = optionalPositiveId(args.processo_id);
+  if (processo_id == null) return { ok: false, summary: "processo_id ausente." };
+  await excluirProcesso(processo_id);
+  const funil = (str(args.funil) || "previdenciario") as FunilProcesso;
+  const cpf = str(args.cpf) || null;
+  return {
+    ok: true,
+    summary: `Processo ${str(args.numero_processo) || `#${processo_id}`} (${str(args.nome) || "cliente"}) excluído.`,
+    links: processoLinks(funil, cpf),
   };
 }
 
@@ -1549,6 +2596,16 @@ export async function executeAssistenteWriteTool(
         return await execAtualizarCaso(args);
       case "criar_cliente_caso":
         return await execCriarClienteCaso(args);
+      case "criar_processo":
+        return await execCriarProcesso(args);
+      case "atualizar_processo":
+        return await execAtualizarProcesso(args);
+      case "mover_processo":
+        return await execMoverProcesso(args);
+      case "definir_situacao_processo":
+        return await execDefinirSituacaoProcesso(args);
+      case "excluir_processo":
+        return await execExcluirProcesso(args);
       case "propor_alteracao_prompt_agente":
         return await execProporAlteracaoPromptAgente(args);
       case "reverter_prompt_agente":

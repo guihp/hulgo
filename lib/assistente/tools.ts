@@ -5,6 +5,22 @@ import {
 } from "@/lib/actions/configuracoes";
 import { getAppUser } from "@/lib/actions/auth";
 import { loadFichaPessoa } from "@/lib/data/ficha";
+import { listKanbanColunas } from "@/lib/data/kanban-colunas";
+import {
+  labelDaColunaProcesso,
+  listProcessoColunasTodas,
+  type ProcessoColunaMatch,
+} from "@/lib/data/processo-colunas";
+import {
+  formatValorCentavos,
+  isFunilProcesso,
+  labelFunilProcesso,
+  normalizeAreaProcesso,
+  SITUACOES_PROCESSO,
+  situacaoProcessoInfo,
+  type FunilProcesso,
+} from "@/lib/utils/processos";
+import type { Tables } from "@/types/database";
 import {
   clipPreview,
   extractPromptSection,
@@ -60,7 +76,7 @@ export const ASSISTENTE_TOOL_DEFINITIONS = [
     function: {
       name: "obter_ficha",
       description:
-        "Carrega a ficha 360 de uma pessoa (processos, casos, prazos, contagem de mensagens). Informe cpf e/ou telefone/contact_norm.",
+        "Carrega a ficha 360 de uma pessoa: processos (área/funil, coluna, partes, tipo de ação, vara, valor, situação, último andamento), casos do funil de vendas, prazos e audiências (separadas), contagem de mensagens. Informe cpf e/ou telefone/contact_norm.",
       parameters: {
         type: "object",
         properties: {
@@ -102,11 +118,16 @@ export const ASSISTENTE_TOOL_DEFINITIONS = [
     function: {
       name: "listar_prazos",
       description:
-        "Lista prazos (app_prazos). Pode filtrar por CPF, próximos N dias ou só abertos.",
+        "Lista prazos (app_prazos). Filtros: CPF, tipo (ex.: audiencia), próximos N dias, só abertos. Audiências trazem local, modalidade e link.",
       parameters: {
         type: "object",
         properties: {
           cpf: { type: "string" },
+          tipo: {
+            type: "string",
+            description:
+              "exigencia_inss | recurso | pericia | audiencia | outro. Use audiencia para 'quais audiências tenho'.",
+          },
           dias: {
             type: "number",
             description: "Janela em dias a partir de hoje (ex.: 7). Omitir = todos.",
@@ -118,6 +139,46 @@ export const ASSISTENTE_TOOL_DEFINITIONS = [
           limite: { type: "number", description: "Máximo (padrão 30, máx. 50)" },
         },
       },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "listar_processos",
+      description:
+        "Lista processos judiciais (processos_clientes) dos funis de processos. Filtros: funil, coluna (chave), situacao, parceiro_id, texto (nome, CPF ou nº do processo). Retorna cards resumidos com processo_id e link /processos?funil=...",
+      parameters: {
+        type: "object",
+        properties: {
+          funil: {
+            type: "string",
+            description: "previdenciario | civel. Omitir = ambos.",
+          },
+          coluna: {
+            type: "string",
+            description: "Chave da coluna do funil (veja listar_colunas_funis).",
+          },
+          situacao: {
+            type: "string",
+            description: `${SITUACOES_PROCESSO.map((s) => s.value).join(" | ")}`,
+          },
+          parceiro_id: { type: "string", description: "UUID do parceiro" },
+          texto: {
+            type: "string",
+            description: "Nome, CPF ou trecho do número do processo",
+          },
+          limite: { type: "number", description: "Máximo (padrão 20, máx. 50)" },
+        },
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "listar_colunas_funis",
+      description:
+        "Colunas ATIVAS atuais: funil de vendas/atendimento (casos, mover_kanban/criar_cliente_caso) e funis de processos previdenciario e civel (mover_processo/criar_processo). Chame antes de mover ou criar para usar chaves válidas.",
+      parameters: { type: "object", properties: {} },
     },
   },
   {
@@ -237,6 +298,90 @@ function bool(v: unknown, fallback: boolean): boolean {
 
 function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.floor(n)));
+}
+
+/** Drops null/undefined/"" so tool payloads stay small. */
+function compact<T extends Record<string, unknown>>(obj: T): Partial<T> {
+  const out: Partial<T> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v === null || v === undefined || v === "") continue;
+    (out as Record<string, unknown>)[k] = v;
+  }
+  return out;
+}
+
+function processosFunilHref(funil: FunilProcesso): string {
+  return `/processos?funil=${funil}`;
+}
+
+function resumoProcesso(
+  p: Tables<"processos_clientes">,
+  colunas: Record<FunilProcesso, ProcessoColunaMatch[]> | null
+) {
+  const funil = normalizeAreaProcesso(p.area);
+  return {
+    ...compact({
+      id: p.id,
+      nome: p.nome,
+      cpf: p.cpf,
+      numero_processo: p.numero_processo,
+      tribunal: p.tribunal,
+      telefone: p.telefone,
+      coluna: p.funil_coluna,
+      coluna_nome: p.funil_coluna
+        ? colunas
+          ? labelDaColunaProcesso(p.funil_coluna, colunas[funil])
+          : p.funil_coluna
+        : null,
+      polo_ativo: p.polo_ativo,
+      polo_passivo: p.polo_passivo,
+      tipo_acao: p.tipo_acao,
+      vara_comarca: p.vara_comarca,
+      valor:
+        p.valor_centavos != null ? formatValorCentavos(p.valor_centavos) : null,
+      processo_origem: p.processo_origem,
+      situacao: p.situacao,
+      situacao_nome: situacaoProcessoInfo(p.situacao)?.label ?? null,
+      beneficio: funil === "previdenciario" ? p.beneficio_identificado : null,
+      ultimo_andamento_data: p.ultimo_andamento_data,
+      ultimo_movimento: p.ultimo_movimento
+        ? clipPreview(p.ultimo_movimento, 160)
+        : null,
+      observacao: p.observacao ? clipPreview(p.observacao, 160) : null,
+      parceiro_id: p.parceiro_id,
+    }),
+    funil,
+    href_funil: processosFunilHref(funil),
+  };
+}
+
+function resumoAudiencia(
+  p: Pick<
+    Tables<"app_prazos">,
+    | "id"
+    | "titulo"
+    | "data_prazo"
+    | "hora_prazo"
+    | "local"
+    | "modalidade"
+    | "link_audiencia"
+    | "processo_id"
+    | "cpf"
+    | "concluido"
+  >
+) {
+  return compact({
+    id: p.id,
+    titulo: p.titulo,
+    data: p.data_prazo,
+    hora: p.hora_prazo ? p.hora_prazo.slice(0, 5) : null,
+    modalidade: p.modalidade,
+    local: p.local,
+    link: p.link_audiencia,
+    processo_id: p.processo_id,
+    cpf: p.cpf,
+    concluido: p.concluido || null,
+  });
 }
 
 async function toolBuscarPessoas(
@@ -382,18 +527,19 @@ async function toolObterFicha(
     contactNorm: ficha.contactNorm,
   });
 
+  const colunasProc = ficha.processos.length
+    ? await listProcessoColunasTodas().catch(() => null)
+    : null;
+
+  const audiencias = ficha.prazos.filter((p) => p.tipo === "audiencia");
+  const outrosPrazos = ficha.prazos.filter((p) => p.tipo !== "audiencia");
+
   const resumo = {
     cpf: ficha.cpf,
     contact_norm: ficha.contactNorm,
     href,
     arquivos_href: arquivosHref,
-    processos: ficha.processos.map((p) => ({
-      id: p.id,
-      nome: p.nome,
-      numero_processo: p.numero_processo,
-      tribunal: p.tribunal,
-      telefone: p.telefone,
-    })),
+    processos: ficha.processos.map((p) => resumoProcesso(p, colunasProc)),
     casos: ficha.casos.map((c) => ({
       id: c.id,
       nome: c.nome,
@@ -402,13 +548,16 @@ async function toolObterFicha(
       telefone: c.telefone,
       href: assistenteKanbanHref(c.id),
     })),
-    prazos: ficha.prazos.map((p) => ({
+    prazos: outrosPrazos.map((p) => ({
       id: p.id,
       titulo: p.titulo,
       data_prazo: p.data_prazo,
+      hora_prazo: p.hora_prazo,
       tipo: p.tipo,
+      processo_id: p.processo_id,
       concluido: p.concluido,
     })),
+    audiencias: audiencias.map(resumoAudiencia),
     mensagens_count: ficha.mensagens.length,
     documentos_count: ficha.documentos.length,
   };
@@ -423,14 +572,24 @@ async function toolObterFicha(
     label: `Kanban #${c.id}`,
     href: assistenteKanbanHref(c.id),
   }));
+  const funisLinks = Array.from(
+    new Set(resumo.processos.map((p) => p.funil))
+  ).map((f) => ({
+    label: `Processos ${labelFunilProcesso(f)}`,
+    href: processosFunilHref(f),
+  }));
+  if (audiencias.length) {
+    funisLinks.push({ label: "Audiências", href: "/audiencias" });
+  }
 
   return {
     ok: true,
-    summary: `Ficha de ${nome}: ${resumo.casos.length} caso(s), ${resumo.processos.length} processo(s), ${resumo.prazos.length} prazo(s), ${resumo.mensagens_count} mensagem(ns). Ficha: ${href}. Arquivos: ${arquivosHref}.`,
+    summary: `Ficha de ${nome}: ${resumo.casos.length} caso(s), ${resumo.processos.length} processo(s), ${resumo.prazos.length} prazo(s), ${resumo.audiencias.length} audiência(s), ${resumo.mensagens_count} mensagem(ns). Ficha: ${href}. Arquivos: ${arquivosHref}.`,
     links: [
       { label: "Abrir ficha", href },
       { label: "Pastas / arquivos", href: arquivosHref },
       ...casoLinks,
+      ...funisLinks,
     ],
     data: resumo,
   };
@@ -495,17 +654,20 @@ async function toolListarPrazos(
   const apenasAbertos = bool(args.apenas_abertos, true);
   const cpf = str(args.cpf) ? normalizeCpf(str(args.cpf)) : "";
   const dias = args.dias != null ? clamp(num(args.dias, 7), 1, 365) : null;
+  const tipo = str(args.tipo).toLowerCase();
 
   let query = supabase
     .from("app_prazos")
     .select(
-      "id, titulo, tipo, data_prazo, descricao, cpf, caso_id, processo_id, concluido"
+      "id, titulo, tipo, data_prazo, hora_prazo, descricao, cpf, caso_id, processo_id, concluido, local, modalidade, link_audiencia"
     )
     .order("data_prazo", { ascending: true })
+    .order("hora_prazo", { ascending: true, nullsFirst: false })
     .limit(limite);
 
   if (apenasAbertos) query = query.eq("concluido", false);
   if (cpf) query = query.eq("cpf", cpf);
+  if (tipo) query = query.eq("tipo", tipo);
   if (dias != null) {
     const hoje = new Date();
     const fim = new Date(hoje.getTime() + dias * 24 * 60 * 60 * 1000);
@@ -518,8 +680,17 @@ async function toolListarPrazos(
   if (error) return { ok: false, summary: error.message };
 
   const rows = data ?? [];
+  const soAudiencias = tipo === "audiencia";
+  const listaHref = soAudiencias ? "/audiencias" : "/prazos";
   if (!rows.length) {
-    return { ok: true, summary: "Nenhum prazo encontrado.", data: [] };
+    return {
+      ok: true,
+      summary: soAudiencias
+        ? "Nenhuma audiência encontrada."
+        : "Nenhum prazo encontrado.",
+      links: [{ label: soAudiencias ? "Audiências" : "Prazos", href: listaHref }],
+      data: [],
+    };
   }
 
   const links = rows
@@ -533,15 +704,161 @@ async function toolListarPrazos(
       if (p.caso_id) {
         return { label: p.titulo, href: assistenteKanbanHref(p.caso_id) };
       }
-      return { label: p.titulo, href: "/prazos" };
+      return { label: p.titulo, href: listaHref };
     })
     .slice(0, 12);
+  links.push({ label: soAudiencias ? "Audiências" : "Prazos", href: listaHref });
+
+  const items = rows.map((p) =>
+    p.tipo === "audiencia"
+      ? { tipo: p.tipo, caso_id: p.caso_id ?? undefined, ...resumoAudiencia(p) }
+      : compact({
+          id: p.id,
+          titulo: p.titulo,
+          tipo: p.tipo,
+          data: p.data_prazo,
+          hora: p.hora_prazo ? p.hora_prazo.slice(0, 5) : null,
+          descricao: p.descricao ? clipPreview(p.descricao, 160) : null,
+          cpf: p.cpf,
+          caso_id: p.caso_id,
+          processo_id: p.processo_id,
+          concluido: p.concluido || null,
+        })
+  );
 
   return {
     ok: true,
-    summary: `${rows.length} prazo(s) encontrado(s).`,
+    summary: `${rows.length} ${soAudiencias ? "audiência(s)" : "prazo(s)"} encontrado(s). Lista: ${listaHref}.`,
     links,
-    data: rows,
+    data: items,
+  };
+}
+
+function sanitizeOrTerm(raw: string): string {
+  return raw.replace(/[,()%*\\]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+async function toolListarProcessos(
+  args: Record<string, unknown>
+): Promise<AssistenteToolResult> {
+  const supabase = await createClient();
+  const limite = clamp(num(args.limite, 20), 1, 50);
+  const funilRaw = str(args.funil).toLowerCase();
+  const funil: FunilProcesso | null = isFunilProcesso(funilRaw)
+    ? funilRaw
+    : funilRaw
+      ? normalizeAreaProcesso(funilRaw)
+      : null;
+  const coluna = str(args.coluna);
+  const situacao = str(args.situacao);
+  const parceiroId = str(args.parceiro_id);
+  const texto = sanitizeOrTerm(str(args.texto));
+
+  let query = supabase
+    .from("processos_clientes")
+    .select("*")
+    .order("ultimo_andamento_data", { ascending: false, nullsFirst: false })
+    .order("id", { ascending: false })
+    .limit(limite);
+
+  if (funil === "previdenciario") {
+    query = query.or("area.eq.previdenciario,area.is.null");
+  } else if (funil === "civel") {
+    query = query.eq("area", "civel");
+  }
+  if (coluna) query = query.eq("funil_coluna", coluna);
+  if (situacao) query = query.eq("situacao", situacao);
+  if (parceiroId) query = query.eq("parceiro_id", parceiroId);
+  if (texto) {
+    const digits = texto.replace(/\D/g, "");
+    const ors = [`nome.ilike.%${texto}%`, `numero_processo.ilike.%${texto}%`];
+    if (digits.length >= 3) {
+      ors.push(`cpf.ilike.%${digits}%`);
+      if (digits !== texto) ors.push(`numero_processo.ilike.%${digits}%`);
+    }
+    query = query.or(ors.join(","));
+  }
+
+  const [{ data, error }, colunas] = await Promise.all([
+    query,
+    listProcessoColunasTodas().catch(() => null),
+  ]);
+  if (error) return { ok: false, summary: error.message };
+
+  const rows = data ?? [];
+  const funisHref = funil
+    ? [{ label: `Processos ${labelFunilProcesso(funil)}`, href: processosFunilHref(funil) }]
+    : [
+        { label: "Processos Previdenciário", href: processosFunilHref("previdenciario") },
+        { label: "Processos Cível", href: processosFunilHref("civel") },
+      ];
+
+  if (!rows.length) {
+    return {
+      ok: true,
+      summary: "Nenhum processo encontrado com esses filtros.",
+      links: funisHref,
+      data: [],
+    };
+  }
+
+  const items = rows.map((p) => {
+    const r = resumoProcesso(p, colunas);
+    return {
+      ...r,
+      ficha_href: assistenteFichaHref({ cpf: p.cpf, contactNorm: p.telefone }),
+    };
+  });
+
+  const preview = items
+    .slice(0, 8)
+    .map(
+      (p) =>
+        `#${p.id} ${p.nome ?? "?"} ${p.numero_processo ?? ""} [${labelFunilProcesso(p.funil)}${p.coluna_nome ? ` · ${p.coluna_nome}` : ""}${p.situacao_nome ? ` · ${p.situacao_nome}` : ""}]`
+    )
+    .join(" | ");
+
+  return {
+    ok: true,
+    summary: `${rows.length} processo(s)${rows.length === limite ? " (limite atingido; refine filtros)" : ""}. ${preview}${rows.length > 8 ? "…" : ""}`,
+    links: [
+      ...items.slice(0, 8).map((p) => ({
+        label: p.nome ?? `Processo #${p.id}`,
+        href: p.ficha_href,
+      })),
+      ...funisHref,
+    ],
+    data: items,
+  };
+}
+
+async function toolListarColunasFunis(): Promise<AssistenteToolResult> {
+  const [vendas, processos] = await Promise.all([
+    listKanbanColunas(),
+    listProcessoColunasTodas(),
+  ]);
+  const fmt = (cols: { chave: string; label: string }[]) =>
+    cols.map((c) => ({ chave: c.chave, nome: c.label }));
+  const line = (cols: { chave: string; label: string }[]) =>
+    cols.map((c) => `${c.chave}=${c.label}`).join(", ");
+
+  return {
+    ok: true,
+    summary: `Funil de vendas (casos): ${line(vendas)}. Processos Previdenciário: ${line(processos.previdenciario)}. Processos Cível: ${line(processos.civel)}. Situações de processo: ${SITUACOES_PROCESSO.map((s) => `${s.value}=${s.label}`).join(", ")}.`,
+    links: [
+      { label: "Kanban (vendas)", href: "/kanban" },
+      { label: "Processos Previdenciário", href: processosFunilHref("previdenciario") },
+      { label: "Processos Cível", href: processosFunilHref("civel") },
+    ],
+    data: {
+      funil_vendas: fmt(vendas),
+      processos_previdenciario: fmt(processos.previdenciario),
+      processos_civel: fmt(processos.civel),
+      situacoes_processo: SITUACOES_PROCESSO.map((s) => ({
+        chave: s.value,
+        nome: s.label,
+      })),
+    },
   };
 }
 
@@ -967,6 +1284,10 @@ export async function executeAssistenteTool(
         return await toolListarCasos(args);
       case "listar_prazos":
         return await toolListarPrazos(args);
+      case "listar_processos":
+        return await toolListarProcessos(args);
+      case "listar_colunas_funis":
+        return await toolListarColunasFunis();
       case "listar_conversa_resumo":
         return await toolListarConversaResumo(args);
       case "resumo_atendimentos_hoje":
