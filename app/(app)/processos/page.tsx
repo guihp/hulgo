@@ -55,6 +55,7 @@ export default async function ProcessosPage({
         initialColunas={colunas}
         parceiros={parceiros}
         canManageColunas={user.papel === "advogado"}
+        canExcluir={user.papel === "advogado"}
       />
     </div>
   );

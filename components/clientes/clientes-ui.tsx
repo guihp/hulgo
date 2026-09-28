@@ -35,6 +35,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { FichaArquivos } from "@/components/clientes/ficha-arquivos";
+import { ExcluirProcessoDialog } from "@/components/processos/excluir-processo-dialog";
 import { fichaPessoaHref } from "@/lib/utils/ficha";
 import type { MidiaChat } from "@/lib/data/arquivos";
 import type { PessoaListaItem } from "@/lib/data/pessoas";
@@ -1676,11 +1677,13 @@ function ProcessoFichaCard({
   parceiroNome,
   colunaLabel,
   onEdit,
+  podeExcluir = false,
 }: {
   processo: Processo;
   parceiroNome?: string;
   colunaLabel: string | null;
   onEdit: () => void;
+  podeExcluir?: boolean;
 }) {
   const funil = normalizeAreaProcesso(p.area);
   const situacao = situacaoProcessoInfo(p.situacao);
@@ -1743,6 +1746,7 @@ function ProcessoFichaCard({
               <Pencil className="mr-1 h-3.5 w-3.5" />
               Editar
             </Button>
+            {podeExcluir ? <ExcluirProcessoDialog processo={p} /> : null}
           </div>
         </div>
 
@@ -1813,6 +1817,7 @@ export function Cliente360({
   showHeader = true,
   showArquivos = true,
   onAbrirCaso,
+  podeExcluirProcesso = false,
 }: {
   cpf: string | null;
   contactNorm?: string;
@@ -1828,6 +1833,8 @@ export function Cliente360({
   showArquivos?: boolean;
   /** Na ficha com abas, "Abrir" troca de aba em vez de navegar para outra URL. */
   onAbrirCaso?: (casoId: number) => void;
+  /** RLS só permite DELETE em processos_clientes para advogado. */
+  podeExcluirProcesso?: boolean;
 }) {
   const [editingProcesso, setEditingProcesso] = useState<Processo | null>(null);
   const [parceiros, setParceiros] = useState<Parceiro[]>([]);
@@ -1958,6 +1965,7 @@ export function Cliente360({
                 }
                 colunaLabel={colunaLabelFor(p)}
                 onEdit={() => setEditingProcesso(p)}
+                podeExcluir={podeExcluirProcesso}
               />
             ))}
           </div>

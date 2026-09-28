@@ -163,6 +163,7 @@ export function FichaTabs({
             showHeader={false}
             showArquivos={false}
             onAbrirCaso={trocarCaso}
+            podeExcluirProcesso={user?.papel === "advogado"}
           />
         </TabsContent>
 

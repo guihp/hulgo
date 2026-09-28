@@ -58,6 +58,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { corBorder, corDot } from "@/components/processos/cores";
+import { ExcluirProcessoDialog } from "@/components/processos/excluir-processo-dialog";
 import { cn } from "@/lib/utils";
 
 type Processo = Tables<"processos_clientes">;
@@ -103,6 +104,7 @@ function ProcessoCard({
   onToggleSelect,
   isDragging,
   overlayCount,
+  onDeleted,
 }: {
   processo: Processo;
   parceiroNome?: string | null;
@@ -111,6 +113,8 @@ function ProcessoCard({
   onToggleSelect?: (id: number) => void;
   isDragging?: boolean;
   overlayCount?: number;
+  /** Presente só quando o usuário pode excluir (advogado). */
+  onDeleted?: (id: number) => void;
 }) {
   const cpf = processo.cpf ? normalizeCpf(processo.cpf) : "";
   const contactNorm = phoneToContactNorm(processo.telefone) || null;
@@ -196,17 +200,22 @@ function ProcessoCard({
         <span className="truncate text-[11px] text-muted-foreground">
           {parceiroNome ? `Parceiro: ${parceiroNome}` : ""}
         </span>
-        {cpf || contactNorm ? (
-          <div onPointerDown={stopDrag}>
-            <LinkButton
-              href={fichaPessoaHref({ cpf: cpf || null, contactNorm, aba: "resumo" })}
-              size="sm"
-              variant="outline"
-              className="h-7 text-xs"
-            >
-              <ExternalLink className="mr-1 h-3 w-3" />
-              Ficha
-            </LinkButton>
+        {cpf || contactNorm || onDeleted ? (
+          <div onPointerDown={stopDrag} className="flex shrink-0 items-center gap-1">
+            {cpf || contactNorm ? (
+              <LinkButton
+                href={fichaPessoaHref({ cpf: cpf || null, contactNorm, aba: "resumo" })}
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+              >
+                <ExternalLink className="mr-1 h-3 w-3" />
+                Ficha
+              </LinkButton>
+            ) : null}
+            {onDeleted ? (
+              <ExcluirProcessoDialog processo={processo} compact onDeleted={onDeleted} />
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -242,6 +251,7 @@ function ProcessoColumn({
   onToggleSelect,
   onToggleColumn,
   onMove,
+  onDeleted,
 }: {
   coluna: ProcessoColunaMatch;
   colunas: ProcessoColunaMatch[];
@@ -252,6 +262,7 @@ function ProcessoColumn({
   onToggleSelect: (id: number) => void;
   onToggleColumn: (ids: number[], select: boolean) => void;
   onMove: (ids: number[], chave: string) => void;
+  onDeleted?: (id: number) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: coluna.chave });
   const ids = processos.map((p) => p.id);
@@ -296,6 +307,7 @@ function ProcessoColumn({
               colunaArquivada={Boolean(p.funil_coluna) && !activeChaves.has(p.funil_coluna!)}
               selected={selected.has(p.id)}
               onToggleSelect={onToggleSelect}
+              onDeleted={onDeleted}
             />
             <Select
               value={coluna.chave}
@@ -331,12 +343,14 @@ export function ProcessosBoard({
   initialColunas,
   parceiros,
   canManageColunas = false,
+  canExcluir = false,
 }: {
   funil: FunilProcesso;
   initialProcessos: Processo[];
   initialColunas: ProcessoColunaMatch[];
   parceiros: Parceiro[];
   canManageColunas?: boolean;
+  canExcluir?: boolean;
 }) {
   const [processos, setProcessos] = useState(initialProcessos);
   const [colunas, setColunas] = useState(initialColunas);
@@ -488,6 +502,16 @@ export function ProcessosBoard({
         if (select) next.add(id);
         else next.delete(id);
       }
+      return next;
+    });
+  }
+
+  function removerProcesso(id: number) {
+    setProcessos((list) => list.filter((p) => p.id !== id));
+    setSelected((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
       return next;
     });
   }
@@ -805,6 +829,7 @@ export function ProcessosBoard({
               onToggleSelect={toggleSelect}
               onToggleColumn={toggleColumn}
               onMove={(ids, chave) => void moveProcessos(ids, chave)}
+              onDeleted={canExcluir ? removerProcesso : undefined}
             />
           ))}
         </div>

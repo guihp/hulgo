@@ -531,12 +531,56 @@ export async function upsertProcesso(data: UpsertProcessoInput) {
   return { success: true };
 }
 
-export async function deleteProcesso(id: number) {
+/**
+ * Exclui o processo. FKs em app_prazos e documentos_cliente são ON DELETE SET
+ * NULL; a pasta `processo:{id}` é texto livre e precisa voltar para `geral`.
+ */
+export async function excluirProcesso(id: number) {
+  const user = await getAppUser();
+  if (!user) throw new Error("Não autenticado");
+  if (user.papel !== "advogado") {
+    throw new Error("Apenas advogados podem excluir processos");
+  }
+  if (!Number.isInteger(id) || id <= 0) throw new Error("Processo inválido");
+
   const supabase = await createClient();
-  const { error } = await supabase.from("processos_clientes").delete().eq("id", id);
+  const { data: processo, error: fetchError } = await supabase
+    .from("processos_clientes")
+    .select("id, cpf, telefone, numero_processo, nome")
+    .eq("id", id)
+    .maybeSingle();
+  if (fetchError) throw new Error(fetchError.message);
+  if (!processo) throw new Error("Processo não encontrado");
+
+  const { error: pastaError } = await supabase
+    .from("documentos_cliente")
+    .update({ pasta: "geral", processo_id: null })
+    .eq("pasta", `processo:${id}`);
+  if (pastaError) throw new Error(pastaError.message);
+
+  const { data: deleted, error } = await supabase
+    .from("processos_clientes")
+    .delete()
+    .eq("id", id)
+    .select("id");
   if (error) throw new Error(error.message);
+  if (!deleted?.length) throw new Error("Sem permissão para excluir este processo");
+
+  await logEvent("processos_clientes", id, "excluir", {
+    numero_processo: processo.numero_processo,
+    nome: processo.nome,
+    cpf: processo.cpf,
+  });
+
   revalidatePath("/processos");
   revalidatePath("/clientes");
+  revalidatePath("/audiencias");
+  revalidatePath("/prazos");
+  revalidatePath("/");
+  const cpf = processo.cpf ? normalizeCpf(processo.cpf) : null;
+  const contactNorm = phoneToContactNorm(processo.telefone) || null;
+  if (cpf) revalidatePath(`/clientes/${cpf}`);
+  if (contactNorm) revalidatePath(`/clientes/contato/${contactNorm}`);
   return { success: true };
 }
 
