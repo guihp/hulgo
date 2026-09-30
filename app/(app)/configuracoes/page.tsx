@@ -34,8 +34,10 @@ export default async function ConfiguracoesPage({
   let agente: AgenteConfig | null = null;
   let parceiros: Parceiro[] = [];
   let processoColunas: Awaited<ReturnType<typeof listProcessoColunasTodas>> = {
-    previdenciario: [],
     civel: [],
+    administrativo: [],
+    previdenciario: [],
+    concedido: [],
   };
 
   try {

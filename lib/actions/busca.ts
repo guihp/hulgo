@@ -105,3 +105,78 @@ export async function buscarGlobal(termo: string): Promise<ResultadoBusca[]> {
 
   return resultados.slice(0, 12);
 }
+
+export type ClienteBusca = {
+  nome: string;
+  cpf: string | null;
+  telefone: string | null;
+  data_nascimento: string | null;
+  /** Onde a pessoa foi encontrada (processo judicial ou caso de triagem). */
+  origem: "processo" | "caso";
+};
+
+/** Pessoas existentes (processos + casos) para preencher um novo processo. */
+export async function buscarClientesParaProcesso(
+  termo: string
+): Promise<ClienteBusca[]> {
+  const q = termo.trim();
+  if (q.length < 2) return [];
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  const digits = q.replace(/\D/g, "");
+  const filtro = [
+    `nome.ilike.%${q.replace(/[,()]/g, " ")}%`,
+    ...(digits.length >= 3
+      ? [`cpf.ilike.%${digits}%`, `telefone.ilike.%${digits}%`]
+      : []),
+  ].join(",");
+
+  const [processos, casos] = await Promise.all([
+    supabase
+      .from("processos_clientes")
+      .select("nome, cpf, telefone, data_nascimento")
+      .or(filtro)
+      .order("id", { ascending: false })
+      .limit(10),
+    supabase
+      .from("casos_novos")
+      .select("nome, cpf, telefone, data_nascimento")
+      .or(filtro)
+      .order("created_at", { ascending: false })
+      .limit(10),
+  ]);
+
+  const out: ClienteBusca[] = [];
+  const vistos = new Set<string>();
+  const add = (
+    r: {
+      nome: string | null;
+      cpf: string | null;
+      telefone: string | null;
+      data_nascimento: string | null;
+    },
+    origem: ClienteBusca["origem"]
+  ) => {
+    const cpf = r.cpf ? normalizeCpf(r.cpf) : null;
+    const tel = r.telefone?.replace(/\D/g, "") || null;
+    const key = cpf || tel || r.nome?.trim().toLowerCase();
+    if (!key || vistos.has(key)) return;
+    vistos.add(key);
+    if (cpf && tel) vistos.add(tel);
+    out.push({
+      nome: r.nome?.trim() || "Sem nome",
+      cpf,
+      telefone: r.telefone ?? null,
+      data_nascimento: r.data_nascimento ?? null,
+      origem,
+    });
+  };
+  for (const p of processos.data ?? []) add(p, "processo");
+  for (const c of casos.data ?? []) add(c, "caso");
+  return out.slice(0, 10);
+}

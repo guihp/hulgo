@@ -1,12 +1,21 @@
-export type FunilProcesso = "previdenciario" | "civel";
+/** `previdenciario` = Judicial Previdenciário (chave legada mantida p/ n8n). */
+export type FunilProcesso =
+  | "civel"
+  | "administrativo"
+  | "previdenciario"
+  | "concedido";
 
 export const FUNIS_PROCESSO: { value: FunilProcesso; label: string }[] = [
-  { value: "previdenciario", label: "Previdenciário" },
   { value: "civel", label: "Cível" },
+  { value: "administrativo", label: "Administrativo Previdenciário" },
+  { value: "previdenciario", label: "Judicial Previdenciário" },
+  { value: "concedido", label: "Concedidos" },
 ];
 
+export const FUNIL_PROCESSO_PADRAO: FunilProcesso = "previdenciario";
+
 export function isFunilProcesso(v: unknown): v is FunilProcesso {
-  return v === "previdenciario" || v === "civel";
+  return FUNIS_PROCESSO.some((f) => f.value === v);
 }
 
 /** Mesma regra do trigger `processos_clientes_normaliza_funil` no banco. */
@@ -14,14 +23,43 @@ export function normalizeAreaProcesso(
   area: string | null | undefined
 ): FunilProcesso {
   const a = (area ?? "").toLowerCase();
-  return a.includes("civ") || a.includes("cív") ? "civel" : "previdenciario";
+  if (a.includes("conced")) return "concedido";
+  if (a.includes("admin")) return "administrativo";
+  if (a.includes("civ") || a.includes("cív")) return "civel";
+  return "previdenciario";
 }
 
 export function labelFunilProcesso(funil: string | null | undefined): string {
   return (
-    FUNIS_PROCESSO.find((f) => f.value === funil)?.label ?? "Previdenciário"
+    FUNIS_PROCESSO.find((f) => f.value === funil)?.label ??
+    "Judicial Previdenciário"
   );
 }
+
+/** Funis previdenciários (benefício INSS relevante). */
+export function funilTemBeneficio(funil: FunilProcesso): boolean {
+  return funil !== "civel";
+}
+
+/**
+ * Funis judiciais exigem nº CNJ (20 dígitos). Administrativo/Concedidos
+ * aceitam nº do requerimento / NB, ou vazio.
+ */
+export function funilExigeCnj(funil: FunilProcesso): boolean {
+  return funil === "civel" || funil === "previdenciario";
+}
+
+export function labelNumeroProcesso(funil: FunilProcesso): string {
+  return funilExigeCnj(funil) ? "Nº processo CNJ" : "Nº do requerimento / NB";
+}
+
+/** Badge da área (ficha, cards). */
+export const FUNIL_BADGE_CLASS: Record<FunilProcesso, string> = {
+  civel: "border-violet-200 bg-violet-50 text-violet-800",
+  administrativo: "border-amber-200 bg-amber-50 text-amber-800",
+  previdenciario: "border-[#0b2148]/20 bg-[#0b2148]/8 text-[#0b2148]",
+  concedido: "border-emerald-200 bg-emerald-50 text-emerald-800",
+};
 
 export type SituacaoProcesso =
   | "providencia_escritorio"

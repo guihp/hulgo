@@ -1,7 +1,11 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Tables } from "@/types/database";
-import type { FunilProcesso } from "@/lib/utils/processos";
+import {
+  FUNIS_PROCESSO,
+  isFunilProcesso,
+  type FunilProcesso,
+} from "@/lib/utils/processos";
 
 export type ProcessoColuna = Tables<"app_processo_colunas">;
 
@@ -31,6 +35,21 @@ const FALLBACK: Record<FunilProcesso, [string, string, string][]> = {
     ["precatorio_aguardando", "Precatório aguardando pagamento", "violet"],
     ["pago_arquivado", "Pago / Arquivado", "slate"],
   ],
+  administrativo: [
+    ["requerimento_protocolar", "Requerimento a protocolar", "slate"],
+    ["protocolado_analise", "Protocolado / Em análise INSS", "blue"],
+    ["exigencia", "Exigência", "amber"],
+    ["pericia_avaliacao", "Perícia / Avaliação social", "violet"],
+    ["indeferido", "Indeferido (avaliar recurso/judicial)", "rose"],
+    ["recurso_administrativo", "Recurso administrativo", "orange"],
+  ],
+  concedido: [
+    ["aguardando_implantacao", "Concedido — aguardando implantação", "cyan"],
+    ["implantado", "Implantado", "emerald"],
+    ["aguardando_rpv_precatorio", "Aguardando RPV/Precatório", "amber"],
+    ["pago_honorarios", "Pago / Honorários recebidos", "violet"],
+    ["arquivado", "Arquivado", "slate"],
+  ],
 };
 
 function fallbackColunas(funil: FunilProcesso): ProcessoColunaMatch[] {
@@ -50,7 +69,7 @@ export function processoColunaRowToMatch(
 ): ProcessoColunaMatch {
   return {
     id: row.id,
-    funil: row.funil === "civel" ? "civel" : "previdenciario",
+    funil: isFunilProcesso(row.funil) ? row.funil : "previdenciario",
     chave: row.chave,
     label: row.label,
     ordem: row.ordem,
@@ -97,15 +116,16 @@ export async function listProcessoColunas(
   return data.map(processoColunaRowToMatch);
 }
 
-/** Colunas dos dois funis de uma vez (formulários que trocam de área). */
+/** Colunas de todos os funis de uma vez (formulários que trocam de área). */
 export async function listProcessoColunasTodas(opts?: {
   includeInactive?: boolean;
 }): Promise<Record<FunilProcesso, ProcessoColunaMatch[]>> {
-  const [previdenciario, civel] = await Promise.all([
-    listProcessoColunas("previdenciario", opts),
-    listProcessoColunas("civel", opts),
-  ]);
-  return { previdenciario, civel };
+  const lists = await Promise.all(
+    FUNIS_PROCESSO.map((f) => listProcessoColunas(f.value, opts))
+  );
+  return Object.fromEntries(
+    FUNIS_PROCESSO.map((f, i) => [f.value, lists[i]])
+  ) as Record<FunilProcesso, ProcessoColunaMatch[]>;
 }
 
 export function labelDaColunaProcesso(

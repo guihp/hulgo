@@ -15,7 +15,15 @@ import {
 } from "@dnd-kit/core";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
-import { Check, Columns3, ExternalLink, Plus, Scale, X } from "lucide-react";
+import {
+  ArrowRightLeft,
+  Check,
+  Columns3,
+  ExternalLink,
+  Plus,
+  Scale,
+  X,
+} from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
   atualizarSituacaoProcesso,
@@ -31,6 +39,7 @@ import type { ProcessoColunaMatch } from "@/lib/data/processo-colunas";
 import type { Parceiro } from "@/lib/actions/parceiros";
 import type { Tables } from "@/types/database";
 import {
+  FUNIL_PROCESSO_PADRAO,
   SITUACOES_PROCESSO,
   formatValorCentavos,
   labelFunilProcesso,
@@ -74,6 +83,7 @@ import {
 import { corBorder, corDot } from "@/components/processos/cores";
 import { ExcluirProcessoDialog } from "@/components/processos/excluir-processo-dialog";
 import { ProcessoColunaMenu } from "@/components/processos/processo-coluna-menu";
+import { TransferirProcessoDialog } from "@/components/processos/transferir-processo-dialog";
 import { cn } from "@/lib/utils";
 
 type Processo = Tables<"processos_clientes">;
@@ -123,6 +133,7 @@ function ProcessoCard({
   colunaAtual,
   colunas,
   onMove,
+  onTransferir,
 }: {
   processo: Processo;
   parceiroNome?: string | null;
@@ -136,6 +147,7 @@ function ProcessoCard({
   colunaAtual?: string;
   colunas?: ProcessoColunaMatch[];
   onMove?: (ids: number[], chave: string) => void;
+  onTransferir?: (ids: number[]) => void;
 }) {
   const podeMover = Boolean(onMove && colunas && colunas.length > 1);
   const cpf = processo.cpf ? normalizeCpf(processo.cpf) : "";
@@ -218,12 +230,25 @@ function ProcessoCard({
         </div>
       ) : null}
 
-      <div className="mt-2 flex items-center justify-between gap-2">
-        <span className="truncate text-[11px] text-muted-foreground">
-          {parceiroNome ? `Parceiro: ${parceiroNome}` : ""}
-        </span>
-        {cpf || contactNorm || onDeleted || podeMover ? (
+      {parceiroNome ? (
+        <p className="mt-2 truncate text-[11px] text-muted-foreground">
+          Parceiro: {parceiroNome}
+        </p>
+      ) : null}
+      <div className="mt-2 flex items-center justify-end gap-2">
+        {cpf || contactNorm || onDeleted || podeMover || onTransferir ? (
           <div onPointerDown={stopDrag} className="flex shrink-0 items-center gap-1">
+            {onTransferir ? (
+              <Button
+                variant="outline"
+                size="icon-sm"
+                title="Transferir para outro funil"
+                aria-label="Transferir para outro funil"
+                onClick={() => onTransferir([processo.id])}
+              >
+                <ArrowRightLeft className="h-3.5 w-3.5" />
+              </Button>
+            ) : null}
             {podeMover ? (
               <DropdownMenu>
                 <DropdownMenuTrigger
@@ -387,6 +412,7 @@ function ProcessoColumn({
   onToggleSelect,
   onToggleColumn,
   onMove,
+  onTransferir,
   onDeleted,
   edit,
 }: {
@@ -399,6 +425,7 @@ function ProcessoColumn({
   onToggleSelect: (id: number) => void;
   onToggleColumn: (ids: number[], select: boolean) => void;
   onMove: (ids: number[], chave: string) => void;
+  onTransferir: (ids: number[]) => void;
   onDeleted?: (id: number) => void;
   /** Presente só para advogados com a coluna persistida no banco. */
   edit?: ColunaEditHandlers;
@@ -448,6 +475,7 @@ function ProcessoColumn({
               colunaAtual={coluna.chave}
               colunas={colunas}
               onMove={onMove}
+              onTransferir={onTransferir}
             />
             <Select
               value={coluna.chave}
@@ -494,6 +522,15 @@ export function ProcessosBoard({
 }) {
   const [processos, setProcessos] = useState(initialProcessos);
   const [colunas, setColunas] = useState(initialColunas);
+  const [prevInitial, setPrevInitial] = useState({ initialProcessos, initialColunas });
+  if (
+    prevInitial.initialProcessos !== initialProcessos ||
+    prevInitial.initialColunas !== initialColunas
+  ) {
+    setPrevInitial({ initialProcessos, initialColunas });
+    setProcessos(initialProcessos);
+    setColunas(initialColunas);
+  }
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
   const [activeProcesso, setActiveProcesso] = useState<Processo | null>(null);
   const [search, setSearch] = useState("");
@@ -503,6 +540,7 @@ export function ProcessosBoard({
   const [novaColunaLabel, setNovaColunaLabel] = useState("");
   const [pendingColuna, startColunaTransition] = useTransition();
   const [pendingBulk, startBulkTransition] = useTransition();
+  const [transferIds, setTransferIds] = useState<number[] | null>(null);
   const router = useRouter();
 
   const sensors = useSensors(
@@ -570,8 +608,8 @@ export function ProcessosBoard({
       .order("ultimo_andamento_data", { ascending: false, nullsFirst: false })
       .order("id", { ascending: false });
     query =
-      funil === "previdenciario"
-        ? query.or("area.eq.previdenciario,area.is.null")
+      funil === FUNIL_PROCESSO_PADRAO
+        ? query.or(`area.eq.${funil},area.is.null`)
         : query.eq("area", funil);
     const [{ data: procData }, { data: colData }] = await Promise.all([
       query,
@@ -926,7 +964,7 @@ export function ProcessosBoard({
         <EmptyState
           icon={Scale}
           title={`Nenhum processo no funil ${labelFunilProcesso(funil)}`}
-          description={`Para cadastrar, abra a ficha do cliente (Clientes → cliente → Resumo) e use "Novo processo", escolhendo a área ${labelFunilProcesso(funil)}. Ele aparecerá aqui na primeira coluna do funil.`}
+          description={`Use o botão "Novo processo" acima (ou a ficha do cliente), ou transfira processos de outro funil. Eles aparecem aqui na primeira coluna do funil ${labelFunilProcesso(funil)}.`}
         />
         <div className="flex justify-center gap-2">
           <LinkButton href="/clientes" size="sm" variant="default">
@@ -1062,6 +1100,15 @@ export function ProcessosBoard({
             </SelectContent>
           </Select>
           <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setTransferIds([...selected])}
+            disabled={pendingBulk}
+          >
+            <ArrowRightLeft className="mr-1 h-4 w-4" />
+            Transferir para outro funil…
+          </Button>
+          <Button
             variant="ghost"
             size="sm"
             className="sm:ml-auto"
@@ -1095,6 +1142,7 @@ export function ProcessosBoard({
               onToggleSelect={toggleSelect}
               onToggleColumn={toggleColumn}
               onMove={(ids, chave) => void moveProcessos(ids, chave)}
+              onTransferir={setTransferIds}
               onDeleted={canExcluir ? removerProcesso : undefined}
             />
           ))}
@@ -1116,6 +1164,21 @@ export function ProcessosBoard({
       </DndContext>
 
       {novaColunaDialog}
+      <TransferirProcessoDialog
+        ids={transferIds ?? []}
+        funilAtual={funil}
+        open={transferIds !== null}
+        onOpenChange={(open) => {
+          if (!open) setTransferIds(null);
+        }}
+        onTransferred={({ ids }) => {
+          setProcessos((list) => list.filter((p) => !ids.includes(p.id)));
+          setSelected((prev) => {
+            const next = new Set([...prev].filter((id) => !ids.includes(id)));
+            return next.size === prev.size ? prev : next;
+          });
+        }}
+      />
     </div>
   );
 }

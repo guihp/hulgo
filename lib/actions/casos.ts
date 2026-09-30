@@ -17,7 +17,11 @@ import {
   normalizeNumeroProcesso,
 } from "@/lib/utils/processo";
 import {
+  FUNIL_PROCESSO_PADRAO,
+  funilExigeCnj,
+  isFunilProcesso,
   isSituacaoProcesso,
+  labelFunilProcesso,
   normalizeAreaProcesso,
   type FunilProcesso,
   type SituacaoProcesso,
@@ -354,7 +358,7 @@ export type UpsertProcessoInput = {
   telefone?: string | null;
   numero_processo: string;
   tribunal?: string | null;
-  /** Texto livre é normalizado para previdenciario | civel */
+  /** Texto livre é normalizado para civel | administrativo | previdenciario | concedido */
   area?: string | null;
   beneficio_identificado?: string | null;
   descricao_caso?: string | null;
@@ -493,7 +497,10 @@ export async function upsertProcesso(data: UpsertProcessoInput) {
       .eq("id", data.id);
     if (error) throw new Error(error.message);
   } else {
-    if (!isValidNumeroProcesso(payload.numero_processo)) {
+    if (
+      funilExigeCnj(area ?? FUNIL_PROCESSO_PADRAO) &&
+      !isValidNumeroProcesso(payload.numero_processo)
+    ) {
       throw new Error("Número de processo CNJ inválido");
     }
     const { error } = await supabase.from("processos_clientes").insert(payload);
@@ -648,6 +655,74 @@ export async function moverProcessoColuna(ids: number[], chave: string) {
 
   await revalidateProcessosEFichas(supabase, uniq);
   return { success: true, count: uniq.length };
+}
+
+/**
+ * Transfere processos (em lote) para outro funil. `colunaDestino` precisa ser
+ * coluna ativa do funil de destino; omitida → primeira coluna ativa.
+ */
+export async function transferirProcessos(
+  ids: number[],
+  funilDestino: string,
+  colunaDestino?: string | null
+) {
+  const user = await getAppUser();
+  if (!user) throw new Error("Não autenticado");
+  const uniq = [...new Set(ids.filter((id) => Number.isInteger(id) && id > 0))];
+  if (!uniq.length) throw new Error("Nenhum processo selecionado");
+  if (!isFunilProcesso(funilDestino)) {
+    throw new Error(`Funil inválido: ${funilDestino}`);
+  }
+  const funil = funilDestino;
+
+  const supabase = await createClient();
+  const { data: procs, error: procErr } = await supabase
+    .from("processos_clientes")
+    .select("id, area, funil_coluna")
+    .in("id", uniq);
+  if (procErr) throw new Error(procErr.message);
+  if (!procs?.length) throw new Error("Processos não encontrados");
+
+  const { data: colunas, error: colErr } = await supabase
+    .from("app_processo_colunas")
+    .select("chave, label")
+    .eq("funil", funil)
+    .eq("ativo", true)
+    .order("ordem", { ascending: true })
+    .order("label", { ascending: true });
+  if (colErr) throw new Error(colErr.message);
+  if (!colunas?.length) {
+    throw new Error(`O funil ${labelFunilProcesso(funil)} não tem colunas ativas`);
+  }
+  const key = colunaDestino?.trim();
+  const coluna = key ? colunas.find((c) => c.chave === key) : colunas[0];
+  if (!coluna) throw new Error(`Coluna inválida ou inativa: ${key}`);
+
+  const { error } = await supabase
+    .from("processos_clientes")
+    .update({ area: funil, funil_coluna: coluna.chave })
+    .in("id", procs.map((p) => p.id));
+  if (error) throw new Error(error.message);
+
+  await logEvent("processos_clientes", procs[0].id, "processo_transferir_funil", {
+    ids: procs.map((p) => p.id),
+    origem: procs.map((p) => ({
+      id: p.id,
+      area: normalizeAreaProcesso(p.area),
+      funil_coluna: p.funil_coluna,
+    })),
+    funil,
+    funil_coluna: coluna.chave,
+  });
+
+  await revalidateProcessosEFichas(supabase, uniq);
+  return {
+    success: true,
+    count: procs.length,
+    funil,
+    coluna: coluna.chave,
+    colunaLabel: coluna.label,
+  };
 }
 
 /** Define (ou limpa, com null) a etiqueta de situação de vários processos. */

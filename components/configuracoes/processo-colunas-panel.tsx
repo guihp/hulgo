@@ -13,6 +13,7 @@ import {
 } from "@/lib/actions/processo-colunas";
 import {
   CORES_COLUNA_PROCESSO,
+  FUNIL_PROCESSO_PADRAO,
   FUNIS_PROCESSO,
   type CorColunaProcesso,
   type FunilProcesso,
@@ -72,19 +73,21 @@ function CorPicker({
   );
 }
 
+const SEM_COLUNAS: ProcessoColunaMatch[] = [];
+
 export function ProcessoColunasPanel({
   initialColunas,
 }: {
   initialColunas: Record<FunilProcesso, ProcessoColunaMatch[]>;
 }) {
-  const [funil, setFunil] = useState<FunilProcesso>("previdenciario");
+  const [funil, setFunil] = useState<FunilProcesso>(FUNIL_PROCESSO_PADRAO);
   const [colunasPorFunil, setColunasPorFunil] = useState(initialColunas);
   const [showInactive, setShowInactive] = useState(false);
   const [novaLabel, setNovaLabel] = useState("");
   const [novaCor, setNovaCor] = useState<CorColunaProcesso>("blue");
   const [editLabels, setEditLabels] = useState<Record<string, string>>(() =>
     Object.fromEntries(
-      [...initialColunas.previdenciario, ...initialColunas.civel].map((c) => [
+      Object.values(initialColunas).flat().map((c) => [
         c.id ?? `${c.funil}:${c.chave}`,
         c.label,
       ])
@@ -92,7 +95,7 @@ export function ProcessoColunasPanel({
   );
   const [pending, startTransition] = useTransition();
 
-  const colunas = colunasPorFunil[funil];
+  const colunas = colunasPorFunil[funil] ?? SEM_COLUNAS;
   const semIds = colunas.some((c) => !c.id);
 
   const visible = useMemo(() => {
@@ -103,7 +106,7 @@ export function ProcessoColunasPanel({
   function setColunas(
     updater: (list: ProcessoColunaMatch[]) => ProcessoColunaMatch[]
   ) {
-    setColunasPorFunil((prev) => ({ ...prev, [funil]: updater(prev[funil]) }));
+    setColunasPorFunil((prev) => ({ ...prev, [funil]: updater(prev[funil] ?? []) }));
   }
 
   function syncLabels(list: ProcessoColunaMatch[]) {
@@ -215,7 +218,8 @@ export function ProcessoColunasPanel({
             Funis de processos
           </h2>
           <p className="mt-1 text-sm text-[#64748b]">
-            Cada funil (Previdenciário e Cível) tem colunas próprias na página
+            Cada funil (Cível, Administrativo Previdenciário, Judicial
+            Previdenciário e Concedidos) tem colunas próprias na página
             Processos. Arquivar uma coluna não apaga os processos — eles passam
             a aparecer na primeira coluna ativa até serem movidos.
           </p>
@@ -224,7 +228,7 @@ export function ProcessoColunasPanel({
         <div
           role="tablist"
           aria-label="Funil"
-          className="inline-flex rounded-full border border-[#e2e8f0] bg-[#F8FAFC] p-1"
+          className="inline-flex max-w-full flex-wrap gap-1 rounded-2xl border border-[#e2e8f0] bg-[#F8FAFC] p-1"
         >
           {FUNIS_PROCESSO.map((f) => {
             const selected = f.value === funil;
@@ -244,7 +248,7 @@ export function ProcessoColunasPanel({
               >
                 {f.label}
                 <span className="ml-1.5 opacity-70">
-                  {colunasPorFunil[f.value].filter((c) => c.ativo).length}
+                  {(colunasPorFunil[f.value] ?? []).filter((c) => c.ativo).length}
                 </span>
               </button>
             );

@@ -5,9 +5,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { differenceInDays } from "date-fns";
-import { Eye, EyeOff, Pencil, Plus, Search, Users } from "lucide-react";
+import { ArrowRightLeft, Eye, EyeOff, Pencil, Plus, Search, Users } from "lucide-react";
 import { upsertProcesso, criarCasoNaFicha, updateCasoFields, updateCasoStatus } from "@/lib/actions/casos";
 import type { AppUser } from "@/lib/actions/auth";
+import {
+  buscarClientesParaProcesso,
+  type ClienteBusca,
+} from "@/lib/actions/busca";
 import {
   listParceiros,
   type Parceiro,
@@ -36,6 +40,7 @@ import {
 } from "@/components/ui/select";
 import { FichaArquivos } from "@/components/clientes/ficha-arquivos";
 import { ExcluirProcessoDialog } from "@/components/processos/excluir-processo-dialog";
+import { TransferirProcessoDialog } from "@/components/processos/transferir-processo-dialog";
 import { fichaPessoaHref } from "@/lib/utils/ficha";
 import type { MidiaChat } from "@/lib/data/arquivos";
 import type { PessoaListaItem } from "@/lib/data/pessoas";
@@ -74,11 +79,15 @@ import {
   normalizeNumeroProcesso,
 } from "@/lib/utils/processo";
 import {
+  FUNIL_BADGE_CLASS,
   FUNIS_PROCESSO,
   formatValorCentavos,
+  funilExigeCnj,
+  funilTemBeneficio,
   isFunilProcesso,
   isSituacaoProcesso,
   labelFunilProcesso,
+  labelNumeroProcesso,
   normalizeAreaProcesso,
   parseValorReais,
   SITUACOES_PROCESSO,
@@ -221,16 +230,23 @@ function poloAtivoPadrao(nome: string, cpf: string): string {
   return `${n.toUpperCase()} (${cpfCnpjDocumentLabel(digits)} ${formatCpfCnpj(digits)})`;
 }
 
+/** CNJ nos funis judiciais; nº do requerimento/NB livre (só dígitos e . - /). */
+function maskNumeroForFunil(value: string, funil: FunilProcesso): string {
+  if (funilExigeCnj(funil)) return maskNumeroProcessoInput(value);
+  return value.replace(/[^\d.\-/]/g, "").slice(0, 30);
+}
+
 function processoToForm(processo: Processo): ProcessoFormState {
   const origem = processo.processo_origem ?? "";
+  const area = normalizeAreaProcesso(processo.area);
   return {
     id: processo.id,
     nome: processo.nome ?? "",
     cpf: maskCpfCnpjInput(processo.cpf),
-    numero_processo: maskNumeroProcessoInput(processo.numero_processo),
+    numero_processo: maskNumeroForFunil(processo.numero_processo ?? "", area),
     telefone: maskPhoneBrInput(processo.telefone ?? ""),
     tribunal: processo.tribunal ?? "",
-    area: normalizeAreaProcesso(processo.area),
+    area,
     data_nascimento: isoToBrazilianDate(processo.data_nascimento),
     beneficio_identificado: processo.beneficio_identificado ?? "",
     descricao_caso: processo.descricao_caso ?? "",
@@ -281,6 +297,7 @@ function ProcessoFormFields({
   const cpfLabel = cpfCnpjDocumentLabel(form.cpf);
   const fieldId = (name: string) => (idPrefix ? `${idPrefix}-${name}` : name);
   const poloPadrao = poloAtivoPadrao(form.nome, form.cpf);
+  const exigeCnj = funilExigeCnj(form.area);
 
   return (
     <div className="grid gap-3 sm:grid-cols-2">
@@ -343,18 +360,22 @@ function ProcessoFormFields({
 
       <FormSectionTitle>Processo</FormSectionTitle>
       <div className="space-y-1">
-        <Label htmlFor={fieldId("numero_processo")}>Nº processo CNJ</Label>
+        <Label htmlFor={fieldId("numero_processo")}>
+          {labelNumeroProcesso(form.area)}
+        </Label>
         <Input
           id={fieldId("numero_processo")}
           value={form.numero_processo}
           onChange={(e) =>
             setForm((f) => ({
               ...f,
-              numero_processo: maskNumeroProcessoInput(e.target.value),
+              numero_processo: maskNumeroForFunil(e.target.value, f.area),
             }))
           }
           inputMode="numeric"
-          placeholder="0000000-00.0000.0.00.0000"
+          placeholder={
+            exigeCnj ? "0000000-00.0000.0.00.0000" : "Protocolo INSS ou NB (opcional)"
+          }
           className="font-mono"
         />
       </div>
@@ -373,7 +394,14 @@ function ProcessoFormFields({
           onValueChange={(v) => {
             if (!isFunilProcesso(v)) return;
             setForm((f) =>
-              f.area === v ? f : { ...f, area: v, funil_coluna: "" }
+              f.area === v
+                ? f
+                : {
+                    ...f,
+                    area: v,
+                    funil_coluna: "",
+                    numero_processo: maskNumeroForFunil(f.numero_processo, v),
+                  }
             );
           }}
         >
@@ -526,7 +554,7 @@ function ProcessoFormFields({
           </SelectContent>
         </Select>
       </div>
-      {form.area === "previdenciario" ? (
+      {funilTemBeneficio(form.area) ? (
         <div className="space-y-1">
           <Label htmlFor={fieldId("beneficio")}>Benefício</Label>
           <BeneficioTipoSelect
@@ -639,25 +667,33 @@ function ProcessoFormFields({
   );
 }
 
-function ProcessoDialog({
+export type ProcessoFormPrefill = Partial<ProcessoFormState>;
+
+export function ProcessoDialog({
   processo,
   prefill,
   open,
   onOpenChange,
   title,
   trigger,
+  clientePicker = false,
+  onSaved,
 }: {
   processo?: Processo | null;
-  prefill?: Partial<ProcessoFormState>;
+  prefill?: ProcessoFormPrefill;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
   trigger?: React.ReactNode;
+  /** Busca de cliente existente acima do formulário (página /processos). */
+  clientePicker?: boolean;
+  onSaved?: () => void;
 }) {
   const router = useRouter();
   const [form, setForm] = useState<ProcessoFormState>(EMPTY_FORM);
   const [parceiros, setParceiros] = useState<Parceiro[]>([]);
   const [parceirosLoading, setParceirosLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [colunasState, setColunasState] = useState<{
     area: FunilProcesso | null;
     list: ProcessoColunaMatch[];
@@ -739,7 +775,7 @@ function ProcessoDialog({
       toast.error(`${cpfLabel} inválido`);
       return;
     }
-    if (!isValidNumeroProcesso(numero)) {
+    if (funilExigeCnj(form.area) && !isValidNumeroProcesso(numero)) {
       toast.error("Número de processo CNJ inválido (20 dígitos)");
       return;
     }
@@ -761,6 +797,7 @@ function ProcessoDialog({
     }
     const situacao = isSituacaoProcesso(form.situacao) ? form.situacao : null;
 
+    setSaving(true);
     try {
       await upsertProcesso({
         id: form.id,
@@ -771,10 +808,9 @@ function ProcessoDialog({
         tribunal: form.tribunal || null,
         area: form.area,
         data_nascimento: dataIso,
-        beneficio_identificado:
-          form.area === "previdenciario"
-            ? form.beneficio_identificado.trim() || null
-            : null,
+        beneficio_identificado: funilTemBeneficio(form.area)
+          ? form.beneficio_identificado.trim() || null
+          : null,
         descricao_caso: form.descricao_caso || null,
         parceiro_id: form.parceiro_id || null,
         ativo: form.ativo ?? true,
@@ -792,9 +828,12 @@ function ProcessoDialog({
       });
       toast.success(form.id ? "Processo atualizado" : "Processo salvo");
       onOpenChange(false);
+      onSaved?.();
       router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro ao salvar");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -805,6 +844,20 @@ function ProcessoDialog({
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
+        {clientePicker && !form.id ? (
+          <ClientePicker
+            onPick={(c) =>
+              setForm((f) => ({
+                ...f,
+                nome: maskNomeInput(c.nome),
+                cpf: maskCpfCnpjInput(c.cpf ?? ""),
+                telefone: maskPhoneBrInput(c.telefone ?? ""),
+                data_nascimento: isoToBrazilianDate(c.data_nascimento),
+                polo_ativo: poloAtivoPadrao(c.nome, c.cpf ?? ""),
+              }))
+            }
+          />
+        ) : null}
         <ProcessoFormFields
           form={form}
           setForm={setForm}
@@ -815,10 +868,108 @@ function ProcessoDialog({
           colunasLoading={colunasLoading}
         />
         <DialogFooter>
-          <Button onClick={handleSave}>Salvar</Button>
+          <Button onClick={handleSave} disabled={saving}>
+            {saving ? "Salvando…" : "Salvar"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function ClientePicker({ onPick }: { onPick: (c: ClienteBusca) => void }) {
+  const [termo, setTermo] = useState("");
+  const [resultados, setResultados] = useState<ClienteBusca[]>([]);
+  const [buscando, setBuscando] = useState(false);
+  const [escolhido, setEscolhido] = useState<string | null>(null);
+
+  useEffect(() => {
+    const q = termo.trim();
+    if (q.length < 2) return;
+    let cancelled = false;
+    const t = setTimeout(() => {
+      setBuscando(true);
+      buscarClientesParaProcesso(q)
+        .then((list) => {
+          if (!cancelled) setResultados(list);
+        })
+        .catch(() => {
+          if (!cancelled) setResultados([]);
+        })
+        .finally(() => {
+          if (!cancelled) setBuscando(false);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [termo]);
+
+  const lista = termo.trim().length >= 2 ? resultados : [];
+
+  return (
+    <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+      <Label htmlFor="novo-processo-busca-cliente">Cliente existente</Label>
+      <div className="relative">
+        <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          id="novo-processo-busca-cliente"
+          value={termo}
+          onChange={(e) => {
+            setTermo(e.target.value);
+            setEscolhido(null);
+          }}
+          placeholder="Buscar por nome, CPF ou telefone…"
+          className="pl-9"
+          autoComplete="off"
+        />
+      </div>
+      {escolhido ? (
+        <p className="text-xs text-muted-foreground">
+          Dados de <span className="font-medium text-foreground">{escolhido}</span>{" "}
+          preenchidos abaixo.
+        </p>
+      ) : lista.length ? (
+        <ul className="max-h-48 divide-y overflow-y-auto rounded-md border bg-background">
+          {lista.map((c) => (
+            <li key={`${c.cpf ?? ""}-${c.telefone ?? ""}-${c.nome}`}>
+              <button
+                type="button"
+                className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
+                onClick={() => {
+                  onPick(c);
+                  setEscolhido(c.nome);
+                }}
+              >
+                <span className="min-w-0">
+                  <span className="block truncate font-medium">{c.nome}</span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {[
+                      c.cpf ? formatCpfCnpj(c.cpf) : "Sem CPF",
+                      c.telefone ? maskPhoneBrInput(c.telefone) : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                </span>
+                <Badge variant="outline" className="shrink-0 text-[11px]">
+                  {c.origem === "processo" ? "Tem processo" : "Atendimento"}
+                </Badge>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          {buscando
+            ? "Buscando…"
+            : termo.trim().length >= 2
+              ? "Nenhum cliente encontrado — preencha os dados do novo cliente abaixo."
+              : "Busque um cliente cadastrado ou preencha os dados de um novo cliente abaixo."}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -1685,6 +1836,7 @@ function ProcessoFichaCard({
   onEdit: () => void;
   podeExcluir?: boolean;
 }) {
+  const [transferirOpen, setTransferirOpen] = useState(false);
   const funil = normalizeAreaProcesso(p.area);
   const situacao = situacaoProcessoInfo(p.situacao);
   const partes = [p.polo_ativo?.trim(), p.polo_passivo?.trim()].filter(Boolean);
@@ -1704,12 +1856,7 @@ function ProcessoFichaCard({
             <div className="flex flex-wrap items-center gap-2">
               <Badge
                 variant="outline"
-                className={cn(
-                  "text-[11px]",
-                  funil === "civel"
-                    ? "border-violet-200 bg-violet-50 text-violet-800"
-                    : "border-[#0b2148]/20 bg-[#0b2148]/8 text-[#0b2148]"
-                )}
+                className={cn("text-[11px]", FUNIL_BADGE_CLASS[funil])}
               >
                 {labelFunilProcesso(funil)}
               </Badge>
@@ -1727,7 +1874,20 @@ function ProcessoFichaCard({
                 </span>
               ) : null}
             </div>
-            <p className="font-mono">{formatNumeroProcesso(p.numero_processo)}</p>
+            <p className="font-mono">
+              {p.numero_processo ? (
+                <>
+                  {funilExigeCnj(funil) ? null : (
+                    <span className="font-sans text-xs text-muted-foreground">
+                      Requerimento/NB:{" "}
+                    </span>
+                  )}
+                  {formatNumeroProcesso(p.numero_processo)}
+                </>
+              ) : (
+                <span className="font-sans text-muted-foreground">Sem nº</span>
+              )}
+            </p>
             <p className="text-xs text-muted-foreground">
               {[p.tribunal, `cadastrado em ${formatDate(p.created_at)}`]
                 .filter(Boolean)
@@ -1742,11 +1902,21 @@ function ProcessoFichaCard({
             >
               Ver no funil
             </LinkButton>
+            <Button size="sm" variant="outline" onClick={() => setTransferirOpen(true)}>
+              <ArrowRightLeft className="mr-1 h-3.5 w-3.5" />
+              Transferir para…
+            </Button>
             <Button size="sm" variant="outline" onClick={onEdit}>
               <Pencil className="mr-1 h-3.5 w-3.5" />
               Editar
             </Button>
             {podeExcluir ? <ExcluirProcessoDialog processo={p} /> : null}
+            <TransferirProcessoDialog
+              ids={[p.id]}
+              funilAtual={funil}
+              open={transferirOpen}
+              onOpenChange={setTransferirOpen}
+            />
           </div>
         </div>
 
@@ -1783,7 +1953,7 @@ function ProcessoFichaCard({
               </span>
             </ProcessoCampo>
           ) : null}
-          {funil === "previdenciario" && p.beneficio_identificado ? (
+          {funilTemBeneficio(funil) && p.beneficio_identificado ? (
             <ProcessoCampo label="Benefício">{p.beneficio_identificado}</ProcessoCampo>
           ) : null}
           {parceiroNome ? (

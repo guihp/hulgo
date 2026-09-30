@@ -12,7 +12,10 @@ import {
   type ProcessoColunaMatch,
 } from "@/lib/data/processo-colunas";
 import {
+  FUNIL_PROCESSO_PADRAO,
+  FUNIS_PROCESSO,
   formatValorCentavos,
+  funilTemBeneficio,
   isFunilProcesso,
   labelFunilProcesso,
   normalizeAreaProcesso,
@@ -146,13 +149,14 @@ export const ASSISTENTE_TOOL_DEFINITIONS = [
     function: {
       name: "listar_processos",
       description:
-        "Lista processos judiciais (processos_clientes) dos funis de processos. Filtros: funil, coluna (chave), situacao, parceiro_id, texto (nome, CPF ou nº do processo). Retorna cards resumidos com processo_id e link /processos?funil=...",
+        "Lista processos (processos_clientes) dos 4 funis de processos (administrativos e judiciais). Filtros: funil, coluna (chave), situacao, parceiro_id, texto (nome, CPF ou nº do processo). Retorna cards resumidos com processo_id e link /processos?funil=...",
       parameters: {
         type: "object",
         properties: {
           funil: {
             type: "string",
-            description: "previdenciario | civel. Omitir = ambos.",
+            description:
+              "civel (Cível) | administrativo (Administrativo Previdenciário) | previdenciario (Judicial Previdenciário) | concedido (Concedidos). Omitir = todos.",
           },
           coluna: {
             type: "string",
@@ -177,7 +181,7 @@ export const ASSISTENTE_TOOL_DEFINITIONS = [
     function: {
       name: "listar_colunas_funis",
       description:
-        "Colunas ATIVAS atuais: funil de vendas/atendimento (casos, mover_kanban/criar_cliente_caso) e funis de processos previdenciario e civel (mover_processo/criar_processo). Chame antes de mover ou criar para usar chaves válidas.",
+        "Colunas ATIVAS atuais: funil de vendas/atendimento (casos, mover_kanban/criar_cliente_caso) e os 4 funis de processos — civel, administrativo, previdenciario (judicial), concedido (mover_processo/criar_processo/transferir_processo). Chame antes de mover ou criar para usar chaves válidas.",
       parameters: { type: "object", properties: {} },
     },
   },
@@ -314,6 +318,13 @@ function processosFunilHref(funil: FunilProcesso): string {
   return `/processos?funil=${funil}`;
 }
 
+function linksTodosFunis() {
+  return FUNIS_PROCESSO.map((f) => ({
+    label: `Processos ${f.label}`,
+    href: processosFunilHref(f.value),
+  }));
+}
+
 function resumoProcesso(
   p: Tables<"processos_clientes">,
   colunas: Record<FunilProcesso, ProcessoColunaMatch[]> | null
@@ -342,7 +353,7 @@ function resumoProcesso(
       processo_origem: p.processo_origem,
       situacao: p.situacao,
       situacao_nome: situacaoProcessoInfo(p.situacao)?.label ?? null,
-      beneficio: funil === "previdenciario" ? p.beneficio_identificado : null,
+      beneficio: funilTemBeneficio(funil) ? p.beneficio_identificado : null,
       ultimo_andamento_data: p.ultimo_andamento_data,
       ultimo_movimento: p.ultimo_movimento
         ? clipPreview(p.ultimo_movimento, 160)
@@ -761,10 +772,10 @@ async function toolListarProcessos(
     .order("id", { ascending: false })
     .limit(limite);
 
-  if (funil === "previdenciario") {
-    query = query.or("area.eq.previdenciario,area.is.null");
-  } else if (funil === "civel") {
-    query = query.eq("area", "civel");
+  if (funil === FUNIL_PROCESSO_PADRAO) {
+    query = query.or(`area.eq.${funil},area.is.null`);
+  } else if (funil) {
+    query = query.eq("area", funil);
   }
   if (coluna) query = query.eq("funil_coluna", coluna);
   if (situacao) query = query.eq("situacao", situacao);
@@ -788,10 +799,7 @@ async function toolListarProcessos(
   const rows = data ?? [];
   const funisHref = funil
     ? [{ label: `Processos ${labelFunilProcesso(funil)}`, href: processosFunilHref(funil) }]
-    : [
-        { label: "Processos Previdenciário", href: processosFunilHref("previdenciario") },
-        { label: "Processos Cível", href: processosFunilHref("civel") },
-      ];
+    : linksTodosFunis();
 
   if (!rows.length) {
     return {
@@ -842,18 +850,19 @@ async function toolListarColunasFunis(): Promise<AssistenteToolResult> {
   const line = (cols: { chave: string; label: string }[]) =>
     cols.map((c) => `${c.chave}=${c.label}`).join(", ");
 
+  const funisLine = FUNIS_PROCESSO.map(
+    (f) => `Processos ${f.label} (funil=${f.value}): ${line(processos[f.value])}`
+  ).join(". ");
+
   return {
     ok: true,
-    summary: `Funil de vendas (casos): ${line(vendas)}. Processos Previdenciário: ${line(processos.previdenciario)}. Processos Cível: ${line(processos.civel)}. Situações de processo: ${SITUACOES_PROCESSO.map((s) => `${s.value}=${s.label}`).join(", ")}.`,
-    links: [
-      { label: "Kanban (vendas)", href: "/kanban" },
-      { label: "Processos Previdenciário", href: processosFunilHref("previdenciario") },
-      { label: "Processos Cível", href: processosFunilHref("civel") },
-    ],
+    summary: `Funil de vendas (casos): ${line(vendas)}. ${funisLine}. Situações de processo: ${SITUACOES_PROCESSO.map((s) => `${s.value}=${s.label}`).join(", ")}.`,
+    links: [{ label: "Kanban (vendas)", href: "/kanban" }, ...linksTodosFunis()],
     data: {
       funil_vendas: fmt(vendas),
-      processos_previdenciario: fmt(processos.previdenciario),
-      processos_civel: fmt(processos.civel),
+      ...Object.fromEntries(
+        FUNIS_PROCESSO.map((f) => [`processos_${f.value}`, fmt(processos[f.value])])
+      ),
       situacoes_processo: SITUACOES_PROCESSO.map((s) => ({
         chave: s.value,
         nome: s.label,

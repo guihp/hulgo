@@ -48,7 +48,7 @@ export function assistenteAtendimentoHref(contactNorm: string): string {
   return `/atendimentos/${phoneToContactNorm(contactNorm)}`;
 }
 
-/** Funil de processos (previdenciario | civel). */
+/** Funil de processos (civel | administrativo | previdenciario | concedido). */
 export function processosFunilHref(funil?: FunilProcesso | null): string {
   return funil ? `/processos?funil=${funil}` : "/processos";
 }

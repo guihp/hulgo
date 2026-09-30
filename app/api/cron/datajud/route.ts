@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { consultarDataJud } from "@/lib/datajud";
 import { phoneToContactNorm } from "@/lib/utils/phone";
+import { isValidNumeroProcesso } from "@/lib/utils/processo";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -49,6 +50,13 @@ export async function GET(req: NextRequest) {
   const relatorio: Record<string, string>[] = [];
 
   for (const p of processos ?? []) {
+    if (!isValidNumeroProcesso(p.numero_processo ?? "")) {
+      relatorio.push({
+        processo: p.numero_processo || `#${p.id}`,
+        resultado: "sem nº CNJ (administrativo/NB) — ignorado",
+      });
+      continue;
+    }
     const dias = p.monitorar_dias ?? 0;
     const ultima = p.ultima_consulta_datajud
       ? new Date(p.ultima_consulta_datajud).getTime()

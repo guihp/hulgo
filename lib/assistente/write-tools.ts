@@ -10,6 +10,7 @@ import {
   criarClienteCaso,
   excluirProcesso,
   moverProcessoColuna,
+  transferirProcessos,
   updateCasoFields,
   updateCasoStatus,
   upsertProcesso,
@@ -65,7 +66,11 @@ import {
 import {
   MODALIDADES_AUDIENCIA,
   SITUACOES_PROCESSO,
+  FUNIL_PROCESSO_PADRAO,
   formatValorCentavos,
+  funilExigeCnj,
+  funilTemBeneficio,
+  isFunilProcesso,
   isModalidadeAudiencia,
   labelFunilProcesso,
   normalizeAreaProcesso,
@@ -80,6 +85,9 @@ import type {
 } from "@/lib/assistente/types";
 import type { CasoStatus, PrazoTipo } from "@/types/database";
 
+const AREAS_PROCESSO_DESC =
+  "civel (Cível) | administrativo (Administrativo Previdenciário) | previdenciario (Judicial Previdenciário) | concedido (Concedidos)";
+
 export const WRITE_TOOL_NAMES = [
   "enviar_whatsapp",
   "criar_prazo",
@@ -90,6 +98,7 @@ export const WRITE_TOOL_NAMES = [
   "criar_processo",
   "atualizar_processo",
   "mover_processo",
+  "transferir_processo",
   "definir_situacao_processo",
   "excluir_processo",
   "propor_alteracao_prompt_agente",
@@ -336,7 +345,7 @@ export const ASSISTENTE_WRITE_TOOL_DEFINITIONS = [
     function: {
       name: "criar_processo",
       description:
-        "Propõe cadastrar um processo judicial (processos_clientes) num funil de processos (previdenciario | civel). Confirmação na UI. OBRIGATÓRIO: nome, cpf, numero_processo (CNJ, 20 dígitos) e area. Use buscar_pessoas antes. Coluna = chave de listar_colunas_funis do funil da área (omitida → primeira coluna). Benefício só no Previdenciário. No Cível, pergunte polo_passivo e tipo_acao se faltarem.",
+        "Propõe cadastrar um processo (processos_clientes) num dos 4 funis de processos: civel | administrativo | previdenciario (Judicial Previdenciário) | concedido. Confirmação na UI. OBRIGATÓRIO: nome, cpf e area; numero_processo é obrigatório (CNJ, 20 dígitos) em civel/previdenciario, e opcional em administrativo/concedido (nº do requerimento INSS / NB). Use buscar_pessoas antes. Coluna = chave de listar_colunas_funis do funil da área (omitida → primeira coluna). Benefício em todos menos Cível. No Cível, pergunte polo_passivo e tipo_acao se faltarem.",
       parameters: {
         type: "object",
         properties: {
@@ -344,9 +353,10 @@ export const ASSISTENTE_WRITE_TOOL_DEFINITIONS = [
           cpf: { type: "string", description: "CPF do cliente" },
           numero_processo: {
             type: "string",
-            description: "Número CNJ (com ou sem máscara)",
+            description:
+              "Número CNJ (com ou sem máscara) nos funis judiciais; nº do requerimento/NB em administrativo/concedido (opcional)",
           },
-          area: { type: "string", description: "previdenciario | civel" },
+          area: { type: "string", description: AREAS_PROCESSO_DESC },
           telefone: { type: "string" },
           tribunal: { type: "string", description: "Ex.: TRF1, TJMA" },
           coluna: {
@@ -378,14 +388,14 @@ export const ASSISTENTE_WRITE_TOOL_DEFINITIONS = [
           observacao: { type: "string" },
           beneficio_identificado: {
             type: "string",
-            description: "Só Previdenciário",
+            description: "Não se aplica ao Cível",
           },
           parceiro_id: {
             type: "string",
             description: "UUID de app_parceiros (só se veio de consulta)",
           },
         },
-        required: ["nome", "cpf", "numero_processo", "area"],
+        required: ["nome", "cpf", "area"],
       },
     },
   },
@@ -394,7 +404,7 @@ export const ASSISTENTE_WRITE_TOOL_DEFINITIONS = [
     function: {
       name: "atualizar_processo",
       description:
-        "Propõe editar um processo existente. Confirmação na UI. Envie processo_id (de busca — nunca invente) e SÓ os campos que mudam; string vazia limpa o campo. Pode trocar a área (previdenciario ↔ civel). Para mover de coluna prefira mover_processo; para situação, definir_situacao_processo.",
+        "Propõe editar um processo existente. Confirmação na UI. Envie processo_id (de busca — nunca invente) e SÓ os campos que mudam; string vazia limpa o campo. Para trocar de funil prefira transferir_processo; para mover de coluna, mover_processo; para situação, definir_situacao_processo.",
       parameters: {
         type: "object",
         properties: {
@@ -402,7 +412,7 @@ export const ASSISTENTE_WRITE_TOOL_DEFINITIONS = [
           nome: { type: "string" },
           cpf: { type: "string" },
           numero_processo: { type: "string" },
-          area: { type: "string", description: "previdenciario | civel" },
+          area: { type: "string", description: AREAS_PROCESSO_DESC },
           telefone: { type: "string" },
           tribunal: { type: "string" },
           coluna: {
@@ -424,7 +434,7 @@ export const ASSISTENTE_WRITE_TOOL_DEFINITIONS = [
           observacao: { type: "string" },
           beneficio_identificado: {
             type: "string",
-            description: "Só Previdenciário",
+            description: "Não se aplica ao Cível",
           },
           parceiro_id: { type: "string" },
         },
@@ -437,7 +447,7 @@ export const ASSISTENTE_WRITE_TOOL_DEFINITIONS = [
     function: {
       name: "mover_processo",
       description:
-        "Propõe mover um ou vários processos judiciais para uma coluna do funil de processos. Todos precisam ser do mesmo funil (área). Coluna = chave de listar_colunas_funis. Confirmação na UI.",
+        "Propõe mover um ou vários processos para uma coluna DO MESMO funil de processos. Todos precisam ser do mesmo funil (área). Coluna = chave de listar_colunas_funis. Para levar a OUTRO funil use transferir_processo. Confirmação na UI.",
       parameters: {
         type: "object",
         properties: {
@@ -452,6 +462,33 @@ export const ASSISTENTE_WRITE_TOOL_DEFINITIONS = [
           },
         },
         required: ["processo_ids", "coluna"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "transferir_processo",
+      description: `Propõe transferir um ou vários processos para OUTRO funil de processos (ex.: Judicial Previdenciário → Concedidos, Administrativo → Judicial, Previdenciário → Cível). Funis: ${AREAS_PROCESSO_DESC}. coluna = chave de coluna ativa do funil de destino (listar_colunas_funis); omitida → primeira coluna. Confirmação na UI.`,
+      parameters: {
+        type: "object",
+        properties: {
+          processo_ids: {
+            type: "array",
+            items: { type: "number" },
+            description: "IDs de processos_clientes (de busca — nunca invente)",
+          },
+          funil: {
+            type: "string",
+            description: `Funil de destino: ${AREAS_PROCESSO_DESC}`,
+          },
+          coluna: {
+            type: "string",
+            description:
+              "Opcional — chave da coluna no funil de destino (omitida → primeira coluna ativa)",
+          },
+        },
+        required: ["processo_ids", "funil"],
       },
     },
   },
@@ -482,7 +519,7 @@ export const ASSISTENTE_WRITE_TOOL_DEFINITIONS = [
     function: {
       name: "excluir_processo",
       description:
-        "Propõe EXCLUIR um processo judicial (irreversível). Só advogado. Prazos e documentos vinculados perdem o vínculo (documentos voltam para a pasta geral). Confirmação na UI.",
+        "Propõe EXCLUIR um processo (irreversível). Só advogado. Prazos e documentos vinculados perdem o vínculo (documentos voltam para a pasta geral). Confirmação na UI.",
       parameters: {
         type: "object",
         properties: {
@@ -683,8 +720,10 @@ function foldText(v: string): string {
 function parseAreaProcesso(raw: string): FunilProcesso | null {
   const a = foldText(raw);
   if (!a) return null;
+  if (a.includes("conced")) return "concedido";
+  if (a.includes("admin")) return "administrativo";
   if (a.includes("civ")) return "civel";
-  if (a.startsWith("prev")) return "previdenciario";
+  if (a.startsWith("prev") || a.includes("judic")) return "previdenciario";
   return null;
 }
 
@@ -1290,7 +1329,8 @@ function hasArg(args: Record<string, unknown>, key: string): boolean {
  */
 async function parseProcessoFields(
   args: Record<string, unknown>,
-  update: boolean
+  update: boolean,
+  areaAtual?: FunilProcesso
 ): Promise<{ ok: true; fields: ProcessoFields } | ProposeErr> {
   const fields: ProcessoFields = {};
 
@@ -1310,22 +1350,26 @@ async function parseProcessoFields(
     }
     fields.cpf = cpf;
   }
-  if (!update || hasArg(args, "numero_processo")) {
-    const numero = str(args.numero_processo);
-    if (!isValidNumeroProcesso(numero)) {
-      return {
-        ok: false,
-        summary: "numero_processo inválido — o número CNJ tem 20 dígitos.",
-      };
-    }
-    fields.numero_processo = normalizeNumeroProcesso(numero);
-  }
   if (!update || hasArg(args, "area")) {
     const area = parseAreaProcesso(str(args.area));
     if (!area) {
-      return { ok: false, summary: "area inválida. Use: previdenciario | civel." };
+      return { ok: false, summary: `area inválida. Use: ${AREAS_PROCESSO_DESC}.` };
     }
     fields.area = area;
+  }
+  if (!update || hasArg(args, "numero_processo")) {
+    const numero = str(args.numero_processo);
+    const areaEfetiva = normalizeAreaProcesso(
+      fields.area ?? areaAtual ?? FUNIL_PROCESSO_PADRAO
+    );
+    if (funilExigeCnj(areaEfetiva) && !isValidNumeroProcesso(numero)) {
+      return {
+        ok: false,
+        summary:
+          "numero_processo inválido — nos funis judiciais (Cível / Judicial Previdenciário) o número CNJ tem 20 dígitos. Em Administrativo/Concedidos use o nº do requerimento/NB ou deixe vazio.",
+      };
+    }
+    fields.numero_processo = normalizeNumeroProcesso(numero);
   }
 
   for (const key of PROCESSO_TEXT_KEYS) {
@@ -1450,11 +1494,11 @@ async function proposeCriarProcesso(
   const fields = parsed.fields;
   const funil = fields.area as FunilProcesso;
 
-  if (funil === "civel" && fields.beneficio_identificado) {
+  if (!funilTemBeneficio(funil) && fields.beneficio_identificado) {
     return {
       ok: false,
       summary:
-        "Benefício só se aplica ao funil Previdenciário. Remova beneficio_identificado ou use area=previdenciario.",
+        "Benefício não se aplica ao funil Cível. Remova beneficio_identificado ou use um funil previdenciário.",
     };
   }
 
@@ -1462,21 +1506,25 @@ async function proposeCriarProcesso(
   if (!col.ok) return col;
   if (col.coluna) fields.funil_coluna = col.coluna.chave;
 
-  const supabase = await createClient();
-  const { data: dup } = await supabase
-    .from("processos_clientes")
-    .select("id, nome")
-    .eq("numero_processo", fields.numero_processo!)
-    .limit(1)
-    .maybeSingle();
-  if (dup) {
-    return {
-      ok: false,
-      summary: `Já existe o processo #${dup.id} com este número (${dup.nome ?? "sem nome"}). Use atualizar_processo com processo_id=${dup.id}.`,
-    };
+  if (fields.numero_processo) {
+    const supabase = await createClient();
+    const { data: dup } = await supabase
+      .from("processos_clientes")
+      .select("id, nome")
+      .eq("numero_processo", fields.numero_processo)
+      .limit(1)
+      .maybeSingle();
+    if (dup) {
+      return {
+        ok: false,
+        summary: `Já existe o processo #${dup.id} com este número (${dup.nome ?? "sem nome"}). Use atualizar_processo com processo_id=${dup.id}.`,
+      };
+    }
   }
 
-  const numeroFmt = formatNumeroProcesso(fields.numero_processo!);
+  const numeroFmt = fields.numero_processo
+    ? formatNumeroProcesso(fields.numero_processo)
+    : "sem nº";
   const details = processoFieldDetails(fields, col.coluna?.label);
   if (!col.coluna) details.push("Coluna: primeira coluna do funil");
 
@@ -1504,7 +1552,11 @@ async function proposeAtualizarProcesso(
   if ("ok" in loaded) return loaded;
   const existing = loaded.rows[0]!;
 
-  const parsed = await parseProcessoFields(args, true);
+  const parsed = await parseProcessoFields(
+    args,
+    true,
+    normalizeAreaProcesso(existing.area)
+  );
   if (!parsed.ok) return parsed;
   const fields = parsed.fields;
 
@@ -1513,10 +1565,10 @@ async function proposeAtualizarProcesso(
   if (!col.ok) return col;
   if (col.coluna) fields.funil_coluna = col.coluna.chave;
 
-  if (funil === "civel" && fields.beneficio_identificado) {
+  if (!funilTemBeneficio(normalizeAreaProcesso(funil)) && fields.beneficio_identificado) {
     return {
       ok: false,
-      summary: "Benefício só se aplica ao funil Previdenciário.",
+      summary: "Benefício não se aplica ao funil Cível.",
     };
   }
 
@@ -1567,7 +1619,7 @@ async function proposeMoverProcesso(
     return {
       ok: false,
       summary:
-        "Os processos são de funis diferentes (Previdenciário e Cível). Mova cada funil em uma chamada separada.",
+        "Os processos são de funis diferentes. Mova cada funil em uma chamada separada (ou use transferir_processo para levar a outro funil).",
     };
   }
   const [funil] = [...funis] as [FunilProcesso];
@@ -1598,6 +1650,62 @@ async function proposeMoverProcesso(
         ? `Mover processo ${processoLine(rows[0]!)} → ${coluna.label}`
         : `Mover ${n} processos → ${coluna.label}`,
     summary: `Mover ${n} processo(s) do funil ${labelFunilProcesso(funil)} para "${coluna.label}": ${details.join("; ")}.`,
+    details,
+  };
+}
+
+async function proposeTransferirProcesso(
+  args: Record<string, unknown>
+): Promise<ProposeOk | ProposeErr> {
+  const funil = parseAreaProcesso(str(args.funil) || str(args.area));
+  if (!funil) {
+    return {
+      ok: false,
+      summary: `Informe o funil de destino: ${AREAS_PROCESSO_DESC}.`,
+    };
+  }
+  const loaded = await loadProcessosOrErr(parseIdList(args));
+  if ("ok" in loaded) return loaded;
+  const rows = loaded.rows;
+
+  let coluna: ProcessoColunaMatch | null = null;
+  if (str(args.coluna) || str(args.funil_coluna)) {
+    const col = await resolveColunaArg(args, funil);
+    if (!col.ok) return col;
+    coluna = col.coluna;
+  } else {
+    coluna = (await listProcessoColunas(funil))[0] ?? null;
+  }
+  if (!coluna) {
+    return {
+      ok: false,
+      summary: `O funil ${labelFunilProcesso(funil)} não tem colunas ativas.`,
+    };
+  }
+
+  const details = rows.map((r) => {
+    const origem = normalizeAreaProcesso(r.area);
+    return (
+      `${processoLine(r)} — de ${labelFunilProcesso(origem)}` +
+      (origem === funil ? " (já está neste funil; só muda a coluna)" : "")
+    );
+  });
+  const n = rows.length;
+  const destino = `${labelFunilProcesso(funil)} · ${coluna.label}`;
+
+  return {
+    ok: true,
+    normalizedArgs: {
+      processo_ids: rows.map((r) => r.id),
+      funil,
+      coluna: coluna.chave,
+      coluna_label: coluna.label,
+    },
+    label:
+      n === 1
+        ? `Transferir processo ${processoLine(rows[0]!)} → ${destino}`
+        : `Transferir ${n} processos → ${destino}`,
+    summary: `Transferir ${n} processo(s) para o funil ${labelFunilProcesso(funil)} (coluna "${coluna.label}"): ${details.join("; ")}.`,
     details,
   };
 }
@@ -1908,6 +2016,8 @@ async function proposeWrite(
       return proposeAtualizarProcesso(args);
     case "mover_processo":
       return proposeMoverProcesso(args);
+    case "transferir_processo":
+      return proposeTransferirProcesso(args);
     case "definir_situacao_processo":
       return proposeDefinirSituacaoProcesso(args);
     case "excluir_processo":
@@ -2383,26 +2493,29 @@ async function execCriarProcesso(
   args: Record<string, unknown>
 ): Promise<AssistenteToolResult> {
   const fields = asRecord(args.fields) as ProcessoFields;
-  if (!fields.nome || !fields.cpf || !fields.numero_processo) {
+  const funil = normalizeAreaProcesso(fields.area);
+  const numero = fields.numero_processo ?? "";
+  if (!fields.nome || !fields.cpf || (funilExigeCnj(funil) && !numero)) {
     return { ok: false, summary: "Dados incompletos para criar o processo." };
   }
   await upsertProcesso({
     ...fields,
     nome: fields.nome,
     cpf: fields.cpf,
-    numero_processo: fields.numero_processo,
+    numero_processo: numero,
   });
 
-  const funil = normalizeAreaProcesso(fields.area);
   const supabase = await createClient();
-  const { data: row } = await supabase
+  let rowQuery = supabase
     .from("processos_clientes")
     .select("id, funil_coluna")
-    .eq("numero_processo", fields.numero_processo)
     .order("id", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  const numeroFmt = formatNumeroProcesso(fields.numero_processo);
+    .limit(1);
+  rowQuery = numero
+    ? rowQuery.eq("numero_processo", numero)
+    : rowQuery.eq("cpf", fields.cpf).eq("area", funil);
+  const { data: row } = await rowQuery.maybeSingle();
+  const numeroFmt = numero ? formatNumeroProcesso(numero) : "(sem nº)";
   const funilLinks = processoLinks(funil, fields.cpf);
 
   return {
@@ -2452,11 +2565,32 @@ async function execMoverProcesso(
     return { ok: false, summary: "processo_ids e coluna são obrigatórios." };
   }
   const result = await moverProcessoColuna(ids, coluna);
-  const funil = (str(args.funil) || "previdenciario") as FunilProcesso;
+  const funil = normalizeAreaProcesso(str(args.funil));
   const label = str(args.coluna_label) || coluna;
   return {
     ok: true,
     summary: `${result.count} processo(s) movido(s) para "${label}". Link: ${processosFunilHref(funil)}.`,
+    links: [
+      {
+        label: `Processos ${labelFunilProcesso(funil)}`,
+        href: processosFunilHref(funil),
+      },
+    ],
+  };
+}
+
+async function execTransferirProcesso(
+  args: Record<string, unknown>
+): Promise<AssistenteToolResult> {
+  const ids = parseIdList(args);
+  const funil = str(args.funil);
+  if (!ids.length || !isFunilProcesso(funil)) {
+    return { ok: false, summary: "processo_ids e funil são obrigatórios." };
+  }
+  const result = await transferirProcessos(ids, funil, str(args.coluna) || null);
+  return {
+    ok: true,
+    summary: `${result.count} processo(s) transferido(s) para ${labelFunilProcesso(funil)} → "${result.colunaLabel}". Link: ${processosFunilHref(funil)}.`,
     links: [
       {
         label: `Processos ${labelFunilProcesso(funil)}`,
@@ -2495,7 +2629,7 @@ async function execExcluirProcesso(
   const processo_id = optionalPositiveId(args.processo_id);
   if (processo_id == null) return { ok: false, summary: "processo_id ausente." };
   await excluirProcesso(processo_id);
-  const funil = (str(args.funil) || "previdenciario") as FunilProcesso;
+  const funil = normalizeAreaProcesso(str(args.funil));
   const cpf = str(args.cpf) || null;
   return {
     ok: true,
@@ -2602,6 +2736,8 @@ export async function executeAssistenteWriteTool(
         return await execAtualizarProcesso(args);
       case "mover_processo":
         return await execMoverProcesso(args);
+      case "transferir_processo":
+        return await execTransferirProcesso(args);
       case "definir_situacao_processo":
         return await execDefinirSituacaoProcesso(args);
       case "excluir_processo":

@@ -28,6 +28,7 @@ import {
   parseFichaAba,
   type FichaAba,
 } from "@/lib/utils/ficha";
+import { isValidNumeroProcesso } from "@/lib/utils/processo";
 
 const ABA_LABEL: Record<FichaAba, string> = {
   resumo: "Resumo",
@@ -60,6 +61,10 @@ export function FichaTabs({
         nome: p.nome,
         cpf: p.cpf,
       })),
+    [ficha.processos]
+  );
+  const processosCnj = useMemo(
+    () => ficha.processos.filter((p) => isValidNumeroProcesso(p.numero_processo)),
     [ficha.processos]
   );
   const { audiencias, prazosSemAudiencia } = useMemo(() => {
@@ -219,12 +224,14 @@ export function FichaTabs({
         </TabsContent>
 
         <TabsContent value="datajud" className="mt-4 space-y-4">
-          {ficha.processos.length === 0 ? (
+          {processosCnj.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              Nenhum processo cadastrado para consultar no DataJud.
+              {ficha.processos.length === 0
+                ? "Nenhum processo cadastrado para consultar no DataJud."
+                : "Nenhum processo com nº CNJ (requerimentos administrativos não são consultados no DataJud)."}
             </p>
           ) : (
-            ficha.processos.map((p) => (
+            processosCnj.map((p) => (
               <DataJudPanel
                 key={p.id}
                 numeroProcesso={p.numero_processo}

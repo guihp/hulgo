@@ -229,6 +229,8 @@ function toolLabel(name: string): string {
       return "Atualizar processo";
     case "mover_processo":
       return "Mover processo(s)";
+    case "transferir_processo":
+      return "Transferir processo(s) de funil";
     case "definir_situacao_processo":
       return "Definir situação";
     case "excluir_processo":

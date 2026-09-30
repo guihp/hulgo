@@ -3,7 +3,12 @@ import { createClient } from "@/lib/supabase/server";
 import { getAppUser } from "@/lib/actions/auth";
 import { listParceiros, type Parceiro } from "@/lib/actions/parceiros";
 import { listProcessoColunas } from "@/lib/data/processo-colunas";
-import { isFunilProcesso, type FunilProcesso } from "@/lib/utils/processos";
+import {
+  FUNIL_PROCESSO_PADRAO,
+  isFunilProcesso,
+  type FunilProcesso,
+} from "@/lib/utils/processos";
+import { NovoProcessoButton } from "@/components/processos/novo-processo-button";
 import { ProcessosBoard } from "@/components/processos/processos-board";
 import { ProcessosFunilTabs } from "@/components/processos/processos-funil-tabs";
 
@@ -18,7 +23,7 @@ export default async function ProcessosPage({
   const { funil: funilParam } = await searchParams;
   const funil: FunilProcesso = isFunilProcesso(funilParam)
     ? funilParam
-    : "previdenciario";
+    : FUNIL_PROCESSO_PADRAO;
 
   const supabase = await createClient();
   let query = supabase
@@ -27,8 +32,8 @@ export default async function ProcessosPage({
     .order("ultimo_andamento_data", { ascending: false, nullsFirst: false })
     .order("id", { ascending: false });
   query =
-    funil === "previdenciario"
-      ? query.or("area.eq.previdenciario,area.is.null")
+    funil === FUNIL_PROCESSO_PADRAO
+      ? query.or(`area.eq.${funil},area.is.null`)
       : query.eq("area", funil);
 
   const [{ data: processos }, colunas, parceiros] = await Promise.all([
@@ -43,11 +48,12 @@ export default async function ProcessosPage({
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Processos</h1>
           <p className="text-muted-foreground">
-            Funil de processos judiciais — arraste os cards entre as fases
+            Funis de processos administrativos e judiciais — arraste os cards entre as fases
           </p>
         </div>
-        <ProcessosFunilTabs funil={funil} />
+        <NovoProcessoButton funil={funil} />
       </div>
+      <ProcessosFunilTabs funil={funil} />
       <ProcessosBoard
         key={funil}
         funil={funil}

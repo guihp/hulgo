@@ -139,7 +139,11 @@ export function BeneficioTipoSelect({
         }}
       >
         <SelectTrigger id={id} className={cn("w-full", triggerClassName)}>
-          <SelectValue placeholder={loading ? "Carregando…" : placeholder} />
+          <SelectValue placeholder={loading ? "Carregando…" : placeholder}>
+            {(v: string | null) =>
+              !v || v === NONE ? "Benefício não identificado" : v
+            }
+          </SelectValue>
         </SelectTrigger>
         <SelectContent>
           <SelectItem value={NONE}>Benefício não identificado</SelectItem>
