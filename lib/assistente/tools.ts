@@ -38,8 +38,14 @@ import {
 } from "@/lib/assistente/links";
 import { createClient } from "@/lib/supabase/server";
 import { brazilCalendarDayBounds } from "@/lib/utils/dates";
-import { normalizeCpf } from "@/lib/utils/cpf";
+import { formatCpf, isValidCpf, normalizeCpf } from "@/lib/utils/cpf";
 import { phoneToContactNorm } from "@/lib/utils/phone";
+import {
+  formatNumeroProcesso,
+  isValidNumeroProcesso,
+  normalizeNumeroProcesso,
+} from "@/lib/utils/processo";
+import { listParceiros } from "@/lib/actions/parceiros";
 import type {
   AssistentePendingAnexo,
   AssistenteToolResult,
@@ -182,6 +188,45 @@ export const ASSISTENTE_TOOL_DEFINITIONS = [
       name: "listar_colunas_funis",
       description:
         "Colunas ATIVAS atuais: funil de vendas/atendimento (casos, mover_kanban/criar_cliente_caso) e os 4 funis de processos — civel, administrativo, previdenciario (judicial), concedido (mover_processo/criar_processo/transferir_processo). Chame antes de mover ou criar para usar chaves válidas.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "verificar_processos_lote",
+      description:
+        "Use SEMPRE que o usuário colar 1 ou N processos (nº CNJ/NB/requerimento + CPF + nome) ou pedir 'cadastra o processo'. Verifica em lote (máx. 50) se cada CPF já tem cliente (nome, telefone) e se o nº já está cadastrado (processo_id, funil, coluna). CPF sem cliente = cliente novo, cadastrado junto pelo processo (sem telefone). Chame antes de cadastrar_processos_lote.",
+      parameters: {
+        type: "object",
+        properties: {
+          itens: {
+            type: "array",
+            description: "Itens extraídos da mensagem, na ordem colada.",
+            items: {
+              type: "object",
+              properties: {
+                numero_processo: {
+                  type: "string",
+                  description: "Nº CNJ, NB ou requerimento (com ou sem máscara/☐).",
+                },
+                cpf: { type: "string", description: "CPF do cliente" },
+                nome: { type: "string", description: "Nome do cliente (opcional)" },
+              },
+              required: ["cpf"],
+            },
+          },
+        },
+        required: ["itens"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "listar_parceiros",
+      description:
+        "Lista os parceiros do escritório (id, nome, cidade) — 'parceiro' no pedido do usuário é SEMPRE um destes (não é sistema externo). Use o id em parceiro_id de cadastrar_processos_lote / criar_processo.",
       parameters: { type: "object", properties: {} },
     },
   },
@@ -454,7 +499,7 @@ async function toolBuscarPessoas(
   if (match_count === 0) {
     return {
       ok: true,
-      summary: `Nenhuma pessoa para "${termo}". Ofereça criar_cliente_caso + salvar anexo (se houver) ou peça CPF/telefone/outra grafia.`,
+      summary: `Nenhuma pessoa para "${termo}". Se o usuário trouxe nº de processo/NB + CPF, NÃO é criar_cliente_caso: siga verificar_processos_lote → cadastrar_processos_lote (cliente novo entra junto, sem telefone). Senão, ofereça criar_cliente_caso + salvar anexo (se houver) ou peça CPF/telefone/outra grafia.`,
       data: {
         termo,
         match_count: 0,
@@ -868,6 +913,210 @@ async function toolListarColunasFunis(): Promise<AssistenteToolResult> {
         nome: s.label,
       })),
     },
+  };
+}
+
+const LOTE_MAX_ITENS = 50;
+
+/** CNJ segment 4 = Justiça Federal → judicial previdenciário; non-CNJ = NB/requerimento. */
+function sugestaoFunilPorNumero(digits: string): FunilProcesso | null {
+  if (!digits) return null;
+  if (digits.length === 20) return digits[13] === "4" ? "previdenciario" : null;
+  return "administrativo";
+}
+
+async function toolVerificarProcessosLote(
+  args: Record<string, unknown>
+): Promise<AssistenteToolResult> {
+  const rawItens = Array.isArray(args.itens) ? args.itens : [];
+  if (!rawItens.length) {
+    return { ok: false, summary: "Informe itens[] com cpf (e numero_processo)." };
+  }
+  if (rawItens.length > LOTE_MAX_ITENS) {
+    return {
+      ok: false,
+      summary: `Máximo de ${LOTE_MAX_ITENS} itens por verificação; divida a lista.`,
+    };
+  }
+
+  const itens = rawItens.map((raw, i) => {
+    const r = asRecord(raw);
+    const numeroRaw = str(r.numero_processo).replace(/[☐☑✓✔]/g, "").trim();
+    const numeroDigits = normalizeNumeroProcesso(numeroRaw);
+    const cpf = normalizeCpf(str(r.cpf));
+    return {
+      indice: i + 1,
+      nome_informado: str(r.nome) || null,
+      numeroRaw,
+      numeroDigits,
+      cpf,
+    };
+  });
+
+  const numeroVariants = Array.from(
+    new Set(
+      itens.flatMap((it) =>
+        it.numeroDigits
+          ? [it.numeroDigits, formatNumeroProcesso(it.numeroDigits), it.numeroRaw]
+          : []
+      )
+    )
+  ).filter(Boolean);
+  const cpfs = Array.from(new Set(itens.map((it) => it.cpf).filter((c) => c.length === 11)));
+  const cpfVariants = Array.from(new Set(cpfs.flatMap((c) => [c, formatCpf(c)])));
+
+  const supabase = await createClient();
+  const procCols =
+    "id, nome, cpf, telefone, numero_processo, area, funil_coluna, parceiro_id";
+  const [porNumero, porCpf, casos, colunas] = await Promise.all([
+    numeroVariants.length
+      ? supabase.from("processos_clientes").select(procCols).in("numero_processo", numeroVariants)
+      : Promise.resolve({ data: [], error: null }),
+    cpfVariants.length
+      ? supabase.from("processos_clientes").select(procCols).in("cpf", cpfVariants)
+      : Promise.resolve({ data: [], error: null }),
+    cpfVariants.length
+      ? supabase
+          .from("casos_novos")
+          .select("id, nome, cpf, telefone, updated_at")
+          .in("cpf", cpfVariants)
+          .order("updated_at", { ascending: false })
+      : Promise.resolve({ data: [], error: null }),
+    listProcessoColunasTodas().catch(() => null),
+  ]);
+  const err = porNumero.error || porCpf.error || casos.error;
+  if (err) return { ok: false, summary: err.message };
+
+  type ProcRow = Pick<
+    Tables<"processos_clientes">,
+    "id" | "nome" | "cpf" | "telefone" | "numero_processo" | "area" | "funil_coluna" | "parceiro_id"
+  >;
+  const procByNumero = new Map<string, ProcRow>();
+  for (const p of (porNumero.data ?? []) as ProcRow[]) {
+    const k = normalizeNumeroProcesso(p.numero_processo);
+    if (k && !procByNumero.has(k)) procByNumero.set(k, p);
+  }
+
+  type Cliente = { nome: string; telefone: string | null; fontes: Set<string>; processos: number };
+  const clienteByCpf = new Map<string, Cliente>();
+  const touch = (cpfRaw: string | null, nome: string | null, telefone: string | null, fonte: string) => {
+    const cpf = cpfRaw ? normalizeCpf(cpfRaw) : "";
+    if (!cpf) return null;
+    let c = clienteByCpf.get(cpf);
+    if (!c) {
+      c = { nome: nome?.trim() || "", telefone: null, fontes: new Set(), processos: 0 };
+      clienteByCpf.set(cpf, c);
+    }
+    if (!c.nome && nome?.trim()) c.nome = nome.trim();
+    if (!c.telefone && telefone?.trim()) c.telefone = telefone.trim();
+    c.fontes.add(fonte);
+    return c;
+  };
+  for (const c of casos.data ?? []) touch(c.cpf, c.nome, c.telefone, "caso");
+  for (const p of (porCpf.data ?? []) as ProcRow[]) {
+    const c = touch(p.cpf, p.nome, p.telefone, "processo");
+    if (c) c.processos += 1;
+  }
+
+  const resultado = itens.map((it) => {
+    const cpfValido = isValidCpf(it.cpf);
+    const cliente = it.cpf ? clienteByCpf.get(it.cpf) : undefined;
+    const proc = it.numeroDigits ? procByNumero.get(it.numeroDigits) : undefined;
+    const procFunil = proc ? normalizeAreaProcesso(proc.area) : null;
+    const procCpf = proc ? normalizeCpf(proc.cpf) : null;
+    return {
+      indice: it.indice,
+      numero_processo: it.numeroDigits ? formatNumeroProcesso(it.numeroDigits) : null,
+      numero_cnj_valido: it.numeroDigits ? isValidNumeroProcesso(it.numeroDigits) : false,
+      cpf: it.cpf ? formatCpf(it.cpf) : null,
+      cpf_valido: cpfValido,
+      nome_informado: it.nome_informado,
+      sugestao_funil: sugestaoFunilPorNumero(it.numeroDigits),
+      cliente_existente: cliente
+        ? {
+            nome: cliente.nome || null,
+            telefone: cliente.telefone,
+            fontes: Array.from(cliente.fontes),
+            processos_no_cpf: cliente.processos,
+            ficha_href: assistenteFichaHref({ cpf: it.cpf }),
+          }
+        : null,
+      cliente_novo: cpfValido && !cliente,
+      processo_existente:
+        proc && procFunil
+          ? {
+              processo_id: proc.id,
+              nome: proc.nome,
+              area: procFunil,
+              funil_nome: labelFunilProcesso(procFunil),
+              funil_coluna: proc.funil_coluna,
+              coluna_nome: proc.funil_coluna
+                ? colunas
+                  ? labelDaColunaProcesso(proc.funil_coluna, colunas[procFunil])
+                  : proc.funil_coluna
+                : null,
+              parceiro_id: proc.parceiro_id,
+              cpf_diferente: Boolean(procCpf && it.cpf && procCpf !== it.cpf),
+              href_funil: processosFunilHref(procFunil),
+            }
+          : null,
+    };
+  });
+
+  const novos = resultado.filter((r) => !r.processo_existente);
+  const existentes = resultado.filter((r) => r.processo_existente);
+  const clientesNovos = resultado.filter((r) => r.cliente_novo).length;
+  const clientesExistentes = resultado.filter((r) => r.cliente_existente).length;
+  const cpfInvalidos = resultado.filter((r) => !r.cpf_valido);
+  const semNumero = resultado.filter((r) => !r.numero_processo);
+
+  const parts = [
+    `${resultado.length} item(ns): ${novos.length} processo(s) novo(s), ${existentes.length} já cadastrado(s).`,
+    `${clientesExistentes} cliente(s) já existente(s) (vincular pelo CPF sem perguntar), ${clientesNovos} cliente(s) novo(s) (cadastrados junto com o processo, sem telefone).`,
+  ];
+  if (existentes.length) {
+    parts.push(
+      `Já cadastrados (pergunte atualizar ou ignorar): ${existentes
+        .map(
+          (r) =>
+            `#${r.indice} ${r.numero_processo} → processo_id ${r.processo_existente!.processo_id} [${r.processo_existente!.funil_nome}${r.processo_existente!.coluna_nome ? ` · ${r.processo_existente!.coluna_nome}` : ""}]${r.processo_existente!.cpf_diferente ? " (CPF diferente!)" : ""}`
+        )
+        .join(" | ")}.`
+    );
+  }
+  if (cpfInvalidos.length) {
+    parts.push(`CPF inválido nos itens: ${cpfInvalidos.map((r) => `#${r.indice}`).join(", ")} — peça o CPF correto.`);
+  }
+  if (semNumero.length) {
+    parts.push(`Sem nº de processo: ${semNumero.map((r) => `#${r.indice}`).join(", ")}.`);
+  }
+  parts.push("Próximo passo: perguntar só o que falta (funil, coluna, parceiro, duplicados) e propor cadastrar_processos_lote.");
+
+  return {
+    ok: true,
+    summary: parts.join(" "),
+    data: { itens: resultado },
+  };
+}
+
+async function toolListarParceiros(): Promise<AssistenteToolResult> {
+  const parceiros = await listParceiros();
+  if (!parceiros.length) {
+    return {
+      ok: true,
+      summary:
+        "Nenhum parceiro cadastrado. Avise o usuário e aponte para Configurações → Parceiros; o processo pode ser cadastrado sem parceiro.",
+      links: [{ label: "Configurações → Parceiros", href: "/configuracoes" }],
+      data: { parceiros: [] },
+    };
+  }
+  const items = parceiros.map((p) => compact({ id: p.id, nome: p.nome, cidade: p.cidade }));
+  return {
+    ok: true,
+    summary: `${items.length} parceiro(s): ${parceiros
+      .map((p) => `${p.nome}${p.cidade ? ` (${p.cidade})` : ""} = ${p.id}`)
+      .join(" | ")}. ${items.length === 1 ? "Só um: sugira este." : "Se o usuário não citou nome, pergunte qual."}`,
+    data: { parceiros: items },
   };
 }
 
@@ -1297,6 +1546,10 @@ export async function executeAssistenteTool(
         return await toolListarProcessos(args);
       case "listar_colunas_funis":
         return await toolListarColunasFunis();
+      case "verificar_processos_lote":
+        return await toolVerificarProcessosLote(args);
+      case "listar_parceiros":
+        return await toolListarParceiros();
       case "listar_conversa_resumo":
         return await toolListarConversaResumo(args);
       case "resumo_atendimentos_hoje":

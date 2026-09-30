@@ -227,6 +227,8 @@ function toolLabel(name: string): string {
       return "Criar processo";
     case "atualizar_processo":
       return "Atualizar processo";
+    case "cadastrar_processos_lote":
+      return "Cadastrar processos em lote";
     case "mover_processo":
       return "Mover processo(s)";
     case "transferir_processo":
@@ -265,6 +267,61 @@ function readDetails(data: unknown): string[] {
   const raw = (data as Record<string, unknown>).details;
   if (!Array.isArray(raw)) return [];
   return raw.filter((d): d is string => typeof d === "string" && !!d.trim());
+}
+
+type LoteTotais = { criar: number; atualizar: number; ignorar: number };
+
+function readLoteTotais(data: unknown): LoteTotais | null {
+  const totais = readNormalizedArgs(data)?.totais;
+  if (!totais || typeof totais !== "object" || Array.isArray(totais)) return null;
+  const t = totais as Record<string, unknown>;
+  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  return { criar: n(t.criar), atualizar: n(t.atualizar), ignorar: n(t.ignorar) };
+}
+
+type LoteResultado = {
+  criados: number;
+  atualizados: number;
+  ignorados: number;
+  erros: { n: number; ref: string; erro: string }[];
+};
+
+function readLoteResultado(data: unknown): LoteResultado | null {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+  const d = data as Record<string, unknown>;
+  if (typeof d.criados !== "number") return null;
+  const erros = Array.isArray(d.erros)
+    ? d.erros.flatMap((raw) => {
+        if (!raw || typeof raw !== "object") return [];
+        const e = raw as Record<string, unknown>;
+        return [
+          {
+            n: typeof e.n === "number" ? e.n : 0,
+            ref: typeof e.ref === "string" ? e.ref : "",
+            erro: typeof e.erro === "string" ? e.erro : "erro",
+          },
+        ];
+      })
+    : [];
+  return {
+    criados: d.criados,
+    atualizados: typeof d.atualizados === "number" ? d.atualizados : 0,
+    ignorados: typeof d.ignorados === "number" ? d.ignorados : 0,
+    erros,
+  };
+}
+
+function LoteChip({ label, value, className }: { label: string; value: number; className: string }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium",
+        className
+      )}
+    >
+      <span className="tabular-nums">{value}</span> {label}
+    </span>
+  );
 }
 
 type PrazoConfirmExtras = {
@@ -526,8 +583,59 @@ function ConfirmCard({
       : null;
   const details = readDetails(item.result.data);
   const destructive = item.name === "excluir_processo";
+  const isLote = item.name === "cadastrar_processos_lote";
+  const loteTotais = isLote ? readLoteTotais(item.result.data) : null;
 
   if (status === "confirmed") {
+    const resultado = isLote ? readLoteResultado(item.result.data) : null;
+    if (resultado) {
+      return (
+        <div
+          className={cn(
+            "mt-2 rounded-xl border px-3 py-2 text-xs",
+            resultado.erros.length
+              ? "border-amber-200 bg-amber-50/80 text-amber-900"
+              : "border-emerald-200 bg-emerald-50 text-emerald-900"
+          )}
+        >
+          <p>Confirmado: {label}</p>
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            <LoteChip
+              label="criados"
+              value={resultado.criados}
+              className="border-emerald-200 bg-white text-emerald-800"
+            />
+            <LoteChip
+              label="atualizados"
+              value={resultado.atualizados}
+              className="border-blue-200 bg-white text-blue-800"
+            />
+            <LoteChip
+              label="ignorados"
+              value={resultado.ignorados}
+              className="border-[#e2e8f0] bg-white text-[#64748B]"
+            />
+            {resultado.erros.length ? (
+              <LoteChip
+                label="com erro"
+                value={resultado.erros.length}
+                className="border-red-200 bg-white text-red-700"
+              />
+            ) : null}
+          </div>
+          {resultado.erros.length ? (
+            <ul className="mt-1.5 max-h-40 space-y-0.5 overflow-y-auto text-[11px] text-red-800">
+              {resultado.erros.map((e, i) => (
+                <li key={i} className="break-words">
+                  Item {e.n}
+                  {e.ref ? ` (${e.ref})` : ""}: {e.erro}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      );
+    }
     return (
       <div className="mt-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
         Confirmado: {label}
@@ -629,10 +737,32 @@ function ConfirmCard({
           ) : null}
         </div>
       ) : null}
+      {loteTotais ? (
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          <LoteChip
+            label="criar"
+            value={loteTotais.criar}
+            className="border-emerald-200 bg-white text-emerald-800"
+          />
+          <LoteChip
+            label="atualizar"
+            value={loteTotais.atualizar}
+            className="border-blue-200 bg-white text-blue-800"
+          />
+          <LoteChip
+            label="ignorar"
+            value={loteTotais.ignorar}
+            className="border-[#e2e8f0] bg-white text-[#64748B]"
+          />
+        </div>
+      ) : null}
       {details.length ? (
         <ul
           className={cn(
-            "mt-1.5 max-h-40 space-y-0.5 overflow-y-auto text-[11px]",
+            "mt-1.5 space-y-0.5 overflow-y-auto text-[11px]",
+            isLote
+              ? "max-h-64 divide-y divide-amber-200/60 rounded-lg border border-amber-200/70 bg-white/70 px-2 py-1 [&>li]:py-1"
+              : "max-h-40",
             destructive ? "text-red-900" : "text-[#475569]"
           )}
         >

@@ -20,8 +20,8 @@ export function ProcessosFunilTabs({ funil }: { funil: FunilProcesso }) {
             className={cn(
               "shrink-0 whitespace-nowrap rounded-md px-4 py-1.5 text-sm font-medium transition-colors",
               selected
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-muted-foreground hover:bg-primary/10 hover:text-primary"
             )}
           >
             {f.label}

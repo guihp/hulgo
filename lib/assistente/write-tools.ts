@@ -97,6 +97,7 @@ export const WRITE_TOOL_NAMES = [
   "criar_cliente_caso",
   "criar_processo",
   "atualizar_processo",
+  "cadastrar_processos_lote",
   "mover_processo",
   "transferir_processo",
   "definir_situacao_processo",
@@ -439,6 +440,64 @@ export const ASSISTENTE_WRITE_TOOL_DEFINITIONS = [
           parceiro_id: { type: "string" },
         },
         required: ["processo_id"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "cadastrar_processos_lote",
+      description:
+        "Propõe cadastrar/atualizar 1..N processos colados pelo usuário (lista com nº, CPF, cliente, benefício, resumo) num único card de confirmação — use também para 1 processo só. NUNCA exija telefone: o cliente é criado implicitamente pelo CPF (a ficha abre pelo CPF) e o telefone é copiado do cadastro existente quando houver. Chame verificar_processos_lote antes. Por item: acao=criar (novo; falha se o número já existir — pergunte ao usuário se atualiza ou ignora), atualizar (processo_id da verificação — nunca invente) ou ignorar. area/coluna/parceiro vêm das respostas do usuário; coluna = chave de listar_colunas_funis do funil do item; parceiro_id = id de listar_parceiros (nunca invente). Resumo/Andamento/Situação/Obs → ultimo_movimento. polo_ativo padrão \"NOME (CPF xxx)\". Máximo 50 itens.",
+      parameters: {
+        type: "object",
+        properties: {
+          itens: {
+            type: "array",
+            maxItems: 50,
+            items: {
+              type: "object",
+              properties: {
+                acao: {
+                  type: "string",
+                  enum: ["criar", "atualizar", "ignorar"],
+                },
+                processo_id: {
+                  type: "number",
+                  description:
+                    "Obrigatório para atualizar — id vindo de verificar_processos_lote",
+                },
+                numero_processo: {
+                  type: "string",
+                  description:
+                    "CNJ (20 dígitos) em civel/previdenciario; nº do requerimento/NB (ou vazio) em administrativo/concedido",
+                },
+                cpf: { type: "string" },
+                nome: { type: "string", description: "Nome do cliente" },
+                area: { type: "string", description: AREAS_PROCESSO_DESC },
+                coluna: {
+                  type: "string",
+                  description:
+                    "Chave da coluna do funil do item (listar_colunas_funis); omitida → primeira coluna",
+                },
+                beneficio_identificado: {
+                  type: "string",
+                  description: "Não se aplica ao Cível",
+                },
+                ultimo_movimento: {
+                  type: "string",
+                  description: "Resumo / último andamento informado pelo usuário",
+                },
+                parceiro_id: {
+                  type: "string",
+                  description: "id de listar_parceiros (vazio = sem parceiro)",
+                },
+              },
+              required: ["acao"],
+            },
+          },
+        },
+        required: ["itens"],
       },
     },
   },
@@ -1607,6 +1666,308 @@ async function proposeAtualizarProcesso(
   };
 }
 
+const LOTE_MAX_ITENS = 50;
+const LOTE_ACOES = ["criar", "atualizar", "ignorar"] as const;
+type LoteAcao = (typeof LOTE_ACOES)[number];
+
+type LoteItemNormalized = {
+  /** 1-based position in the user's list. */
+  n: number;
+  acao: LoteAcao;
+  processo_id?: number;
+  fields: ProcessoFields;
+  funil?: FunilProcesso;
+  coluna_label?: string;
+  parceiro_nome?: string;
+  /** Display-only (ignorar / fallback). */
+  numero?: string;
+  nome?: string;
+};
+
+type LoteErro = { n: number; ref: string; erro: string };
+
+function loteItemRef(item: { numero?: string; nome?: string; processo_id?: number }): string {
+  const numero = item.numero ? formatNumeroProcesso(item.numero) : null;
+  return (
+    [numero, item.nome, item.processo_id ? `#${item.processo_id}` : null]
+      .filter(Boolean)
+      .join(" · ") || "sem identificação"
+  );
+}
+
+function loteDetailLine(item: LoteItemNormalized): string {
+  const verbo =
+    item.acao === "criar" ? "Criar" : item.acao === "atualizar" ? "Atualizar" : "Ignorar";
+  const f = item.fields;
+  const numero = f.numero_processo
+    ? formatNumeroProcesso(f.numero_processo)
+    : item.numero
+      ? formatNumeroProcesso(item.numero)
+      : item.acao === "criar"
+        ? "sem nº"
+        : null;
+  const parts: string[] = [
+    [verbo, numero, item.processo_id ? `#${item.processo_id}` : null]
+      .filter(Boolean)
+      .join(" "),
+  ];
+  const nome = f.nome ?? item.nome;
+  if (nome) parts.push(nome);
+  if (item.acao !== "ignorar") {
+    if (item.funil && (item.acao === "criar" || f.area || item.coluna_label)) {
+      parts.push(
+        `${labelFunilProcesso(item.funil)} → ${item.coluna_label ?? (item.acao === "criar" ? "primeira coluna" : "coluna atual")}`
+      );
+    }
+    if (f.beneficio_identificado) parts.push(f.beneficio_identificado);
+    if (item.parceiro_nome) parts.push(`Parceiro ${item.parceiro_nome}`);
+    if (f.ultimo_movimento) parts.push(`Andamento: ${clipPreview(f.ultimo_movimento, 80)}`);
+  }
+  return parts.join(" · ");
+}
+
+/** Drops "" / null so a batch update never clears fields by accident. */
+function loteItemArgs(raw: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of [
+    "numero_processo",
+    "cpf",
+    "nome",
+    "area",
+    "coluna",
+    "beneficio_identificado",
+    "ultimo_movimento",
+  ]) {
+    const v = raw[key];
+    if (typeof v === "string" && v.trim()) out[key] = v.trim();
+  }
+  return out;
+}
+
+async function proposeCadastrarProcessosLote(
+  args: Record<string, unknown>
+): Promise<ProposeOk | ProposeErr> {
+  const rawItens = Array.isArray(args.itens) ? args.itens.map(asRecord) : [];
+  if (!rawItens.length) {
+    return { ok: false, summary: "Informe itens (lista de processos)." };
+  }
+  if (rawItens.length > LOTE_MAX_ITENS) {
+    return {
+      ok: false,
+      summary: `Máximo de ${LOTE_MAX_ITENS} itens por lote (recebi ${rawItens.length}). Divida em lotes menores.`,
+    };
+  }
+
+  const supabase = await createClient();
+  const erros: LoteErro[] = [];
+
+  const updateIds = new Set<number>();
+  const numeros = new Set<string>();
+  const parceiroIds = new Set<string>();
+  for (const raw of rawItens) {
+    const pid = optionalPositiveId(raw.processo_id);
+    if (pid != null && str(raw.acao) === "atualizar") updateIds.add(pid);
+    const numero = normalizeNumeroProcesso(str(raw.numero_processo));
+    if (numero) numeros.add(numero);
+    const parceiro = str(raw.parceiro_id);
+    if (parceiro) parceiroIds.add(parceiro);
+  }
+
+  const [existingRows, dupRes, parceirosRes] = await Promise.all([
+    fetchProcessos([...updateIds]),
+    numeros.size
+      ? supabase
+          .from("processos_clientes")
+          .select("id, nome, numero_processo, area")
+          .in("numero_processo", [...numeros])
+      : Promise.resolve({ data: [], error: null }),
+    parceiroIds.size
+      ? supabase.from("app_parceiros").select("id, nome").in("id", [...parceiroIds])
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (dupRes.error) throw new Error(dupRes.error.message);
+  if (parceirosRes.error) throw new Error(parceirosRes.error.message);
+
+  const existingById = new Map(existingRows.map((r) => [r.id, r]));
+  const dupByNumero = new Map<string, { id: number; nome: string | null; area: string | null }>();
+  for (const d of (dupRes.data ?? []) as {
+    id: number;
+    nome: string | null;
+    numero_processo: string | null;
+    area: string | null;
+  }[]) {
+    if (d.numero_processo && !dupByNumero.has(d.numero_processo)) {
+      dupByNumero.set(d.numero_processo, d);
+    }
+  }
+  const parceiroNome = new Map(
+    ((parceirosRes.data ?? []) as { id: string; nome: string }[]).map((p) => [p.id, p.nome])
+  );
+
+  const colunasCache = new Map<FunilProcesso, ProcessoColunaMatch[]>();
+  const colunasDoFunil = async (funil: FunilProcesso) => {
+    let list = colunasCache.get(funil);
+    if (!list) {
+      list = await listProcessoColunas(funil);
+      colunasCache.set(funil, list);
+    }
+    return list;
+  };
+
+  const itens: LoteItemNormalized[] = [];
+  const numerosCriar = new Map<string, number>();
+
+  for (const [i, raw] of rawItens.entries()) {
+    const n = i + 1;
+    const acao = str(raw.acao) as LoteAcao;
+    const itemArgs = loteItemArgs(raw);
+    const processo_id = optionalPositiveId(raw.processo_id);
+    const refBase = {
+      numero: normalizeNumeroProcesso(str(raw.numero_processo)) || undefined,
+      nome: str(raw.nome) || undefined,
+      processo_id,
+    };
+    const fail = (erro: string) => erros.push({ n, ref: loteItemRef(refBase), erro });
+
+    if (!LOTE_ACOES.includes(acao)) {
+      fail(`acao inválida "${str(raw.acao)}" — use criar | atualizar | ignorar.`);
+      continue;
+    }
+
+    if (acao === "ignorar") {
+      itens.push({ n, acao, fields: {}, ...refBase });
+      continue;
+    }
+
+    let existing: ProcessoRow | undefined;
+    if (acao === "atualizar") {
+      if (processo_id == null) {
+        fail("atualizar exige processo_id (de verificar_processos_lote — nunca invente).");
+        continue;
+      }
+      existing = existingById.get(processo_id);
+      if (!existing) {
+        fail(`processo #${processo_id} não encontrado.`);
+        continue;
+      }
+    }
+
+    const parsed = await parseProcessoFields(
+      itemArgs,
+      acao === "atualizar",
+      existing ? normalizeAreaProcesso(existing.area) : undefined
+    );
+    if (!parsed.ok) {
+      fail(parsed.summary);
+      continue;
+    }
+    const fields = parsed.fields;
+    const funil = normalizeAreaProcesso(fields.area ?? existing?.area);
+
+    if (!funilTemBeneficio(funil) && fields.beneficio_identificado) {
+      fail("benefício não se aplica ao funil Cível.");
+      continue;
+    }
+
+    let coluna_label: string | undefined;
+    const colunaRaw = str(itemArgs.coluna);
+    if (colunaRaw) {
+      const colunas = await colunasDoFunil(funil);
+      const coluna = matchColunaProcesso(colunaRaw, colunas);
+      if (!coluna) {
+        fail(
+          `coluna "${colunaRaw}" não existe no funil ${labelFunilProcesso(funil)}. Use: ${colunasOptions(colunas)}.`
+        );
+        continue;
+      }
+      fields.funil_coluna = coluna.chave;
+      coluna_label = coluna.label;
+    }
+
+    let parceiro_nome: string | undefined;
+    const parceiroRaw = str(raw.parceiro_id);
+    if (parceiroRaw) {
+      parceiro_nome = parceiroNome.get(parceiroRaw);
+      if (!parceiro_nome) {
+        fail(`parceiro ${parceiroRaw} não encontrado — use listar_parceiros, nunca invente.`);
+        continue;
+      }
+      fields.parceiro_id = parceiroRaw;
+    }
+
+    const numero = fields.numero_processo;
+    if (acao === "criar") {
+      if (numero) {
+        const dup = dupByNumero.get(numero);
+        if (dup) {
+          fail(
+            `já cadastrado como processo #${dup.id} (${dup.nome ?? "sem nome"}, ${labelFunilProcesso(normalizeAreaProcesso(dup.area))}). Pergunte ao usuário se atualiza (acao=atualizar, processo_id=${dup.id}) ou ignora.`
+          );
+          continue;
+        }
+        const repetido = numerosCriar.get(numero);
+        if (repetido != null) {
+          fail(`número repetido na lista (mesmo do item ${repetido}).`);
+          continue;
+        }
+        numerosCriar.set(numero, n);
+      }
+      if (fields.nome && fields.cpf && !str(raw.polo_ativo)) {
+        fields.polo_ativo = `${fields.nome} (CPF ${formatCpf(fields.cpf)})`;
+      }
+    } else if (existing && numero && numero !== existing.numero_processo) {
+      const dup = dupByNumero.get(numero);
+      if (dup && dup.id !== existing.id) {
+        fail(`o número informado já pertence ao processo #${dup.id}.`);
+        continue;
+      }
+    }
+
+    if (acao === "atualizar" && !Object.keys(fields).length) {
+      fail("nenhum campo para atualizar — use acao=ignorar.");
+      continue;
+    }
+
+    itens.push({
+      n,
+      acao,
+      ...(processo_id != null && acao === "atualizar" ? { processo_id } : {}),
+      fields,
+      funil,
+      ...(coluna_label ? { coluna_label } : {}),
+      ...(parceiro_nome ? { parceiro_nome } : {}),
+      numero: numero || existing?.numero_processo || undefined,
+      nome: fields.nome ?? existing?.nome ?? undefined,
+    });
+  }
+
+  if (erros.length) {
+    return {
+      ok: false,
+      summary: `Não gerei o card — ${erros.length} item(ns) com problema. Corrija ou pergunte ao usuário e chame cadastrar_processos_lote de novo com a lista inteira (não diga que cadastrou):\n${erros
+        .map((e) => `- Item ${e.n} (${e.ref}): ${e.erro}`)
+        .join("\n")}`,
+    };
+  }
+
+  const totais = { criar: 0, atualizar: 0, ignorar: 0 };
+  for (const it of itens) totais[it.acao] += 1;
+  const total = itens.length;
+  const partes = [
+    totais.criar ? `${totais.criar} criar` : null,
+    totais.atualizar ? `${totais.atualizar} atualizar` : null,
+    totais.ignorar ? `${totais.ignorar} ignorar` : null,
+  ].filter(Boolean);
+
+  return {
+    ok: true,
+    normalizedArgs: { itens, totais },
+    label: `Cadastrar ${total} processo${total === 1 ? "" : "s"}`,
+    summary: `Cadastrar ${total} processo(s) em lote (${partes.join(", ")}).`,
+    details: itens.map(loteDetailLine),
+  };
+}
+
 async function proposeMoverProcesso(
   args: Record<string, unknown>
 ): Promise<ProposeOk | ProposeErr> {
@@ -2014,6 +2375,8 @@ async function proposeWrite(
       return proposeCriarProcesso(args);
     case "atualizar_processo":
       return proposeAtualizarProcesso(args);
+    case "cadastrar_processos_lote":
+      return proposeCadastrarProcessosLote(args);
     case "mover_processo":
       return proposeMoverProcesso(args);
     case "transferir_processo":
@@ -2526,6 +2889,171 @@ async function execCriarProcesso(
   };
 }
 
+/** CPF → telefone from casos_novos first, then other processos with the same CPF. */
+async function telefonesPorCpf(cpfs: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (!cpfs.length) return out;
+  const supabase = await createClient();
+  const [casos, processos] = await Promise.all([
+    supabase
+      .from("casos_novos")
+      .select("cpf, telefone")
+      .in("cpf", cpfs)
+      .not("telefone", "is", null),
+    supabase
+      .from("processos_clientes")
+      .select("cpf, telefone")
+      .in("cpf", cpfs)
+      .not("telefone", "is", null),
+  ]);
+  for (const row of [...(casos.data ?? []), ...(processos.data ?? [])] as {
+    cpf: string | null;
+    telefone: string | null;
+  }[]) {
+    const tel = row.telefone?.trim();
+    if (row.cpf && tel && !out.has(row.cpf)) out.set(row.cpf, tel);
+  }
+  return out;
+}
+
+async function execCadastrarProcessosLote(
+  args: Record<string, unknown>
+): Promise<AssistenteToolResult> {
+  const itens = (Array.isArray(args.itens) ? args.itens : []).map(
+    (raw) => asRecord(raw) as unknown as LoteItemNormalized
+  );
+  if (!itens.length) return { ok: false, summary: "Lote vazio." };
+
+  const supabase = await createClient();
+  const criar = itens.filter((it) => it.acao === "criar");
+  const atualizar = itens.filter((it) => it.acao === "atualizar");
+
+  const numerosCriar = criar
+    .map((it) => asRecord(it.fields).numero_processo)
+    .filter((v): v is string => typeof v === "string" && !!v);
+  const cpfs = new Set<string>();
+  for (const it of criar) {
+    const cpf = asRecord(it.fields).cpf;
+    if (typeof cpf === "string" && cpf) cpfs.add(cpf);
+  }
+
+  const [existingRows, dupRes] = await Promise.all([
+    fetchProcessos(
+      atualizar.map((it) => it.processo_id).filter((id): id is number => !!id)
+    ),
+    numerosCriar.length
+      ? supabase
+          .from("processos_clientes")
+          .select("id, numero_processo")
+          .in("numero_processo", numerosCriar)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (dupRes.error) throw new Error(dupRes.error.message);
+  const existingById = new Map(existingRows.map((r) => [r.id, r]));
+  for (const r of existingRows) if (r.cpf) cpfs.add(r.cpf);
+  const dupByNumero = new Map(
+    ((dupRes.data ?? []) as { id: number; numero_processo: string | null }[])
+      .filter((d) => d.numero_processo)
+      .map((d) => [d.numero_processo as string, d.id])
+  );
+  const telefones = await telefonesPorCpf([...cpfs]);
+
+  let criados = 0;
+  let atualizados = 0;
+  let ignorados = 0;
+  const erros: LoteErro[] = [];
+  const funis = new Set<FunilProcesso>();
+  const fichas = new Map<string, string>();
+
+  for (const it of itens) {
+    const fields = asRecord(it.fields) as ProcessoFields;
+    const ref = loteItemRef({
+      numero: fields.numero_processo || it.numero,
+      nome: fields.nome ?? it.nome,
+      processo_id: it.processo_id,
+    });
+    try {
+      if (it.acao === "ignorar") {
+        ignorados += 1;
+        continue;
+      }
+      if (it.acao === "criar") {
+        const funil = normalizeAreaProcesso(fields.area);
+        const numero = fields.numero_processo ?? "";
+        if (!fields.nome || !fields.cpf || (funilExigeCnj(funil) && !numero)) {
+          throw new Error("dados incompletos.");
+        }
+        const dupId = numero ? dupByNumero.get(numero) : undefined;
+        if (dupId) throw new Error(`já cadastrado como processo #${dupId}.`);
+        await upsertProcesso({
+          ...fields,
+          nome: fields.nome,
+          cpf: fields.cpf,
+          numero_processo: numero,
+          telefone: fields.telefone || telefones.get(fields.cpf) || null,
+        });
+        criados += 1;
+        funis.add(funil);
+        fichas.set(fields.cpf, fields.nome);
+        continue;
+      }
+      const existing = it.processo_id ? existingById.get(it.processo_id) : undefined;
+      if (!existing) throw new Error(`processo #${it.processo_id ?? "?"} não encontrado.`);
+      const cpf = fields.cpf ?? existing.cpf ?? "";
+      const telefone =
+        !existing.telefone && !fields.telefone ? telefones.get(cpf) : undefined;
+      // upsertProcesso always rewrites beneficio/parceiro — keep current values unless changed.
+      await upsertProcesso({
+        id: existing.id,
+        nome: existing.nome ?? "",
+        cpf: existing.cpf ?? "",
+        numero_processo: existing.numero_processo ?? "",
+        beneficio_identificado: existing.beneficio_identificado,
+        parceiro_id: existing.parceiro_id,
+        ...(telefone ? { telefone } : {}),
+        ...fields,
+      });
+      atualizados += 1;
+      funis.add(normalizeAreaProcesso(fields.area ?? existing.area));
+      if (cpf) fichas.set(cpf, fields.nome ?? existing.nome ?? cpf);
+    } catch (e) {
+      erros.push({
+        n: it.n,
+        ref,
+        erro: e instanceof Error ? e.message : "erro ao gravar",
+      });
+    }
+  }
+
+  const links = [
+    ...[...funis].map((funil) => ({
+      label: `Processos ${labelFunilProcesso(funil)}`,
+      href: processosFunilHref(funil),
+    })),
+    ...[...fichas].slice(0, 10).map(([cpf, nome]) => ({
+      label: `Ficha ${nome}`,
+      href: assistenteFichaHref({ cpf }),
+    })),
+  ];
+
+  const partes = [
+    `${criados} criado(s)`,
+    `${atualizados} atualizado(s)`,
+    `${ignorados} ignorado(s)`,
+    erros.length ? `${erros.length} com erro` : null,
+  ].filter(Boolean);
+  const errosTxt = erros.length
+    ? ` Erros: ${erros.map((e) => `item ${e.n} (${e.ref}): ${e.erro}`).join("; ")}.`
+    : "";
+
+  return {
+    ok: criados + atualizados + ignorados > 0 || !erros.length,
+    summary: `Lote de processos: ${partes.join(", ")}.${errosTxt}${links.length ? ` Links: ${links.map((l) => l.href).join(", ")}.` : ""}`,
+    links,
+    data: { criados, atualizados, ignorados, erros },
+  };
+}
+
 async function execAtualizarProcesso(
   args: Record<string, unknown>
 ): Promise<AssistenteToolResult> {
@@ -2734,6 +3262,8 @@ export async function executeAssistenteWriteTool(
         return await execCriarProcesso(args);
       case "atualizar_processo":
         return await execAtualizarProcesso(args);
+      case "cadastrar_processos_lote":
+        return await execCadastrarProcessosLote(args);
       case "mover_processo":
         return await execMoverProcesso(args);
       case "transferir_processo":
