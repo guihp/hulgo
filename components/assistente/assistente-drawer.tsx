@@ -50,6 +50,7 @@ import type {
   AssistenteMessage,
   AssistentePromptEditPreviewItem,
   AssistenteSessaoListItem,
+  AssistenteSessionResult,
   AssistenteToolTraceItem,
 } from "@/lib/assistente/types";
 import { labelForOffset } from "@/lib/prazos/lembretes";
@@ -636,9 +637,24 @@ function ConfirmCard({
         </div>
       );
     }
+    if (!item.result.ok) {
+      return (
+        <div className="mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900">
+          <p>Falhou: {label}</p>
+          {item.result.summary && item.result.summary !== label ? (
+            <p className="mt-0.5 text-[11px] text-red-800/90">{item.result.summary}</p>
+          ) : null}
+        </div>
+      );
+    }
     return (
       <div className="mt-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
-        Confirmado: {label}
+        <p>Confirmado: {label}</p>
+        {item.result.summary && item.result.summary !== label ? (
+          <p className="mt-0.5 text-[11px] text-emerald-800/90">
+            {item.result.summary}
+          </p>
+        ) : null}
       </div>
     );
   }
@@ -829,6 +845,65 @@ function ConfirmCard({
   );
 }
 
+const MAX_LINKS_POR_MENSAGEM = 4;
+
+/** Executed write results first, then reads; proposals not yet executed contribute nothing. */
+function messageLinks(trace: AssistenteToolTraceItem[]) {
+  const writes: { label: string; href: string }[] = [];
+  const reads: { label: string; href: string }[] = [];
+  for (const t of trace) {
+    const links = t.result.links ?? [];
+    if (!links.length) continue;
+    if (t.confirmationId) {
+      if (t.confirmationStatus === "confirmed" && t.result.ok) writes.push(...links);
+    } else {
+      reads.push(...links);
+    }
+  }
+  const seen = new Set<string>();
+  const out: { label: string; href: string }[] = [];
+  for (const link of [...writes, ...reads]) {
+    if (seen.has(link.href)) continue;
+    seen.add(link.href);
+    out.push(link);
+    if (out.length >= MAX_LINKS_POR_MENSAGEM) break;
+  }
+  return out;
+}
+
+/**
+ * Older sessions persisted a separate "Confirmado:/Cancelado:" message repeating
+ * a card that is already shown on the proposal message.
+ */
+function visibleMessages(messages: AssistenteMessage[]): AssistenteMessage[] {
+  const seenConfirmations = new Set<string>();
+  const seenIds = new Set<string>();
+  const out: AssistenteMessage[] = [];
+  for (const m of messages) {
+    if (seenIds.has(m.id)) continue;
+    seenIds.add(m.id);
+    const ids = m.tool_trace
+      .map((t) => t.confirmationId)
+      .filter((id): id is string => Boolean(id));
+    const isLegacyEcho =
+      m.role === "assistant" &&
+      ids.length > 0 &&
+      ids.every((id) => seenConfirmations.has(id)) &&
+      /^(Confirmado|Cancelado|Falha ao executar):/.test(m.content.trim());
+    ids.forEach((id) => seenConfirmations.add(id));
+    if (!isLegacyEcho) out.push(m);
+  }
+  return out;
+}
+
+type QueuedSend = { content: string; anexo: PendingAnexo | null };
+
+let optimisticSeq = 0;
+function nextOptimisticId() {
+  optimisticSeq += 1;
+  return `opt-${optimisticSeq}`;
+}
+
 export function AssistenteDrawer() {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
@@ -843,10 +918,15 @@ export function AssistenteDrawer() {
   const [sessoes, setSessoes] = useState<AssistenteSessaoListItem[]>([]);
   const [showSessoes, setShowSessoes] = useState(false);
   const [loadingSessoes, setLoadingSessoes] = useState(false);
+  /** Nova conversa / abrir / reiniciar in flight — sends are queued meanwhile. */
+  const [switching, setSwitching] = useState(false);
+  const [queued, setQueued] = useState<QueuedSend | null>(null);
+  const queuedRef = useRef<QueuedSend | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sessaoRef = useRef<string | null>(null);
   const bootedRef = useRef(false);
+  const bootingRef = useRef(false);
 
   function applySession(res: {
     sessaoId: string;
@@ -871,32 +951,29 @@ export function AssistenteDrawer() {
     }
   }
 
-  useEffect(() => {
-    if (!open || bootedRef.current) return;
-    let cancelled = false;
+  async function bootIfNeeded() {
+    if (bootedRef.current || bootingRef.current) return;
+    bootingRef.current = true;
     setBooting(true);
+    try {
+      const res = await iniciarSessaoAssistente();
+      applySession(res);
+      bootedRef.current = true;
+      flushQueued();
+      void refreshSessoes();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Falha ao iniciar assistente");
+      restoreQueued();
+    } finally {
+      bootingRef.current = false;
+      setBooting(false);
+    }
+  }
 
-    iniciarSessaoAssistente()
-      .then((res) => {
-        if (cancelled) return;
-        applySession(res);
-        bootedRef.current = true;
-        void refreshSessoes();
-      })
-      .catch((e: unknown) => {
-        if (cancelled) return;
-        const msg =
-          e instanceof Error ? e.message : "Falha ao iniciar assistente";
-        toast.error(msg);
-      })
-      .finally(() => {
-        if (!cancelled) setBooting(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [open]);
+  function onOpenChange(next: boolean) {
+    setOpen(next);
+    if (next) void bootIfNeeded();
+  }
 
   useEffect(() => {
     const el = listRef.current;
@@ -934,41 +1011,55 @@ export function AssistenteDrawer() {
     }
   }
 
+  function setQueue(q: QueuedSend | null) {
+    queuedRef.current = q;
+    setQueued(q);
+  }
+
+  function restoreQueued() {
+    const q = queuedRef.current;
+    if (!q) return;
+    setQueue(null);
+    setDraft((d) => d || q.content);
+    if (q.anexo) setPendingAnexo((p) => p ?? q.anexo);
+  }
+
+  /** Switches session without swallowing what the user types meanwhile (it gets queued). */
+  async function switchSession(
+    load: () => Promise<AssistenteSessionResult>,
+    opts: { success?: string; errorLabel: string }
+  ) {
+    setSwitching(true);
+    setAwaitingReply(false);
+    setConfirmingId(null);
+    clearPendingAnexo();
+    setDraft("");
+    setShowSessoes(false);
+    try {
+      const res = await load();
+      applySession(res);
+      flushQueued();
+      void refreshSessoes();
+      if (opts.success) toast.success(opts.success);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : opts.errorLabel);
+      restoreQueued();
+    } finally {
+      setSwitching(false);
+    }
+  }
+
   function restart() {
-    startTransition(async () => {
-      try {
-        setAwaitingReply(false);
-        setConfirmingId(null);
-        clearPendingAnexo();
-        const res = await reiniciarSessaoAssistente({
-          sessaoId: sessaoRef.current,
-        });
-        applySession(res);
-        setDraft("");
-        setShowSessoes(false);
-        void refreshSessoes();
-        toast.success("Conversa reiniciada");
-      } catch (e: unknown) {
-        toast.error(e instanceof Error ? e.message : "Falha ao reiniciar");
-      }
-    });
+    void switchSession(
+      () => reiniciarSessaoAssistente({ sessaoId: sessaoRef.current }),
+      { success: "Conversa reiniciada", errorLabel: "Falha ao reiniciar" }
+    );
   }
 
   function novaConversa() {
-    startTransition(async () => {
-      try {
-        setAwaitingReply(false);
-        setConfirmingId(null);
-        clearPendingAnexo();
-        const res = await novaSessaoAssistente();
-        applySession(res);
-        setDraft("");
-        setShowSessoes(false);
-        void refreshSessoes();
-        toast.success("Nova conversa");
-      } catch (e: unknown) {
-        toast.error(e instanceof Error ? e.message : "Falha ao criar conversa");
-      }
+    void switchSession(() => novaSessaoAssistente(), {
+      success: "Nova conversa",
+      errorLabel: "Falha ao criar conversa",
     });
   }
 
@@ -977,18 +1068,8 @@ export function AssistenteDrawer() {
       setShowSessoes(false);
       return;
     }
-    startTransition(async () => {
-      try {
-        setAwaitingReply(false);
-        setConfirmingId(null);
-        clearPendingAnexo();
-        const res = await abrirSessaoAssistente(id);
-        applySession(res);
-        setDraft("");
-        setShowSessoes(false);
-      } catch (e: unknown) {
-        toast.error(e instanceof Error ? e.message : "Falha ao abrir conversa");
-      }
+    void switchSession(() => abrirSessaoAssistente(id), {
+      errorLabel: "Falha ao abrir conversa",
     });
   }
 
@@ -1001,10 +1082,11 @@ export function AssistenteDrawer() {
   function applyConfirmResult(
     messageId: string,
     updated: AssistenteMessage,
-    followUp: AssistenteMessage
+    followUp: AssistenteMessage | null
   ) {
     setMessages((prev) => {
       const next = prev.map((m) => (m.id === messageId ? updated : m));
+      if (!followUp || next.some((m) => m.id === followUp.id)) return next;
       return [...next, followUp];
     });
   }
@@ -1070,24 +1152,42 @@ export function AssistenteDrawer() {
     });
   }
 
+  const sessionReady = Boolean(sessaoId) && !booting && !switching;
+
+  function flushQueued() {
+    const q = queuedRef.current;
+    if (!q || !sessaoRef.current) return;
+    setQueue(null);
+    dispatchSend(q.content, q.anexo);
+  }
+
   function send(text?: string) {
     const content = (text ?? draft).trim();
     const anexo = pendingAnexo;
-    if (
-      (!content && !anexo) ||
-      !sessaoId ||
-      awaitingReply ||
-      pending ||
-      booting
-    ) {
+    if ((!content && !anexo) || awaitingReply || confirmingId || queued) {
       return;
     }
     if (anexo && !anexo.modo) {
       toast.error("Escolha Interpretar ou Só salvar para o anexo");
       return;
     }
+    setDraft("");
+    clearPendingAnexo({ revoke: false });
+    if (!sessionReady) {
+      setQueue({ content, anexo });
+      return;
+    }
+    dispatchSend(content, anexo);
+  }
 
-    const optimisticId = `opt-${Date.now()}`;
+  function dispatchSend(content: string, anexo: PendingAnexo | null) {
+    const sessaoAtual = sessaoRef.current;
+    if (!sessaoAtual) {
+      setQueue({ content, anexo });
+      return;
+    }
+
+    const optimisticId = nextOptimisticId();
     const optimistic: AssistenteMessage = {
       id: optimisticId,
       role: "user",
@@ -1119,22 +1219,24 @@ export function AssistenteDrawer() {
     const draftSnapshot = content;
     const blobToRevoke = anexo?.previewUrl ?? null;
 
-    setDraft("");
-    clearPendingAnexo({ revoke: false });
     setMessages((prev) => [...prev, optimistic]);
     setAwaitingReply(true);
 
     startTransition(async () => {
       try {
         const res = await enviarMensagemAssistente({
-          sessaoId,
+          sessaoId: sessaoAtual,
           content: draftSnapshot,
           anexo: anexoPayload,
         });
         if (res.model) setModelLabel(res.model);
+        if (sessaoRef.current !== sessaoAtual) return;
         setMessages((prev) => {
-          const withoutOpt = prev.filter((m) => m.id !== optimisticId);
-          return [...withoutOpt, res.userMessage, res.assistantMessage];
+          const incoming = [res.userMessage, res.assistantMessage];
+          const withoutOpt = prev.filter(
+            (m) => m.id !== optimisticId && !incoming.some((n) => n.id === m.id)
+          );
+          return [...withoutOpt, ...incoming];
         });
         void refreshSessoes();
       } catch (e: unknown) {
@@ -1148,18 +1250,18 @@ export function AssistenteDrawer() {
     });
   }
 
-  const busy = pending || booting || awaitingReply || Boolean(confirmingId);
+  const busy =
+    pending || booting || switching || awaitingReply || Boolean(confirmingId);
   const anexoReady = !pendingAnexo || pendingAnexo.modo != null;
   const canSend =
-    Boolean(sessaoId) &&
     (draft.trim().length > 0 || Boolean(pendingAnexo)) &&
     anexoReady &&
     !awaitingReply &&
-    !booting &&
+    !queued &&
     !confirmingId;
 
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
+    <Sheet open={open} onOpenChange={onOpenChange}>
       {!open ? (
         <SheetTrigger
           render={
@@ -1300,7 +1402,7 @@ export function AssistenteDrawer() {
             </div>
           ) : null}
 
-          {!booting && messages.length === 0 && !awaitingReply ? (
+          {!booting && !switching && messages.length === 0 && !awaitingReply && !queued ? (
             <div className="rounded-2xl border border-dashed border-[#e2e8f0] bg-white px-4 py-6 text-center">
               <p className="text-sm font-medium text-[#0b2148]">
                 Como posso ajudar?
@@ -1328,7 +1430,7 @@ export function AssistenteDrawer() {
             </div>
           ) : null}
 
-          {messages.map((m) => (
+          {visibleMessages(messages).map((m) => (
             <div
               key={m.id}
               className={cn(
@@ -1380,25 +1482,16 @@ export function AssistenteDrawer() {
                       />
                     ) : null
                   )}
-                  {(() => {
-                    const seen = new Set<string>();
-                    return m.tool_trace.flatMap((t, ti) =>
-                      (t.result.links ?? []).slice(0, 3).flatMap((link, li) => {
-                        if (seen.has(link.href)) return [];
-                        seen.add(link.href);
-                        return [
-                          <Link
-                            key={`${t.name}-${link.href}-${ti}-${li}`}
-                            href={link.href}
-                            className="block truncate text-xs font-medium text-[#0b2148] underline-offset-2 hover:underline"
-                            onClick={() => setOpen(false)}
-                          >
-                            {link.label}
-                          </Link>,
-                        ];
-                      })
-                    );
-                  })()}
+                  {messageLinks(m.tool_trace).map((link) => (
+                    <Link
+                      key={link.href}
+                      href={link.href}
+                      className="block truncate text-xs font-medium text-[#0b2148] underline-offset-2 hover:underline"
+                      onClick={() => setOpen(false)}
+                    >
+                      {link.label}
+                    </Link>
+                  ))}
                 </div>
               ) : null}
               <p
@@ -1411,6 +1504,22 @@ export function AssistenteDrawer() {
               </p>
             </div>
           ))}
+
+          {queued ? (
+            <div className="ml-auto max-w-[92%] rounded-2xl bg-[#0b2148]/80 px-3.5 py-2.5 text-sm text-white">
+              <ChatMarkdown
+                text={
+                  queued.content ||
+                  (queued.anexo ? `[Anexo] ${queued.anexo.fileName}` : "")
+                }
+                className="[&_strong]:text-white"
+              />
+              <p className="mt-1 flex items-center justify-end gap-1 text-[10px] text-white/70">
+                <Loader2 className="size-3 animate-spin" />
+                Preparando conversa…
+              </p>
+            </div>
+          ) : null}
 
           {awaitingReply ? <WaitingDots /> : null}
         </div>
@@ -1516,9 +1625,7 @@ export function AssistenteDrawer() {
               variant="outline"
               size="icon"
               className="shrink-0 border-[#e2e8f0] text-[#0b2148]"
-              disabled={
-                booting || !sessaoId || Boolean(confirmingId) || awaitingReply
-              }
+              disabled={Boolean(confirmingId) || awaitingReply || Boolean(queued)}
               onClick={() => fileInputRef.current?.click()}
               aria-label="Anexar arquivo"
               title="Anexar imagem, vídeo ou documento"
@@ -1532,7 +1639,7 @@ export function AssistenteDrawer() {
               )}
               placeholder="Pergunte, anexe arquivo ou peça uma ação…"
               value={draft}
-              disabled={booting || !sessaoId || Boolean(confirmingId)}
+              disabled={Boolean(confirmingId)}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
@@ -1547,7 +1654,7 @@ export function AssistenteDrawer() {
               disabled={!canSend}
               onClick={() => send()}
             >
-              {awaitingReply ? (
+              {awaitingReply || queued ? (
                 <Loader2 className="size-4 animate-spin" />
               ) : (
                 <Send className="size-4" />

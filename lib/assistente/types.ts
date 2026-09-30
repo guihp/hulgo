@@ -116,5 +116,6 @@ export type AssistenteSendResult = {
 export type AssistenteConfirmResult = {
   sessaoId: string;
   updatedMessage: AssistenteMessage;
-  followUpMessage: AssistenteMessage;
+  /** Only when there is something beyond the result card (e.g. ask for a corrected CPF). */
+  followUpMessage: AssistenteMessage | null;
 };

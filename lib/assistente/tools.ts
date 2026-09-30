@@ -363,13 +363,6 @@ function processosFunilHref(funil: FunilProcesso): string {
   return `/processos?funil=${funil}`;
 }
 
-function linksTodosFunis() {
-  return FUNIS_PROCESSO.map((f) => ({
-    label: `Processos ${f.label}`,
-    href: processosFunilHref(f.value),
-  }));
-}
-
 function resumoProcesso(
   p: Tables<"processos_clientes">,
   colunas: Record<FunilProcesso, ProcessoColunaMatch[]> | null
@@ -844,7 +837,7 @@ async function toolListarProcessos(
   const rows = data ?? [];
   const funisHref = funil
     ? [{ label: `Processos ${labelFunilProcesso(funil)}`, href: processosFunilHref(funil) }]
-    : linksTodosFunis();
+    : [];
 
   if (!rows.length) {
     return {
@@ -902,7 +895,6 @@ async function toolListarColunasFunis(): Promise<AssistenteToolResult> {
   return {
     ok: true,
     summary: `Funil de vendas (casos): ${line(vendas)}. ${funisLine}. Situações de processo: ${SITUACOES_PROCESSO.map((s) => `${s.value}=${s.label}`).join(", ")}.`,
-    links: [{ label: "Kanban (vendas)", href: "/kanban" }, ...linksTodosFunis()],
     data: {
       funil_vendas: fmt(vendas),
       ...Object.fromEntries(

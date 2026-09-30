@@ -75,6 +75,26 @@ function mapMessage(row: {
   };
 }
 
+/** Decisions live only in the card (tool_trace), so the model needs them spelled out. */
+function historyContent(m: AssistenteMessage): string {
+  if (m.role !== "assistant") return m.content;
+  const notes = m.tool_trace.flatMap((t) => {
+    const label = t.result.confirmationLabel || t.name;
+    if (t.confirmationStatus === "confirmed") {
+      return [
+        t.result.ok
+          ? `[Usuário confirmou "${label}". Resultado: ${t.result.summary}]`
+          : `[Usuário confirmou "${label}", mas falhou: ${t.result.summary}]`,
+      ];
+    }
+    if (t.confirmationStatus === "cancelled") {
+      return [`[Usuário cancelou "${label}".]`];
+    }
+    return [];
+  });
+  return notes.length ? [m.content, ...notes].join("\n") : m.content;
+}
+
 async function loadAssistantMessage(
   messageId: string,
   sessaoId: string
@@ -418,7 +438,7 @@ export async function enviarMensagemAssistente(input: {
   const historyRows = await listMessages(input.sessaoId);
   const history = historyRows
     .slice(-HISTORICO_MAX)
-    .map((m) => ({ role: m.role, content: m.content }));
+    .map((m) => ({ role: m.role, content: historyContent(m) }));
 
   const { data: userRow, error: userErr } = await supabase
     .from("app_assistente_mensagens")
@@ -576,27 +596,24 @@ export async function confirmarAcaoAssistente(input: {
     confirmedBy: user.id,
   });
 
-  const supabase = await createClient();
-  const content = result.ok
-    ? `Confirmado: ${result.summary}`
-    : /cpf inválido/i.test(result.summary)
-      ? `Não consegui criar: o CPF informado é inválido (dígitos verificadores). Pode me enviar o CPF correto para eu tentar de novo?`
-      : `Falha ao executar: ${result.summary}`;
-
-  const { data: followRow, error: followErr } = await supabase
-    .from("app_assistente_mensagens")
-    .insert({
-      sessao_id: input.sessaoId,
-      role: "assistant",
-      content,
-      tool_trace: asJson([executedItem]),
-    })
-    .select("id, role, content, tool_trace, anexos, created_at")
-    .single();
-  if (followErr) throw new Error(followErr.message);
-
-  const followUpMessage = mapMessage(followRow);
-  if (!followUpMessage) throw new Error("Falha ao gravar resultado");
+  // The updated card already shows the result; a follow-up only when it adds a next step.
+  let followUpMessage: AssistenteMessage | null = null;
+  if (!result.ok && /cpf inválido/i.test(result.summary)) {
+    const supabase = await createClient();
+    const { data: followRow, error: followErr } = await supabase
+      .from("app_assistente_mensagens")
+      .insert({
+        sessao_id: input.sessaoId,
+        role: "assistant",
+        content:
+          "Não consegui criar: o CPF informado é inválido (dígitos verificadores). Pode me enviar o CPF correto para eu tentar de novo?",
+        tool_trace: [],
+      })
+      .select("id, role, content, tool_trace, anexos, created_at")
+      .single();
+    if (followErr) throw new Error(followErr.message);
+    followUpMessage = mapMessage(followRow);
+  }
 
   await touchSessao(input.sessaoId);
 
@@ -662,28 +679,11 @@ export async function cancelarAcaoAssistente(input: {
     confirmedBy: user.id,
   });
 
-  const supabase = await createClient();
-  const label = pending.result.confirmationLabel || pending.name;
-  const { data: followRow, error: followErr } = await supabase
-    .from("app_assistente_mensagens")
-    .insert({
-      sessao_id: input.sessaoId,
-      role: "assistant",
-      content: `Cancelado: ${label}.`,
-      tool_trace: asJson([cancelledItem]),
-    })
-    .select("id, role, content, tool_trace, anexos, created_at")
-    .single();
-  if (followErr) throw new Error(followErr.message);
-
-  const followUpMessage = mapMessage(followRow);
-  if (!followUpMessage) throw new Error("Falha ao gravar cancelamento");
-
   await touchSessao(input.sessaoId);
 
   return {
     sessaoId: input.sessaoId,
     updatedMessage: { ...message, tool_trace: updatedTrace },
-    followUpMessage,
+    followUpMessage: null,
   };
 }
