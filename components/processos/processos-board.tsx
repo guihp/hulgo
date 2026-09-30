@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useId, useMemo, useState, useTransition } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -520,6 +520,7 @@ export function ProcessosBoard({
   canManageColunas?: boolean;
   canExcluir?: boolean;
 }) {
+  const dndId = useId();
   const [processos, setProcessos] = useState(initialProcessos);
   const [colunas, setColunas] = useState(initialColunas);
   const [prevInitial, setPrevInitial] = useState({ initialProcessos, initialColunas });
@@ -1122,6 +1123,7 @@ export function ProcessosBoard({
       ) : null}
 
       <DndContext
+        id={dndId}
         sensors={sensors}
         collisionDetection={closestCorners}
         onDragStart={handleDragStart}

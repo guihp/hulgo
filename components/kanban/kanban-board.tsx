@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useId, useMemo, useState, useTransition } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -334,6 +334,7 @@ export function KanbanBoard({
   /** Clientes só em processos_clientes (fora do funil). */
   processosCount?: number;
 }) {
+  const dndId = useId();
   const [casos, setCasos] = useState(initialCasos);
   const [colunas, setColunas] = useState(initialColunas);
   const [aprovacaoPorContato, setAprovacaoPorContato] = useState(
@@ -596,6 +597,7 @@ export function KanbanBoard({
       </div>
 
       <DndContext
+        id={dndId}
         sensors={sensors}
         collisionDetection={closestCorners}
         onDragStart={handleDragStart}
