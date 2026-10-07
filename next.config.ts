@@ -11,8 +11,15 @@ const withSerwist = withSerwistInit({
   globPublicPatterns: ["icon-*.png", "FB.png"],
 });
 
+// Muda a cada build; o VersionWatcher compara com /api/health para avisar
+// abas abertas antes de um deploy (Server Actions do build antigo deixam de existir).
+const buildId = process.env.SOURCE_COMMIT || `${Date.now()}`;
+
 const nextConfig: NextConfig = {
   output: "standalone",
+  env: {
+    NEXT_PUBLIC_BUILD_ID: buildId,
+  },
   experimental: {
     // External/slow disk (/Volumes/HD): webpack can corrupt .next manifests
     // (e.g. routes-manifest.json filled with JS fragments → JSON.parse 500 on /login).

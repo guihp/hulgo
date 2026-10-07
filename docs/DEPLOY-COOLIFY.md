@@ -32,6 +32,7 @@ Essas variáveis precisam estar em **Build Variables** no Coolify — são embut
 | `NEXT_PUBLIC_SUPABASE_URL` | URL do projeto Supabase |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Chave anon/publishable |
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | Chave pública VAPID (Web Push) |
+| `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` | Chave **fixa** (base64, 32 bytes — `openssl rand -base64 32`). Mantém os ids das Server Actions iguais entre deploys; sem ela, quem está com o painel aberto durante um deploy recebe "Server Action … was not found on the server". Não troque depois de definida. |
 
 ### Runtime (servidor)
 

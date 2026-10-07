@@ -3,6 +3,7 @@ import { Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/providers/theme-provider";
 import { PwaInstallProvider } from "@/components/providers/pwa-install-provider";
 import { AppToaster } from "@/components/providers/app-toaster";
+import { VersionWatcher } from "@/components/providers/version-watcher";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
 
@@ -58,6 +59,7 @@ export default function RootLayout({
             <TooltipProvider>
               {children}
               <AppToaster />
+              <VersionWatcher />
             </TooltipProvider>
           </PwaInstallProvider>
         </ThemeProvider>

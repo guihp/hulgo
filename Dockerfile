@@ -21,6 +21,15 @@ ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
 ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
 ENV NEXT_PUBLIC_VAPID_PUBLIC_KEY=$NEXT_PUBLIC_VAPID_PUBLIC_KEY
 
+# Chave fixa das Server Actions: o id de cada action é um hash salgado por ela.
+# Sem ela o Next gera uma aleatória por build e TODA action muda de id a cada deploy —
+# quem estava com a página aberta recebe "Server Action ... was not found on the server".
+ARG NEXT_SERVER_ACTIONS_ENCRYPTION_KEY
+ENV NEXT_SERVER_ACTIONS_ENCRYPTION_KEY=$NEXT_SERVER_ACTIONS_ENCRYPTION_KEY
+# Coolify injeta o commit do deploy (id de build exibido em /api/health)
+ARG SOURCE_COMMIT
+ENV SOURCE_COMMIT=$SOURCE_COMMIT
+
 ENV NEXT_TELEMETRY_DISABLED=1
 # Evita OOM no `next build` (fase TypeScript) em VPS pequenas do Coolify.
 ENV NODE_OPTIONS="--max-old-space-size=3072"

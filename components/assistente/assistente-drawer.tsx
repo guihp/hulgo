@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { compressImageFile } from "@/lib/client/image-compress";
+import { toastErroAcao } from "@/lib/client/versao";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -967,7 +968,7 @@ export function AssistenteDrawer() {
       flushQueued();
       void refreshSessoes();
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Falha ao iniciar assistente");
+      toastErroAcao(e, "Falha ao iniciar assistente");
       restoreQueued();
     } finally {
       bootingRef.current = false;
@@ -1053,7 +1054,7 @@ export function AssistenteDrawer() {
       void refreshSessoes();
       if (opts.success) toast.success(opts.success);
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : opts.errorLabel);
+      toastErroAcao(e, opts.errorLabel);
       restoreQueued();
     } finally {
       setSwitching(false);
@@ -1133,7 +1134,7 @@ export function AssistenteDrawer() {
         }
         void refreshSessoes();
       } catch (e: unknown) {
-        toast.error(e instanceof Error ? e.message : "Falha ao confirmar");
+        toastErroAcao(e, "Falha ao confirmar");
       } finally {
         setConfirmingId(null);
       }
@@ -1156,7 +1157,7 @@ export function AssistenteDrawer() {
           res.followUpMessage
         );
       } catch (e: unknown) {
-        toast.error(e instanceof Error ? e.message : "Falha ao cancelar");
+        toastErroAcao(e, "Falha ao cancelar");
       } finally {
         setConfirmingId(null);
       }
@@ -1253,7 +1254,7 @@ export function AssistenteDrawer() {
       } catch (e: unknown) {
         setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
         setDraft(draftSnapshot);
-        toast.error(e instanceof Error ? e.message : "Falha ao enviar");
+        toastErroAcao(e, "Falha ao enviar");
       } finally {
         if (blobToRevoke) URL.revokeObjectURL(blobToRevoke);
         setAwaitingReply(false);
