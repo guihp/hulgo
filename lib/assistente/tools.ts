@@ -46,6 +46,20 @@ import {
   normalizeNumeroProcesso,
 } from "@/lib/utils/processo";
 import { listParceiros } from "@/lib/actions/parceiros";
+import {
+  carregarRelatorioProcessos,
+  RelatorioParamError,
+} from "@/lib/relatorios/processos-dados";
+import { relatorioProcessosHref } from "@/lib/relatorios/processos-href";
+import {
+  carregarDadosDocumento,
+  criarDocumentoGerado,
+  documentoGeradoEditorHref,
+  documentoGeradoHref,
+  montarValoresDocumento,
+  VALIDADE_DOCUMENTO_HORAS,
+} from "@/lib/documentos/gerados";
+import { DOCUMENTOS_TEMPLATES, getDocumentoTemplate } from "@/lib/utils/documentos";
 import type {
   AssistentePendingAnexo,
   AssistenteToolResult,
@@ -59,6 +73,20 @@ import {
 
 /** Write tools that require UI confirmation before mutating. */
 export const ASSISTENTE_TOOLS_NEEDING_CONFIRMATION = WRITE_TOOL_NAMES;
+
+/** Lista compacta dos modelos/campos para a descrição de preencher_documento. */
+const CATALOGO_MODELOS = DOCUMENTOS_TEMPLATES.map((t) => {
+  const campos = t.campos
+    .map((c) =>
+      c.tipo === "opcao"
+        ? `${c.key}[${(c.opcoes ?? []).map((o) => o.value).filter(Boolean).join("|")}]`
+        : c.template
+          ? `${c.key} (montado automaticamente)`
+          : `${c.key}: ${c.label}`
+    )
+    .join("; ");
+  return `- ${t.slug} (${t.label}): ${campos}`;
+}).join("\n");
 
 /** OpenAI function-calling tool definitions (read + write proposals). */
 export const ASSISTENTE_TOOL_DEFINITIONS = [
@@ -189,6 +217,60 @@ export const ASSISTENTE_TOOL_DEFINITIONS = [
       description:
         "Colunas ATIVAS atuais: funil de vendas/atendimento (casos, mover_kanban/criar_cliente_caso) e os 4 funis de processos — civel, administrativo, previdenciario (judicial), concedido (mover_processo/criar_processo/transferir_processo). Chame antes de mover ou criar para usar chaves válidas.",
       parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "gerar_relatorio_processos",
+      description:
+        "Gera o RELATÓRIO EM PDF dos processos (logo do escritório, resumo e uma seção por coluna). Use quando pedirem relatório/PDF/listagem para imprimir de um funil, de uma coluna ou de todos os funis. Devolve o link do PDF e a contagem por coluna — cite os números e diga para clicar no link. Somente leitura (sem confirmação).",
+      parameters: {
+        type: "object",
+        properties: {
+          funil: {
+            type: "string",
+            description:
+              "civel | administrativo | previdenciario (Judicial Previdenciário) | concedido | todos. Omitir = todos.",
+          },
+          coluna: {
+            type: "string",
+            description:
+              "Chave da coluna (listar_colunas_funis) para relatório de uma coluna só. Exige funil. Omitir = todas as colunas.",
+          },
+        },
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "preencher_documento",
+      description:
+        "Preenche um MODELO de documento do escritório (procuração, termos, autodeclarações, LOAS) e devolve o link do PDF pronto para baixar/imprimir e um link para revisar no editor. Use quando pedirem para preencher/gerar procuração ou outro modelo — normalmente após o usuário enviar foto do RG/CNH e do comprovante de residência (use o texto lido dos anexos no histórico). Dados da ficha do cliente (nome, CPF, nascimento, telefone) entram sozinhos se informar cpf ou caso_id; os campos em `valores` sobrepõem. Data de hoje já vem preenchida. Não invente dados: deixe vazio o que não souber. Concorde com o gênero da pessoa (nacionalidade \"brasileira\"/\"brasileiro\", \"solteira\", \"lavradora\"). Nomes em MAIÚSCULAS como no documento. Correspondências: localNascimento = naturalidade do RG; rgLocal = órgão expedidor/UF; rgDia/rgMes/rgAno = data de expedição; nascimentoDia/Mes/Ano = data de nascimento; municipio/uf/cep = do comprovante. Sem confirmação; o link vale 1 dia.\n\nModelos e campos (chave: rótulo; opções entre []):\n" +
+        CATALOGO_MODELOS,
+      parameters: {
+        type: "object",
+        properties: {
+          modelo: {
+            type: "string",
+            enum: DOCUMENTOS_TEMPLATES.map((t) => t.slug),
+            description: "Slug do modelo",
+          },
+          cpf: {
+            type: "string",
+            description: "CPF do cliente (puxa dados da ficha, se existir). Opcional.",
+          },
+          caso_id: { type: "number", description: "ID do caso no funil de vendas. Opcional." },
+          valores: {
+            type: "object",
+            description:
+              "Campos do modelo {chave: valor} extraídos dos documentos/conversa. Ex.: {\"nome\":\"MARIA DA SILVA\",\"rg\":\"012345678 SSP/MA\",\"endereco\":\"Rua X, 10, Centro, Bacabal/MA, CEP 65700-000\",\"estadoCivil\":\"solteira\",\"profissao\":\"lavradora\"}",
+            additionalProperties: { type: "string" },
+          },
+        },
+        required: ["modelo"],
+      },
     },
   },
   {
@@ -1509,6 +1591,106 @@ async function toolLerVersoesPromptAgente(
   };
 }
 
+async function toolPreencherDocumento(
+  args: Record<string, unknown>
+): Promise<AssistenteToolResult> {
+  const slug = typeof args.modelo === "string" ? args.modelo.trim() : "";
+  const template = getDocumentoTemplate(slug);
+  if (!template) {
+    return {
+      ok: false,
+      summary: `Modelo inválido. Use: ${DOCUMENTOS_TEMPLATES.map((t) => t.slug).join(", ")}`,
+    };
+  }
+  const cpfArg = typeof args.cpf === "string" ? normalizeCpf(args.cpf) : "";
+  const casoId =
+    typeof args.caso_id === "number" && args.caso_id > 0 ? Math.trunc(args.caso_id) : null;
+  const informados =
+    args.valores && typeof args.valores === "object" && !Array.isArray(args.valores)
+      ? (args.valores as Record<string, unknown>)
+      : {};
+
+  // Cliente não cadastrado → só os valores informados (não é erro).
+  const dados =
+    (await carregarDadosDocumento({ casoId, cpf: cpfArg || null })) ??
+    (await carregarDadosDocumento({}));
+  if (!dados) return { ok: false, summary: "Não consegui carregar os dados base do documento." };
+
+  const { valores, faltando, ignorados } = montarValoresDocumento(template, dados, informados);
+  const nome = valores.nome || valores.beneficiario1Nome || dados.clienteNome || "";
+  const cpf = normalizeCpf(valores.cpf || valores.beneficiario1Cpf || dados.clienteCpf || "");
+  const { id } = await criarDocumentoGerado({
+    modelo: template.slug,
+    valores,
+    clienteNome: nome || null,
+    clienteCpf: cpf.length === 11 ? cpf : null,
+  });
+
+  const partes = [
+    `${template.label} preenchido${nome ? ` para ${nome}` : ""}. Link válido por ${VALIDADE_DOCUMENTO_HORAS}h.`,
+    faltando.length
+      ? `Campos em branco (preencher à mão ou peça os dados e chame de novo): ${faltando.join(", ")}.`
+      : "Todos os campos preenchidos.",
+    ignorados.length ? `Ignorados (chave/opção inválida): ${ignorados.join(", ")}.` : "",
+    'Os botões "Abrir PDF preenchido" e "Revisar no editor" aparecem abaixo da resposta — NÃO escreva as URLs. Lembre que o documento precisa ser assinado pelo cliente.',
+  ];
+  return {
+    ok: true,
+    summary: partes.filter(Boolean).join(" "),
+    links: [
+      { label: "Abrir PDF preenchido", href: documentoGeradoHref(id) },
+      { label: "Revisar no editor", href: documentoGeradoEditorHref(template.slug, id) },
+    ],
+    data: { id, modelo: template.slug, faltando, valores },
+  };
+}
+
+async function toolGerarRelatorioProcessos(
+  args: Record<string, unknown>
+): Promise<AssistenteToolResult> {
+  const funilArg = typeof args.funil === "string" ? args.funil.trim() : "";
+  const colunaArg = typeof args.coluna === "string" ? args.coluna.trim() : "";
+  const funil = funilArg && funilArg !== "todos" ? normalizeFunilArg(funilArg) : "todos";
+  try {
+    const dados = await carregarRelatorioProcessos({
+      funil,
+      coluna: colunaArg || null,
+    });
+    const href = relatorioProcessosHref({ funil, coluna: colunaArg || null });
+    const porColuna = dados.funis
+      .map((f) => {
+        const cols = f.colunas
+          .map((c) => `${c.label}: ${c.processos.length}`)
+          .join("; ");
+        return `${f.label} — ${cols}`;
+      })
+      .join(" | ");
+    const escopo =
+      dados.escopo.funil === "todos"
+        ? "todos os funis"
+        : colunaArg
+          ? `${dados.funis[0].label} → ${dados.funis[0].colunas[0]?.label ?? colunaArg}`
+          : `${dados.funis[0].label} (todas as colunas)`;
+    return {
+      ok: true,
+      summary: `Relatório PDF pronto (${escopo}): ${dados.total} processo(s). ${porColuna}. O botão "Abrir relatório PDF" já aparece abaixo da resposta — NÃO escreva a URL nem link em markdown.`,
+      links: [{ label: "Abrir relatório PDF", href }],
+      data: { href, total: dados.total, escopo },
+    };
+  } catch (e) {
+    if (e instanceof RelatorioParamError) return { ok: false, summary: e.message };
+    throw e;
+  }
+}
+
+/** Aceita chave ou nome ("judicial", "cível", "concedidos"...). */
+function normalizeFunilArg(raw: string): string {
+  if (isFunilProcesso(raw)) return raw;
+  const a = raw.toLowerCase();
+  if (a.includes("judic")) return "previdenciario";
+  return isFunilProcesso(a) ? a : normalizeAreaProcesso(a);
+}
+
 /**
  * Executes a tool. Write tools always propose (UI confirm) —
  * use executeAssistenteWriteTool after the user confirms.
@@ -1538,6 +1720,10 @@ export async function executeAssistenteTool(
         return await toolListarProcessos(args);
       case "listar_colunas_funis":
         return await toolListarColunasFunis();
+      case "preencher_documento":
+        return await toolPreencherDocumento(args);
+      case "gerar_relatorio_processos":
+        return await toolGerarRelatorioProcessos(args);
       case "verificar_processos_lote":
         return await toolVerificarProcessosLote(args);
       case "listar_parceiros":

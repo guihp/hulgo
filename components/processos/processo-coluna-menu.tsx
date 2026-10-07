@@ -6,11 +6,13 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
+  FileDown,
   MoreVertical,
   Palette,
   Pencil,
 } from "lucide-react";
 import type { ProcessoColunaMatch } from "@/lib/data/processo-colunas";
+import { abrirRelatorioProcessos } from "@/components/processos/relatorio-processos-button";
 import { CORES_COLUNA_PROCESSO } from "@/lib/utils/processos";
 import { COR_COLUNA_DOT, COR_COLUNA_LABEL, corDot } from "@/components/processos/cores";
 import { buttonVariants } from "@/components/ui/button";
@@ -125,6 +127,10 @@ export function ProcessoColunaMenu({
               </DropdownMenuItem>
             </DropdownMenuSubContent>
           </DropdownMenuSub>
+          <DropdownMenuItem onClick={() => abrirRelatorioProcessos(coluna.funil, coluna.chave)}>
+            <FileDown />
+            Relatório PDF da coluna
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem disabled={!canMoveLeft} onClick={() => onMove(-1)}>
             <ArrowLeft />

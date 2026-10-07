@@ -39,6 +39,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { FichaArquivos } from "@/components/clientes/ficha-arquivos";
+import { GerarDocumentoMenu } from "@/components/documentos/gerar-documento-menu";
 import { ExcluirProcessoDialog } from "@/components/processos/excluir-processo-dialog";
 import { TransferirProcessoDialog } from "@/components/processos/transferir-processo-dialog";
 import { fichaPessoaHref } from "@/lib/utils/ficha";
@@ -1577,12 +1578,19 @@ export function FichaHeader({
             ) : null}
           </p>
         </div>
-        {processos[0] ? (
-          <Button variant="outline" size="sm" onClick={() => setEditingProcesso(processos[0])}>
-            <Pencil className="mr-2 h-4 w-4" />
-            Editar cadastro
-          </Button>
-        ) : null}
+        <div className="flex flex-wrap gap-2">
+          {cpf || casos[0] ? (
+            <GerarDocumentoMenu
+              query={cpf ? `cpf=${normalizeCpf(cpf)}` : `caso=${casos[0]!.id}`}
+            />
+          ) : null}
+          {processos[0] ? (
+            <Button variant="outline" size="sm" onClick={() => setEditingProcesso(processos[0])}>
+              <Pencil className="mr-2 h-4 w-4" />
+              Editar cadastro
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       <ProcessoDialog

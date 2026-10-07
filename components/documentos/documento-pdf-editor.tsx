@@ -33,13 +33,33 @@ const COL_SPAN = {
 export function DocumentoPdfEditor({
   template,
   dados,
+  valoresPreenchidos,
+  avisoExpirado,
 }: {
   template: DocumentoTemplate;
   dados: DadosDocumento;
+  /** Valores já preenchidos (ex.: pelo assistente) — sobrepõem os iniciais. */
+  valoresPreenchidos?: Record<string, string>;
+  avisoExpirado?: boolean;
 }) {
-  const iniciais = useMemo(() => valoresIniciais(template, dados), [template, dados]);
+  const iniciais = useMemo(
+    () => ({ ...valoresIniciais(template, dados), ...(valoresPreenchidos ?? {}) }),
+    [template, dados, valoresPreenchidos]
+  );
   const [valores, setValores] = useState<Record<string, string>>(iniciais);
-  const [editados, setEditados] = useState<Record<string, boolean>>({});
+  // Derivado que veio diferente do recalculado foi escrito à mão: não sobrescrever.
+  const [editados, setEditados] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(
+      template.campos
+        .filter(
+          (c) =>
+            c.template &&
+            valoresPreenchidos?.[c.key] &&
+            valoresPreenchidos[c.key] !== aplicarTemplate(c.template, iniciais)
+        )
+        .map((c) => [c.key, true])
+    )
+  );
   const [preview, setPreview] = useState<string | null>(null);
   const [gerando, setGerando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
@@ -93,6 +113,14 @@ export function DocumentoPdfEditor({
     }
   }, [template, valores]);
 
+  // Veio preenchido (assistente): mostra a prévia sem precisar clicar.
+  const previaAutomatica = useRef(Boolean(valoresPreenchidos));
+  useEffect(() => {
+    if (!previaAutomatica.current) return;
+    previaAutomatica.current = false;
+    void gerar();
+  }, [gerar]);
+
   const baixar = async () => {
     const url = (await gerar()) ?? preview;
     if (!url) return;
@@ -132,6 +160,18 @@ export function DocumentoPdfEditor({
         </div>
       </div>
 
+      {avisoExpirado && (
+        <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          O documento preenchido pelo assistente expirou (vale 1 dia). Os campos abaixo
+          vieram da ficha do cliente.
+        </p>
+      )}
+      {valoresPreenchidos && (
+        <p className="rounded-md border border-[#0b2148]/15 bg-[#0b2148]/5 p-3 text-sm text-[#0b2148]">
+          Campos preenchidos pelo assistente. Confira, ajuste se precisar e clique em
+          <b className="mx-1">Baixar PDF</b>.
+        </p>
+      )}
       {erro && (
         <p className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
           {erro}

@@ -18,8 +18,12 @@ const nextConfig: NextConfig = {
     // (e.g. routes-manifest.json filled with JS fragments → JSON.parse 500 on /login).
     // Recovery: npm run dev:clean  (or rm -rf .next && npm run dev)
     turbopackFileSystemCacheForDev: false,
+    // Anexos vão em base64 nas Server Actions (+~37%): 25 MB de arquivo ≈ 34 MB de corpo.
+    // O proxy.ts bufferiza o corpo e, acima do limite (padrão 10 MB), TRUNCA em silêncio —
+    // a action quebra com "Unterminated string in JSON" (digest genérico em produção).
+    proxyClientMaxBodySize: "40mb",
     serverActions: {
-      bodySizeLimit: "20mb",
+      bodySizeLimit: "40mb",
     },
   },
 };

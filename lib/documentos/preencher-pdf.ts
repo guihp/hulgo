@@ -61,15 +61,24 @@ function quebrarEmLinhas(
   return resultado;
 }
 
+/**
+ * `modeloBytes`: no servidor, passe o PDF do modelo lido do disco
+ * (`fetch` relativo só funciona no navegador).
+ */
 export async function preencherPdf(
   template: DocumentoTemplate,
-  valores: Record<string, string>
+  valores: Record<string, string>,
+  modeloBytes?: Uint8Array | ArrayBuffer
 ): Promise<Uint8Array> {
-  const resposta = await fetch(template.file);
-  if (!resposta.ok) {
-    throw new Error(`Não foi possível carregar o modelo ${template.file}`);
+  let bytes = modeloBytes;
+  if (!bytes) {
+    const resposta = await fetch(template.file);
+    if (!resposta.ok) {
+      throw new Error(`Não foi possível carregar o modelo ${template.file}`);
+    }
+    bytes = await resposta.arrayBuffer();
   }
-  const pdf = await PDFDocument.load(await resposta.arrayBuffer());
+  const pdf = await PDFDocument.load(bytes);
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const paginas = pdf.getPages();
   const cor = rgb(0, 0, 0);

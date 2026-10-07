@@ -9,6 +9,7 @@ import {
   type FunilProcesso,
 } from "@/lib/utils/processos";
 import { NovoProcessoButton } from "@/components/processos/novo-processo-button";
+import { RelatorioProcessosButton } from "@/components/processos/relatorio-processos-button";
 import { ProcessosBoard } from "@/components/processos/processos-board";
 import { ProcessosFunilTabs } from "@/components/processos/processos-funil-tabs";
 
@@ -51,7 +52,10 @@ export default async function ProcessosPage({
             Funis de processos administrativos e judiciais — arraste os cards entre as fases
           </p>
         </div>
-        <NovoProcessoButton funil={funil} />
+        <div className="flex flex-wrap gap-2">
+          <RelatorioProcessosButton funil={funil} colunas={colunas} />
+          <NovoProcessoButton funil={funil} />
+        </div>
       </div>
       <ProcessosFunilTabs funil={funil} />
       <ProcessosBoard

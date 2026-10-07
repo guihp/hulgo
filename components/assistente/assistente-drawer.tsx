@@ -11,6 +11,7 @@ import Link from "next/link";
 import {
   Bot,
   Check,
+  FileDown,
   FileText,
   Loader2,
   MessageSquare,
@@ -22,6 +23,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { compressImageFile } from "@/lib/client/image-compress";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -58,6 +60,9 @@ import { cn } from "@/lib/utils";
 
 const inputShell =
   "border-[#e2e8f0] bg-white text-[#0b2148] placeholder:text-[#94a3b8] focus-visible:border-[#0b2148] focus-visible:ring-[#0b2148]/12";
+
+/** Mesmo teto de lib/assistente/media.ts (somente_salvar). */
+const MAX_ANEXO_BYTES = 25 * 1024 * 1024;
 
 const ACCEPT_FILES =
   "image/*,video/*,.pdf,.txt,.md,.doc,.docx,.csv,application/pdf,text/plain";
@@ -989,10 +994,16 @@ export function AssistenteDrawer() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
-  async function onPickFile(file: File | null | undefined) {
-    if (!file) return;
-    const kind = classifyFile(file);
+  async function onPickFile(picked: File | null | undefined) {
+    if (!picked) return;
+    const kind = classifyFile(picked);
     try {
+      const file = kind === "image" ? await compressImageFile(picked) : picked;
+      if (file.size > MAX_ANEXO_BYTES) {
+        toast.error("Arquivo maior que 25 MB");
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        return;
+      }
       const base64 = await fileToBase64(file);
       clearPendingAnexo();
       setPendingAnexo({
@@ -1482,16 +1493,30 @@ export function AssistenteDrawer() {
                       />
                     ) : null
                   )}
-                  {messageLinks(m.tool_trace).map((link) => (
-                    <Link
-                      key={link.href}
-                      href={link.href}
-                      className="block truncate text-xs font-medium text-[#0b2148] underline-offset-2 hover:underline"
-                      onClick={() => setOpen(false)}
-                    >
-                      {link.label}
-                    </Link>
-                  ))}
+                  {messageLinks(m.tool_trace).map((link) =>
+                    link.href.startsWith("/api/") ? (
+                      // Arquivo gerado (ex.: relatório PDF): nova aba, drawer continua aberto.
+                      <a
+                        key={link.href}
+                        href={link.href}
+                        target="_blank"
+                        rel="noopener"
+                        className="mt-1 inline-flex items-center gap-1.5 rounded-lg bg-[#0b2148] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#163a7a]"
+                      >
+                        <FileDown className="size-3.5" />
+                        {link.label}
+                      </a>
+                    ) : (
+                      <Link
+                        key={link.href}
+                        href={link.href}
+                        className="block truncate text-xs font-medium text-[#0b2148] underline-offset-2 hover:underline"
+                        onClick={() => setOpen(false)}
+                      >
+                        {link.label}
+                      </Link>
+                    )
+                  )}
                 </div>
               ) : null}
               <p

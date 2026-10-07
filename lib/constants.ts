@@ -29,6 +29,7 @@ export const NAV_ICON_NAMES = [
   "Users",
   "MessageSquare",
   "FileBarChart",
+  "FileText",
   "Settings",
 ] as const;
 
@@ -60,6 +61,7 @@ export const NAV_GROUPS: { title: string; items: NavItemDef[] }[] = [
     title: "ESCRITÓRIO",
     items: [
       { href: "/relatorios", label: "Relatórios", icon: "FileBarChart" },
+      { href: "/documentos", label: "Modelos de documentos", icon: "FileText" },
       { href: "/configuracoes", label: "Configurações", icon: "Settings", advogadoOnly: true },
     ],
   },

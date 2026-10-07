@@ -76,8 +76,21 @@ function mapMessage(row: {
 }
 
 /** Decisions live only in the card (tool_trace), so the model needs them spelled out. */
+/** Limite por anexo no histórico (o turno do upload já recebeu o texto completo). */
+const HISTORICO_TRANSCRICAO_MAX = 3500;
+
 function historyContent(m: AssistenteMessage): string {
-  if (m.role !== "assistant") return m.content;
+  if (m.role !== "assistant") {
+    // O content do usuário guarda só o rótulo do anexo; sem a transcrição a IA
+    // esquece o RG quando o comprovante chega na mensagem seguinte.
+    const lidos = (m.anexos ?? [])
+      .filter((a) => a.transcript?.trim())
+      .map(
+        (a) =>
+          `[Conteúdo lido do anexo "${a.fileName}"]\n${a.transcript!.trim().slice(0, HISTORICO_TRANSCRICAO_MAX)}`
+      );
+    return lidos.length ? [m.content, ...lidos].join("\n\n") : m.content;
+  }
   const notes = m.tool_trace.flatMap((t) => {
     const label = t.result.confirmationLabel || t.name;
     if (t.confirmationStatus === "confirmed") {
@@ -410,19 +423,28 @@ export async function enviarMensagemAssistente(input: {
   let storedAnexos: AssistenteAnexoStored[] = [];
   let pendingAnexo = parseAssistentePendingAnexo(sessao.pending_anexo);
 
+  // Falha no anexo vira resposta do assistente: throw em Server Action chega
+  // ao usuário só como digest genérico em produção.
+  let anexoErro: string | null = null;
   if (anexo) {
-    const prepared = await prepareAssistenteAnexo({
-      anexo,
-      userId: user.id,
-      sessaoId: input.sessaoId,
-      userText: content,
-      supabase,
-    });
-    displayContent = prepared.displayContent;
-    modelUserMessage = prepared.modelContext;
-    storedAnexos = [prepared.stored];
-    pendingAnexo = prepared.pending;
-    await setSessaoPendingAnexo(input.sessaoId, pendingAnexo);
+    try {
+      const prepared = await prepareAssistenteAnexo({
+        anexo,
+        userId: user.id,
+        sessaoId: input.sessaoId,
+        userText: content,
+        supabase,
+      });
+      displayContent = prepared.displayContent;
+      modelUserMessage = prepared.modelContext;
+      storedAnexos = [prepared.stored];
+      pendingAnexo = prepared.pending;
+      await setSessaoPendingAnexo(input.sessaoId, pendingAnexo);
+    } catch (err) {
+      anexoErro = err instanceof Error ? err.message : String(err);
+      console.error("[assistente] prepareAssistenteAnexo:", anexoErro);
+      displayContent = content || `[Anexo] ${anexo.fileName}`;
+    }
   }
 
   // Re-inject pending media on follow-up turns (history only has display text).
@@ -468,34 +490,43 @@ export async function enviarMensagemAssistente(input: {
   let loopTrace: AssistenteToolTraceItem[] = [];
   let loopModel = getOpenAIChatModel();
 
-  try {
-    const loop = await runAssistenteToolLoop({
-      systemPrompt,
-      history,
-      userMessage: modelUserMessage,
-      pendingAnexo,
-      onTool: async (item) => {
-        await insertAudit({
-          sessaoId: input.sessaoId,
-          userId: user.id,
-          item,
-        });
-      },
-    });
-    loopContent = loop.content;
-    loopTrace = loop.toolTrace;
-    loopModel = loop.model;
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    console.error("[assistente] runAssistenteToolLoop:", errMsg);
-    // Não relança: em produção o throw da Server Action vira digest de RSC.
+  if (anexoErro) {
     loopContent =
-      "Não consegui responder agora. " +
-      (/api key|OPENAI|401|Unauthorized/i.test(errMsg)
-        ? "Verifique OPENAI_API_KEY no ambiente (Coolify)."
-        : /model|not found|404/i.test(errMsg)
-          ? `Modelo "${loopModel}" indisponível — confira OPENAI_MODEL.`
-          : errMsg.slice(0, 280));
+      `Não consegui processar o anexo "${anexo?.fileName ?? "arquivo"}": ` +
+      (/mime type|not supported/i.test(anexoErro)
+        ? "formato de arquivo não aceito. Envie como JPG, PNG ou PDF."
+        : anexoErro.slice(0, 280)) +
+      " Pode tentar de novo?";
+  } else {
+    try {
+      const loop = await runAssistenteToolLoop({
+        systemPrompt,
+        history,
+        userMessage: modelUserMessage,
+        pendingAnexo,
+        onTool: async (item) => {
+          await insertAudit({
+            sessaoId: input.sessaoId,
+            userId: user.id,
+            item,
+          });
+        },
+      });
+      loopContent = loop.content;
+      loopTrace = loop.toolTrace;
+      loopModel = loop.model;
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error("[assistente] runAssistenteToolLoop:", errMsg);
+      // Não relança: em produção o throw da Server Action vira digest de RSC.
+      loopContent =
+        "Não consegui responder agora. " +
+        (/api key|OPENAI|401|Unauthorized/i.test(errMsg)
+          ? "Verifique OPENAI_API_KEY no ambiente (Coolify)."
+          : /model|not found|404/i.test(errMsg)
+            ? `Modelo "${loopModel}" indisponível — confira OPENAI_MODEL.`
+            : errMsg.slice(0, 280));
+    }
   }
 
   const { data: asstRow, error: asstErr } = await supabase

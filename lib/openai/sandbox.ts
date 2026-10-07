@@ -80,7 +80,11 @@ export async function openaiDescribeImage(input: {
       role: "system",
       content:
         "Descreva a imagem de forma completa e objetiva em português, incluindo todo texto legível. " +
-        "Não responda ao cliente — só descreva o que vê. Seja detalhado o bastante para um agente de atendimento agir sem ver a imagem.",
+        "Não responda ao cliente — só descreva o que vê. Seja detalhado o bastante para um agente de atendimento agir sem ver a imagem. " +
+        "Se for documento (RG, CNH, CPF, certidão, comprovante de residência, carteira de pescador etc.), diga o tipo e transcreva " +
+        "LITERALMENTE cada campo legível, um por linha (\"Campo: valor\"): nome, nº do RG/registro, órgão expedidor e UF, data de expedição, " +
+        "CPF, data e local de nascimento (naturalidade), filiação, estado civil, e endereço completo (rua, número, bairro, município, UF, CEP). " +
+        "Liste só os campos que existem no documento; não invente. Campo presente mas impossível de ler = \"ilegível\".",
     },
     {
       role: "user",

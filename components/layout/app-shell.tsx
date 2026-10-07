@@ -10,6 +10,7 @@ import {
   Users,
   MessageSquare,
   FileBarChart,
+  FileText,
   CalendarClock,
   Scale,
   Gavel,
@@ -55,6 +56,7 @@ const NAV_ICONS: Record<
   Users,
   MessageSquare,
   FileBarChart,
+  FileText,
   Settings,
 };
 

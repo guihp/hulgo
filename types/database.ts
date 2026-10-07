@@ -695,6 +695,39 @@ export type Database = {
         };
         Relationships: [];
       };
+      app_documentos_gerados: {
+        Row: {
+          id: string;
+          created_at: string;
+          expires_at: string;
+          criado_por: string | null;
+          modelo: string;
+          cliente_nome: string | null;
+          cliente_cpf: string | null;
+          valores: Json;
+        };
+        Insert: {
+          id?: string;
+          created_at?: string;
+          expires_at?: string;
+          criado_por?: string | null;
+          modelo: string;
+          cliente_nome?: string | null;
+          cliente_cpf?: string | null;
+          valores?: Json;
+        };
+        Update: {
+          id?: string;
+          created_at?: string;
+          expires_at?: string;
+          criado_por?: string | null;
+          modelo?: string;
+          cliente_nome?: string | null;
+          cliente_cpf?: string | null;
+          valores?: Json;
+        };
+        Relationships: [];
+      };
       casos_novos: {
         Row: {
           area: string | null;
