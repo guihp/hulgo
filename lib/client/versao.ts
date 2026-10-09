@@ -31,12 +31,3 @@ export function avisarVersaoNova() {
     },
   });
 }
-
-/** `toast.error` para catch de Server Action, trocando o erro de versão pelo aviso de recarregar. */
-export function toastErroAcao(e: unknown, fallback: string) {
-  if (isVersaoDesatualizada(e)) {
-    avisarVersaoNova();
-    return;
-  }
-  toast.error(e instanceof Error ? e.message : fallback);
-}

@@ -48,6 +48,7 @@ import { formatDateTime, formatRelative, formatChatTime } from "@/lib/utils/date
 import { formatPhone } from "@/lib/utils/phone";
 import { fichaPessoaHref } from "@/lib/utils/ficha";
 import { cn } from "@/lib/utils";
+import { toastErroAcao } from "@/lib/client/erros";
 
 type Aprovacao = Tables<"aprovacoes_pendentes">;
 
@@ -634,7 +635,7 @@ function AprovacaoDetailPanel({
       onDecided?.();
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao processar");
+      toastErroAcao(err, "Erro ao processar");
     } finally {
       setLoading(false);
     }

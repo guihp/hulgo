@@ -60,3 +60,14 @@
   `caso_id` nullable; tabela `documentos_pastas`. Upload na ficha:
   `uploadArquivoCliente` / `criarPastaCliente`. `/arquivos` redireciona. Migration:
   `20260812120000_documentos_pastas_ficha.sql`.
+- **Erros mapeados** (2026-10-09): `instrumentation.ts` (onRequestError) grava todo erro de servidor em
+  `app_erros_log` (digest, rota, mensagem, `mensagem_usuario` traduzida por `lib/erros.ts`). No cliente,
+  use `toastErroAcao`/`mensagemErro` de `lib/client/erros.ts` — quando a produção só devolve o código,
+  o toast busca o motivo em `/api/erros/{digest}`. `app/(app)/error.tsx` faz o mesmo para páginas.
+  Para investigar um código que a cliente mandar: `select * from app_erros_log where digest = '...'`.
+- **Processo sem número**: `processos_clientes.numero_processo` é nullable; checkbox "Ainda sem número"
+  no formulário, badge + "Adicionar nº" no card (`definirNumeroProcesso`), filtro "Sem número".
+  Assistente também cadastra sem número. DataJud ignora os sem número.
+- **Pagamentos** (`/pagamentos`): `app_prazos` com `tipo='pagamento'` + `valor_centavos`; some de /prazos;
+  "Marcar pago"; pagos não entram na limpeza de 30 dias. Rótulos de push em `lib/prazos/rotulos.ts`.
+- Assistente: limite de mensagem subiu de 8.000 para 30.000 caracteres (`ASSISTENTE_MENSAGEM_MAX`).

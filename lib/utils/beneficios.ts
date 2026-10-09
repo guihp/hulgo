@@ -6,6 +6,7 @@ export const PRAZO_TIPOS: { value: PrazoTipo; label: string }[] = [
   { value: "recurso", label: "Recurso" },
   { value: "pericia", label: "Perícia" },
   { value: "audiencia", label: "Audiência" },
+  { value: "pagamento", label: "Pagamento" },
   { value: "outro", label: "Outro" },
 ];
 

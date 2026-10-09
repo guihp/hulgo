@@ -11,17 +11,20 @@ import { todaySaoPauloIso } from "@/lib/prazos/calendario";
 
 type PrazoLembrete = Tables<"app_prazos_lembretes">;
 
-/** Dados das telas /prazos e /audiencias (calendário + filtros). */
+/** Dados das telas /prazos, /audiencias e /pagamentos (calendário + filtros). */
 export async function carregarPrazosPagina({
-  somenteAudiencias = false,
-}: { somenteAudiencias?: boolean } = {}) {
+  modo = "prazos",
+}: { modo?: "prazos" | "audiencias" | "pagamentos" } = {}) {
   const supabase = await createClient();
 
   let prazosQuery = supabase
     .from("app_prazos")
     .select("*")
     .order("data_prazo", { ascending: true });
-  if (somenteAudiencias) prazosQuery = prazosQuery.eq("tipo", "audiencia");
+  if (modo === "audiencias") prazosQuery = prazosQuery.eq("tipo", "audiencia");
+  else if (modo === "pagamentos") prazosQuery = prazosQuery.eq("tipo", "pagamento");
+  // Pagamentos têm tela própria e não aparecem em Prazos.
+  else prazosQuery = prazosQuery.neq("tipo", "pagamento");
 
   const [prazosRes, processosRes, parceirosRes] = await Promise.all([
     prazosQuery,
@@ -36,7 +39,7 @@ export async function carregarPrazosPagina({
   ]);
 
   if (prazosRes.error) {
-    const oque = somenteAudiencias ? "audiências" : "prazos";
+    const oque = modo;
     console.error("[prazos/carregar-pagina] select", prazosRes.error.message);
     throw new Error(
       `Não foi possível carregar ${oque}: ${prazosRes.error.message}`

@@ -356,7 +356,8 @@ export type UpsertProcessoInput = {
   cpf: string;
   data_nascimento?: string | null;
   telefone?: string | null;
-  numero_processo: string;
+  /** Vazio/null = processo ainda sem número (preenchido depois). */
+  numero_processo: string | null;
   tribunal?: string | null;
   /** Texto livre é normalizado para civel | administrativo | previdenciario | concedido */
   area?: string | null;
@@ -472,7 +473,9 @@ export async function upsertProcesso(data: UpsertProcessoInput) {
   const payload = {
     ...data,
     cpf: normalizeCpf(data.cpf),
-    numero_processo: normalizeNumeroProcesso(data.numero_processo),
+    numero_processo: data.numero_processo
+      ? normalizeNumeroProcesso(data.numero_processo) || null
+      : null,
     telefone: data.telefone ? normalizePhoneBrStorage(data.telefone) : data.telefone,
     data_nascimento: dataNascimento,
     beneficio_identificado: data.beneficio_identificado?.trim() || null,
@@ -490,6 +493,17 @@ export async function upsertProcesso(data: UpsertProcessoInput) {
     observacao: trimOrNull(data.observacao),
   };
 
+  // Sem número é permitido (cadastro antecipado); se vier, precisa ser CNJ válido.
+  if (
+    payload.numero_processo &&
+    funilExigeCnj(area ?? FUNIL_PROCESSO_PADRAO) &&
+    !isValidNumeroProcesso(payload.numero_processo)
+  ) {
+    throw new Error(
+      "Número de processo CNJ inválido (precisa ter 20 dígitos). Deixe em branco para cadastrar sem número."
+    );
+  }
+
   if (data.id) {
     const { error } = await supabase
       .from("processos_clientes")
@@ -497,12 +511,6 @@ export async function upsertProcesso(data: UpsertProcessoInput) {
       .eq("id", data.id);
     if (error) throw new Error(error.message);
   } else {
-    if (
-      funilExigeCnj(area ?? FUNIL_PROCESSO_PADRAO) &&
-      !isValidNumeroProcesso(payload.numero_processo)
-    ) {
-      throw new Error("Número de processo CNJ inválido");
-    }
     const { error } = await supabase.from("processos_clientes").insert(payload);
     if (error) throw new Error(error.message);
 
@@ -536,6 +544,53 @@ export async function upsertProcesso(data: UpsertProcessoInput) {
   revalidatePath("/clientes");
   revalidatePath(`/clientes/${payload.cpf}`);
   return { success: true };
+}
+
+/** Preenche o número de um processo cadastrado sem número (ou corrige o atual). */
+export async function definirNumeroProcesso(id: number, numero: string) {
+  const user = await getAppUser();
+  if (!user) throw new Error("Não autenticado");
+  if (!Number.isInteger(id) || id <= 0) throw new Error("Processo inválido");
+
+  const supabase = await createClient();
+  const { data: processo, error: fetchError } = await supabase
+    .from("processos_clientes")
+    .select("id, cpf, area")
+    .eq("id", id)
+    .maybeSingle();
+  if (fetchError) throw new Error(fetchError.message);
+  if (!processo) throw new Error("Processo não encontrado");
+
+  const digitos = normalizeNumeroProcesso(numero ?? "");
+  const area = normalizeAreaProcesso(processo.area);
+  if (!digitos) throw new Error("Informe o número do processo");
+  if (funilExigeCnj(area) && !isValidNumeroProcesso(digitos)) {
+    throw new Error("Número de processo CNJ inválido (precisa ter 20 dígitos)");
+  }
+
+  const { data: duplicado } = await supabase
+    .from("processos_clientes")
+    .select("id, nome")
+    .eq("numero_processo", digitos)
+    .neq("id", id)
+    .limit(1)
+    .maybeSingle();
+  if (duplicado) {
+    throw new Error(
+      `Esse número já está cadastrado em outro processo (${duplicado.nome}).`
+    );
+  }
+
+  const { error } = await supabase
+    .from("processos_clientes")
+    .update({ numero_processo: digitos })
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/processos");
+  revalidatePath("/clientes");
+  if (processo.cpf) revalidatePath(`/clientes/${normalizeCpf(processo.cpf)}`);
+  return { success: true, numero_processo: digitos };
 }
 
 /**

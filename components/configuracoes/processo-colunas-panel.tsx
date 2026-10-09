@@ -22,6 +22,7 @@ import { COR_COLUNA_LABEL, corDot } from "@/components/processos/cores";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { toastErroAcao } from "@/lib/client/erros";
 
 const cardShell =
   "rounded-2xl border border-[#e2e8f0] bg-white shadow-none";
@@ -134,7 +135,7 @@ export function ProcessoColunasPanel({
         setNovaLabel("");
         toast.success(`Coluna "${created.label}" criada`);
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Erro ao criar");
+        toastErroAcao(err, "Erro ao criar");
       }
     });
   }
@@ -156,7 +157,7 @@ export function ProcessoColunasPanel({
         replaceColuna(updated);
         toast.success("Nome atualizado");
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Erro ao salvar");
+        toastErroAcao(err, "Erro ao salvar");
       }
     });
   }
@@ -168,7 +169,7 @@ export function ProcessoColunasPanel({
         const updated = await atualizarProcessoColuna({ id: col.id!, cor });
         replaceColuna(updated);
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Erro ao mudar cor");
+        toastErroAcao(err, "Erro ao mudar cor");
       }
     });
   }
@@ -190,7 +191,7 @@ export function ProcessoColunasPanel({
         syncLabels(updated);
         toast.success("Ordem atualizada");
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Erro ao reordenar");
+        toastErroAcao(err, "Erro ao reordenar");
       }
     });
   }
@@ -205,7 +206,7 @@ export function ProcessoColunasPanel({
         replaceColuna(updated);
         toast.success(updated.ativo ? "Coluna reativada" : "Coluna arquivada");
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Erro");
+        toastErroAcao(err, "Erro");
       }
     });
   }

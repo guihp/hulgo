@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { mensagemErro } from "@/lib/client/erros";
 
 type ColunaKanbanSelectProps = {
   value: string | null | undefined;
@@ -64,7 +65,7 @@ export function ColunaKanbanSelect({
         if (!cancelled) {
           setColunasLocal([]);
           setError(
-            err instanceof Error ? err.message : "Erro ao carregar colunas"
+            mensagemErro(err, "Erro ao carregar colunas")
           );
         }
       })

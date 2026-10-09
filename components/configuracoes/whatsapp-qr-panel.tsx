@@ -19,6 +19,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { formatRelative } from "@/lib/utils/dates";
+import { mensagemErro } from "@/lib/client/erros";
 
 const QR_REFRESH_MS = 25_000;
 const STATUS_POLL_MS = 3_000;
@@ -145,7 +146,7 @@ export function WhatsAppQrPanel() {
       return data;
     } catch (err) {
       const msg =
-        err instanceof Error ? err.message : "Falha ao consultar WhatsApp";
+        mensagemErro(err, "Falha ao consultar WhatsApp");
       if (!silent) {
         setError(msg);
         toast.error(msg);
@@ -182,7 +183,7 @@ export function WhatsAppQrPanel() {
           }
         } catch (err) {
           const msg =
-            err instanceof Error ? err.message : "Falha ao gerar QR Code";
+            mensagemErro(err, "Falha ao gerar QR Code");
           if (!silent) {
             setError(msg);
             toast.error(msg);

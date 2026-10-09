@@ -1067,7 +1067,7 @@ async function toolVerificarProcessosLote(
   >;
   const procByNumero = new Map<string, ProcRow>();
   for (const p of (porNumero.data ?? []) as ProcRow[]) {
-    const k = normalizeNumeroProcesso(p.numero_processo);
+    const k = normalizeNumeroProcesso(p.numero_processo ?? "");
     if (k && !procByNumero.has(k)) procByNumero.set(k, p);
   }
 
@@ -1162,7 +1162,9 @@ async function toolVerificarProcessosLote(
     parts.push(`CPF inválido nos itens: ${cpfInvalidos.map((r) => `#${r.indice}`).join(", ")} — peça o CPF correto.`);
   }
   if (semNumero.length) {
-    parts.push(`Sem nº de processo: ${semNumero.map((r) => `#${r.indice}`).join(", ")}.`);
+    parts.push(
+      `Sem nº de processo: ${semNumero.map((r) => `#${r.indice}`).join(", ")} — podem ser cadastrados assim (ficam como "sem número" e o número é adicionado depois); confirme com o usuário.`
+    );
   }
   parts.push("Próximo passo: perguntar só o que falta (funil, coluna, parceiro, duplicados) e propor cadastrar_processos_lote.");
 

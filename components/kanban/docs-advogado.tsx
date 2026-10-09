@@ -34,6 +34,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDateTime } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils";
+import { toastErroAcao } from "@/lib/client/erros";
 
 type Documento = Tables<"documentos_cliente">;
 
@@ -91,7 +92,7 @@ export function DocsAdvogado({
       setArquivo(null);
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro no upload");
+      toastErroAcao(err, "Erro no upload");
     } finally {
       setLoading(false);
     }
@@ -119,7 +120,7 @@ export function DocsAdvogado({
       setEnvioDoc(null);
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao enviar");
+      toastErroAcao(err, "Erro ao enviar");
     } finally {
       setLoading(false);
     }
@@ -131,7 +132,7 @@ export function DocsAdvogado({
       toast.success("Marcado como assinado/recebido");
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro");
+      toastErroAcao(err, "Erro");
     }
   }
 
@@ -141,7 +142,7 @@ export function DocsAdvogado({
       toast.success("Documento excluído");
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro");
+      toastErroAcao(err, "Erro");
     }
   }
 

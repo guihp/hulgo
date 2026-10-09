@@ -86,8 +86,10 @@ import { fichaPessoaHref } from "@/lib/utils/ficha";
 import { brazilianDateToIso, isoToBrazilianDate } from "@/lib/utils/dates";
 import { formatNumeroProcesso } from "@/lib/utils/processo";
 import {
+  formatValorCentavos,
   isModalidadeAudiencia,
   MODALIDADES_AUDIENCIA,
+  parseValorReais,
   type ModalidadeAudiencia,
 } from "@/lib/utils/processos";
 import {
@@ -97,6 +99,7 @@ import {
   todaySaoPauloIso,
 } from "@/lib/prazos/calendario";
 import { cn } from "@/lib/utils";
+import { toastErroAcao } from "@/lib/client/erros";
 
 type Prazo = Tables<"app_prazos">;
 type PrazoLembrete = Tables<"app_prazos_lembretes">;
@@ -179,6 +182,8 @@ export function tipoBadgeClasses(tipo: string) {
       return "border-violet-200 bg-violet-50 text-violet-900";
     case "audiencia":
       return "border-[#0b2148]/20 bg-[#0b2148]/8 text-[#0b2148]";
+    case "pagamento":
+      return "border-emerald-200 bg-emerald-50 text-emerald-800";
     default:
       return "border-slate-200 bg-slate-50 text-slate-700";
   }
@@ -210,6 +215,9 @@ function prazoHref(prazo: Prazo) {
 
 function metaLine(prazo: PrazoEnriched) {
   const parts: string[] = [];
+  if (prazo.tipo === "pagamento" && prazo.valor_centavos != null) {
+    parts.push(formatValorCentavos(prazo.valor_centavos));
+  }
   if (prazo.cliente_nome) parts.push(prazo.cliente_nome);
   else if (prazo.cpf) parts.push(`CPF ${prazo.cpf}`);
   if (prazo.numero_processo) parts.push(formatNumeroProcesso(prazo.numero_processo));
@@ -299,11 +307,17 @@ export function prazoChipClasses(prazo: Prazo, todayIso?: string) {
 
 /* ---------- Ações (concluir com desfazer / excluir) ---------- */
 
-export function usePrazoAcoes(opts?: { audiencia?: boolean }) {
+export function usePrazoAcoes(opts?: { audiencia?: boolean; pagamento?: boolean }) {
   const router = useRouter();
   const feminino = !!opts?.audiencia;
-  const substantivo = feminino ? "Audiência" : "Prazo";
+  const substantivo = opts?.pagamento ? "Pagamento" : feminino ? "Audiência" : "Prazo";
   const sufixo = feminino ? "a" : "o";
+  const textoConcluido = opts?.pagamento
+    ? "Pagamento marcado como pago"
+    : `${substantivo} concluíd${sufixo}`;
+  const textoReaberto = opts?.pagamento
+    ? "Pagamento voltou para pendente"
+    : `${substantivo} reabert${sufixo}`;
 
   const toggle = useCallback(
     async (prazo: Prazo) => {
@@ -312,14 +326,14 @@ export function usePrazoAcoes(opts?: { audiencia?: boolean }) {
         await concluirPrazo(prazo.id, concluir);
         router.refresh();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Erro");
+        toastErroAcao(err, "Erro");
         return;
       }
       if (!concluir) {
-        toast.success(`${substantivo} reabert${sufixo}`);
+        toast.success(textoReaberto);
         return;
       }
-      toast.success(`${substantivo} concluíd${sufixo}`, {
+      toast.success(textoConcluido, {
         duration: 6000,
         action: {
           label: "Desfazer",
@@ -328,13 +342,13 @@ export function usePrazoAcoes(opts?: { audiencia?: boolean }) {
               await concluirPrazo(prazo.id, false);
               router.refresh();
             } catch (err) {
-              toast.error(err instanceof Error ? err.message : "Erro");
+              toastErroAcao(err, "Erro");
             }
           },
         },
       });
     },
-    [router, substantivo, sufixo]
+    [router, textoConcluido, textoReaberto]
   );
 
   const remover = useCallback(
@@ -344,7 +358,7 @@ export function usePrazoAcoes(opts?: { audiencia?: boolean }) {
         toast.success(`${substantivo} excluíd${sufixo}`);
         router.refresh();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Erro");
+        toastErroAcao(err, "Erro");
       }
     },
     [router, substantivo, sufixo]
@@ -379,13 +393,16 @@ export function ConcluirPrazoButton({
     }
   }
 
+  const pagamento = prazo.tipo === "pagamento";
+  const rotulo = pagamento ? "Marcar pago" : "Concluir";
   if (prazo.concluido) {
     const em = formatConcluidoEm(prazo.concluido_em);
+    const selo = pagamento ? "Pago" : "Concluído";
     return (
       <span className="inline-flex items-center gap-1.5">
         <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
           <Check className="size-3" />
-          {em ? `Concluído em ${em}` : "Concluído"}
+          {em ? `${selo} em ${em}` : selo}
         </span>
         <Button
           type="button"
@@ -396,7 +413,7 @@ export function ConcluirPrazoButton({
           onClick={run}
         >
           <RotateCcw />
-          Reabrir
+          {pagamento ? "Desmarcar" : "Reabrir"}
         </Button>
       </span>
     );
@@ -408,7 +425,7 @@ export function ConcluirPrazoButton({
         type="button"
         disabled={pending}
         onClick={run}
-        aria-label="Concluir"
+        aria-label={rotulo}
         className={cn(
           buttonVariants({ size: "sm" }),
           "bg-emerald-600 text-white hover:bg-emerald-700",
@@ -416,10 +433,10 @@ export function ConcluirPrazoButton({
         )}
       >
         <Check />
-        <span className={cn(compactLabel && "max-sm:sr-only")}>Concluir</span>
+        <span className={cn(compactLabel && "max-sm:sr-only")}>{rotulo}</span>
       </TooltipTrigger>
       <TooltipContent className={cn(!compactLabel && "hidden", "sm:hidden")}>
-        Concluir
+        {rotulo}
       </TooltipContent>
     </Tooltip>
   );
@@ -714,7 +731,7 @@ function LembretesEditor({
 
 export type PrazoProcessoOption = {
   id: number;
-  numero_processo: string;
+  numero_processo: string | null;
   nome?: string | null;
   cpf?: string | null;
 };
@@ -755,8 +772,18 @@ function linkAudienciaInvalido(tipo: PrazoTipo, a: AudienciaDraft) {
 }
 
 function processoOptionLabel(p: PrazoProcessoOption) {
-  const numero = formatNumeroProcesso(p.numero_processo);
+  const numero = p.numero_processo
+    ? formatNumeroProcesso(p.numero_processo)
+    : "Sem número";
   return p.nome ? `${numero} · ${p.nome}` : numero;
+}
+
+function valorParaInput(centavos: number | null | undefined): string {
+  if (centavos == null) return "";
+  return (centavos / 100).toLocaleString("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 function PrazoFormFields({
@@ -781,6 +808,8 @@ function PrazoFormFields({
   processos,
   processoSel,
   setProcessoSel,
+  valor = "",
+  setValor,
 }: {
   titulo: string;
   setTitulo: (v: string) => void;
@@ -803,8 +832,16 @@ function PrazoFormFields({
   processos?: PrazoProcessoOption[];
   processoSel?: string;
   setProcessoSel?: (v: string) => void;
+  /** Valor em reais (texto) — só tipo = pagamento. */
+  valor?: string;
+  setValor?: (v: string) => void;
 }) {
   const isAudiencia = tipo === "audiencia";
+  const isPagamento = tipo === "pagamento";
+  // Pagamentos têm tela própria: o seletor só oferece "Pagamento" se já for um.
+  const tiposVisiveis = PRAZO_TIPOS.filter(
+    (t) => t.value !== "pagamento" || isPagamento
+  );
   return (
     <div className="space-y-4">
       <div className="space-y-1.5">
@@ -814,9 +851,11 @@ function PrazoFormFields({
           value={titulo}
           onChange={(e) => setTitulo(e.target.value)}
           placeholder={
-            isAudiencia
-              ? "Ex.: Audiência de conciliação — Maria Silva"
-              : "Ex.: Responder exigência do INSS — Maria Silva"
+            isPagamento
+              ? "Ex.: RPV — Maria Silva"
+              : isAudiencia
+                ? "Ex.: Audiência de conciliação — Maria Silva"
+                : "Ex.: Responder exigência do INSS — Maria Silva"
           }
         />
       </div>
@@ -832,13 +871,25 @@ function PrazoFormFields({
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
-              {PRAZO_TIPOS.map((t) => (
+              {tiposVisiveis.map((t) => (
                 <SelectItem key={t.value} value={t.value}>
                   {t.label}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
+        </div>
+      )}
+      {isPagamento && setValor && (
+        <div className="space-y-1.5">
+          <Label className={fieldLabel}>Valor (R$)</Label>
+          <Input
+            className={inputShell}
+            value={valor}
+            onChange={(e) => setValor(e.target.value.replace(/[^\d.,]/g, ""))}
+            inputMode="decimal"
+            placeholder="Ex.: 1.518,00 (opcional)"
+          />
         </div>
       )}
       {processos && processos.length > 0 && setProcessoSel && (
@@ -872,7 +923,11 @@ function PrazoFormFields({
       )}
       <div className="space-y-1.5">
         <Label className={fieldLabel}>
-          {isAudiencia ? "Data e horário da audiência" : "Data e horário do prazo"}
+          {isPagamento
+            ? "Data e horário do pagamento"
+            : isAudiencia
+              ? "Data e horário da audiência"
+              : "Data e horário do prazo"}
         </Label>
         <div className="grid gap-3 sm:grid-cols-2">
           <PrazoDateInput value={data} onChange={setData} />
@@ -998,6 +1053,8 @@ export function NovoPrazoDialog({
   const router = useRouter();
   const tipoInicial: PrazoTipo = fixedTipo ?? "outro";
   const isAudienciaFixa = fixedTipo === "audiencia";
+  const isPagamentoFixo = fixedTipo === "pagamento";
+  const [valor, setValor] = useState("");
   const [open, setOpen] = useState(false);
   const [titulo, setTitulo] = useState("");
   const [tipo, setTipo] = useState<PrazoTipo>(tipoInicial);
@@ -1030,10 +1087,12 @@ export function NovoPrazoDialog({
       ? Number(processoSel)
       : undefined
     : processoId;
-  const substantivo = tipo === "audiencia" ? "Audiência" : "Prazo";
+  const substantivo =
+    tipo === "pagamento" ? "Pagamento" : tipo === "audiencia" ? "Audiência" : "Prazo";
 
   function reset() {
     setTitulo("");
+    setValor("");
     setData(isoToBrazilianDate(defaultDataIso ?? todaySaoPauloIso()));
     setHora("08:00");
     setLembretes(DEFAULT_LEMBRETES.map((d) => ({ ...d })));
@@ -1059,6 +1118,12 @@ export function NovoPrazoDialog({
       toast.error("Link da audiência deve começar com http:// ou https://");
       return;
     }
+    const valorCentavos =
+      tipo === "pagamento" && valor.trim() ? parseValorReais(valor) : null;
+    if (tipo === "pagamento" && valor.trim() && valorCentavos === null) {
+      toast.error("Valor inválido (ex.: 1.518,00)");
+      return;
+    }
     setLoading(true);
     try {
       await criarPrazo({
@@ -1072,13 +1137,14 @@ export function NovoPrazoDialog({
         caso_id: casoId,
         processo_id: processoIdFinal,
         ...(tipo === "audiencia" ? audienciaToInput(tipo, audiencia) : {}),
+        ...(tipo === "pagamento" ? { valor_centavos: valorCentavos } : {}),
       });
       toast.success(`${substantivo} criad${tipo === "audiencia" ? "a" : "o"}`);
       setOpen(false);
       reset();
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao criar prazo");
+      toastErroAcao(err, `Erro ao criar ${substantivo.toLowerCase()}`);
     } finally {
       setLoading(false);
     }
@@ -1096,17 +1162,28 @@ export function NovoPrazoDialog({
         )}
       >
         <Plus className="h-4 w-4" />{" "}
-        {triggerLabel ?? (isAudienciaFixa ? "Nova audiência" : "Novo prazo")}
+        {triggerLabel ??
+          (isPagamentoFixo
+            ? "Novo pagamento"
+            : isAudienciaFixa
+              ? "Nova audiência"
+              : "Novo prazo")}
       </DialogTrigger>
       <DialogContent className="gap-0 overflow-hidden border-[#e2e8f0] bg-white p-0 sm:max-w-md">
         <DialogHeader className="shrink-0 space-y-1 border-b border-[#e2e8f0] px-4 py-3 pr-12">
           <DialogTitle className="text-lg font-bold text-[#0b2148]">
-            {isAudienciaFixa ? "Nova audiência" : "Novo prazo"}
+            {isPagamentoFixo
+              ? "Novo pagamento"
+              : isAudienciaFixa
+                ? "Nova audiência"
+                : "Novo prazo"}
           </DialogTitle>
           <DialogDescription className="text-[#64748B]">
-            {isAudienciaFixa
-              ? "Data, local ou link da audiência e lembretes por push."
-              : "Cadastre exigências, recursos, perícias e audiências."}
+            {isPagamentoFixo
+              ? "Data, valor e lembretes por push do pagamento."
+              : isAudienciaFixa
+                ? "Data, local ou link da audiência e lembretes por push."
+                : "Cadastre exigências, recursos, perícias e audiências."}
           </DialogDescription>
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3">
@@ -1132,6 +1209,8 @@ export function NovoPrazoDialog({
             processos={processos}
             processoSel={processoSel}
             setProcessoSel={setProcessoSel}
+            valor={valor}
+            setValor={setValor}
           />
         </div>
         <DialogFooter className="mx-0 mb-0 shrink-0 flex-row justify-stretch gap-2 rounded-none border-[#e2e8f0] bg-[#F8FAFC] pb-[max(1rem,env(safe-area-inset-bottom))] sm:justify-end">
@@ -1188,6 +1267,7 @@ export function EditarPrazoDialog({
     lembretesToDrafts(prazo.lembretes)
   );
   const [descricao, setDescricao] = useState(prazo.descricao ?? "");
+  const [valor, setValor] = useState(() => valorParaInput(prazo.valor_centavos));
   const [loading, setLoading] = useState(false);
 
   // Sync when opening / switching prazo
@@ -1199,6 +1279,7 @@ export function EditarPrazoDialog({
     setHora(horaPrazoForInput(prazo.hora_prazo) || "23:59");
     setLembretes(lembretesToDrafts(prazo.lembretes));
     setDescricao(prazo.descricao ?? "");
+    setValor(valorParaInput(prazo.valor_centavos));
     setAudiencia({
       local: prazo.local ?? "",
       modalidade: isModalidadeAudiencia(prazo.modalidade) ? prazo.modalidade : "",
@@ -1218,6 +1299,7 @@ export function EditarPrazoDialog({
     prazo.modalidade,
     prazo.link_audiencia,
     prazo.processo_id,
+    prazo.valor_centavos,
   ]);
 
   async function salvar() {
@@ -1235,6 +1317,12 @@ export function EditarPrazoDialog({
       toast.error("Link da audiência deve começar com http:// ou https://");
       return;
     }
+    const valorCentavos =
+      tipo === "pagamento" && valor.trim() ? parseValorReais(valor) : null;
+    if (tipo === "pagamento" && valor.trim() && valorCentavos === null) {
+      toast.error("Valor inválido (ex.: 1.518,00)");
+      return;
+    }
     setLoading(true);
     try {
       await atualizarPrazo({
@@ -1249,14 +1337,19 @@ export function EditarPrazoDialog({
           ? { processo_id: processoSel ? Number(processoSel) : null }
           : {}),
         ...audienciaToInput(tipo, audiencia),
+        valor_centavos: valorCentavos,
       });
-      toast.success(tipo === "audiencia" ? "Audiência atualizada" : "Prazo atualizado");
+      toast.success(
+        tipo === "pagamento"
+          ? "Pagamento atualizado"
+          : tipo === "audiencia"
+            ? "Audiência atualizada"
+            : "Prazo atualizado"
+      );
       onOpenChange(false);
       router.refresh();
     } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "Erro ao atualizar prazo"
-      );
+      toastErroAcao(err, "Erro ao atualizar prazo");
     } finally {
       setLoading(false);
     }
@@ -1267,7 +1360,11 @@ export function EditarPrazoDialog({
       <DialogContent className="gap-0 overflow-hidden border-[#e2e8f0] bg-white p-0 sm:max-w-md">
         <DialogHeader className="shrink-0 space-y-1 border-b border-[#e2e8f0] px-4 py-3 pr-12">
           <DialogTitle className="text-lg font-bold text-[#0b2148]">
-            {tipo === "audiencia" ? "Editar audiência" : "Editar prazo"}
+            {tipo === "pagamento"
+              ? "Editar pagamento"
+              : tipo === "audiencia"
+                ? "Editar audiência"
+                : "Editar prazo"}
           </DialogTitle>
           <DialogDescription className="text-[#64748B]">
             Ajuste data, horário e lembretes de notificação.
@@ -1292,6 +1389,8 @@ export function EditarPrazoDialog({
             processos={processos}
             processoSel={processoSel}
             setProcessoSel={setProcessoSel}
+            valor={valor}
+            setValor={setValor}
           />
         </div>
         <DialogFooter className="mx-0 mb-0 shrink-0 rounded-none border-[#e2e8f0] bg-[#F8FAFC]">

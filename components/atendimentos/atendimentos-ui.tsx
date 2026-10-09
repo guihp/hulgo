@@ -45,6 +45,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { toastErroAcao } from "@/lib/client/erros";
 
 type Mensagem = Tables<"mensagens">;
 
@@ -637,7 +638,7 @@ function ConversationThread({
       onAgentChange(next);
       toast.success(next ? "Agente ligado" : "Agente pausado nesta conversa");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Falha ao controlar a IA");
+      toastErroAcao(err, "Falha ao controlar a IA");
     } finally {
       setAgentBusy(false);
     }

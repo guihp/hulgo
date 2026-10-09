@@ -12,6 +12,7 @@ import { AGENTE_CONFIG_UPDATED_EVENT } from "@/lib/assistente/events";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { toastErroAcao } from "@/lib/client/erros";
 
 const cardShell =
   "rounded-2xl border border-[#e2e8f0] bg-white shadow-none";
@@ -137,7 +138,7 @@ export function AgenteIaPanel({
         setAbertura(saved.mensagem_abertura);
         toast.success("Rascunho salvo no Supabase");
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Erro ao salvar rascunho");
+        toastErroAcao(err, "Erro ao salvar rascunho");
       }
     });
   }
@@ -160,7 +161,7 @@ export function AgenteIaPanel({
         setAbertura(published.mensagem_abertura);
         toast.success(`Versão ${published.versao} publicada`);
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Erro ao publicar");
+        toastErroAcao(err, "Erro ao publicar");
       }
     });
   }

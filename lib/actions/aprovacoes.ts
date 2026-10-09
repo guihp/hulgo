@@ -14,7 +14,7 @@ export type AprovacaoContexto = {
   cpf: string;
   processos: {
     id: number;
-    numero_processo: string;
+    numero_processo: string | null;
     tribunal: string | null;
     area: string | null;
     ativo: boolean | null;

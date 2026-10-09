@@ -64,7 +64,12 @@ export function FichaTabs({
     [ficha.processos]
   );
   const processosCnj = useMemo(
-    () => ficha.processos.filter((p) => isValidNumeroProcesso(p.numero_processo)),
+    () =>
+      ficha.processos.flatMap((p) =>
+        p.numero_processo && isValidNumeroProcesso(p.numero_processo)
+          ? [{ ...p, numero_processo: p.numero_processo }]
+          : []
+      ),
     [ficha.processos]
   );
   const { audiencias, prazosSemAudiencia } = useMemo(() => {

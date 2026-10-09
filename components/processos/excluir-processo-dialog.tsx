@@ -19,6 +19,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
+import { toastErroAcao } from "@/lib/client/erros";
 
 export function ExcluirProcessoDialog({
   processo,
@@ -48,7 +49,7 @@ export function ExcluirProcessoDialog({
       onDeleted?.(processo.id);
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao excluir processo");
+      toastErroAcao(err, "Erro ao excluir processo");
     } finally {
       setDeleting(false);
     }

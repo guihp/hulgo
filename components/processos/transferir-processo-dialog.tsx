@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/dialog";
 import { corDot } from "@/components/processos/cores";
 import { cn } from "@/lib/utils";
+import { toastErroAcao } from "@/lib/client/erros";
 
 export type TransferenciaResultado = {
   ids: number[];
@@ -112,7 +113,7 @@ export function TransferirProcessoDialog({
         onTransferred?.({ ids, funil, coluna: res.coluna });
         router.refresh();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Erro ao transferir");
+        toastErroAcao(err, "Erro ao transferir");
       }
     });
   }

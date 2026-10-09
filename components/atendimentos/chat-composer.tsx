@@ -32,6 +32,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { toastErroAcao } from "@/lib/client/erros";
 type ChatComposerProps = {
   phone: string;
   contactNorm: string;
@@ -125,7 +126,7 @@ export function ChatComposer({
       try {
         await fn();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Falha ao enviar mensagem");
+        toastErroAcao(err, "Falha ao enviar mensagem");
       } finally {
         setSending(false);
       }

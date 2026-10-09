@@ -549,6 +549,8 @@ export type Database = {
           processo_id: number | null;
           tipo: string;
           titulo: string;
+          /** Centavos (tipo = pagamento) */
+          valor_centavos: number | null;
         };
         Insert: {
           caso_id?: number | null;
@@ -568,6 +570,7 @@ export type Database = {
           processo_id?: number | null;
           tipo?: string;
           titulo: string;
+          valor_centavos?: number | null;
         };
         Update: {
           caso_id?: number | null;
@@ -587,6 +590,7 @@ export type Database = {
           processo_id?: number | null;
           tipo?: string;
           titulo?: string;
+          valor_centavos?: number | null;
         };
         Relationships: [];
       };
@@ -692,6 +696,45 @@ export type Database = {
           cor?: string | null;
           created_at?: string;
           updated_at?: string;
+        };
+        Relationships: [];
+      };
+      app_erros_log: {
+        Row: {
+          action_id: string | null;
+          created_at: string;
+          digest: string | null;
+          id: number;
+          mensagem: string;
+          mensagem_usuario: string | null;
+          metodo: string | null;
+          origem: string | null;
+          rota: string | null;
+          stack: string | null;
+        };
+        Insert: {
+          action_id?: string | null;
+          created_at?: string;
+          digest?: string | null;
+          id?: never;
+          mensagem: string;
+          mensagem_usuario?: string | null;
+          metodo?: string | null;
+          origem?: string | null;
+          rota?: string | null;
+          stack?: string | null;
+        };
+        Update: {
+          action_id?: string | null;
+          created_at?: string;
+          digest?: string | null;
+          id?: never;
+          mensagem?: string;
+          mensagem_usuario?: string | null;
+          metodo?: string | null;
+          origem?: string | null;
+          rota?: string | null;
+          stack?: string | null;
         };
         Relationships: [];
       };
@@ -955,7 +998,7 @@ export type Database = {
           id: number;
           monitorar_dias: number | null;
           nome: string;
-          numero_processo: string;
+          numero_processo: string | null;
           observacao: string | null;
           parceiro_id: string | null;
           polo_ativo: string | null;
@@ -984,7 +1027,7 @@ export type Database = {
           id?: number;
           monitorar_dias?: number | null;
           nome: string;
-          numero_processo: string;
+          numero_processo?: string | null;
           observacao?: string | null;
           parceiro_id?: string | null;
           polo_ativo?: string | null;
@@ -1012,7 +1055,7 @@ export type Database = {
           id?: number;
           monitorar_dias?: number | null;
           nome?: string;
-          numero_processo?: string;
+          numero_processo?: string | null;
           observacao?: string | null;
           parceiro_id?: string | null;
           polo_ativo?: string | null;
@@ -1141,6 +1184,7 @@ export type PrazoTipo =
   | "recurso"
   | "pericia"
   | "audiencia"
+  | "pagamento"
   | "outro";
 
 export type AprovacaoAcao = "aprovar" | "recusar" | "responder";

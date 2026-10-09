@@ -63,6 +63,7 @@ import { formatNumeroProcesso } from "@/lib/utils/processo";
 import { resolveMediaDisplayKind } from "@/lib/utils/messages";
 import { cn } from "@/lib/utils";
 import type { Tables } from "@/types/database";
+import { toastErroAcao, mensagemErro } from "@/lib/client/erros";
 
 type Documento = Tables<"documentos_cliente">;
 type PastaCustom = Tables<"documentos_pastas">;
@@ -183,7 +184,7 @@ function DocTile({
       toast.success("Arquivo excluído");
       onDeleted?.();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao excluir");
+      toastErroAcao(err, "Erro ao excluir");
     } finally {
       setDeleting(false);
     }
@@ -456,7 +457,9 @@ export function FichaArquivos({
       const key = `processo:${p.id}`;
       list.push({
         key,
-        label: formatNumeroProcesso(p.numero_processo),
+        label: p.numero_processo
+          ? formatNumeroProcesso(p.numero_processo)
+          : "Processo sem número",
         count: countByPasta.get(key) ?? 0,
         kind: "processo",
       });
@@ -561,7 +564,7 @@ export function FichaArquivos({
           });
         } catch (err) {
           errors.push(
-            `${file.name}: ${err instanceof Error ? err.message : "erro"}`
+            `${file.name}: ${mensagemErro(err, "erro")}`
           );
         } finally {
           done += 1;
@@ -599,7 +602,7 @@ export function FichaArquivos({
       setSelected(destino);
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro no upload");
+      toastErroAcao(err, "Erro no upload");
     } finally {
       setLoading(false);
       setProgresso(null);
@@ -622,7 +625,7 @@ export function FichaArquivos({
       setUploadOpen(true);
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao criar pasta");
+      toastErroAcao(err, "Erro ao criar pasta");
     } finally {
       setLoading(false);
     }

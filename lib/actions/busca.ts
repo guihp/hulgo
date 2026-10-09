@@ -69,7 +69,7 @@ export async function buscarGlobal(termo: string): Promise<ResultadoBusca[]> {
     resultados.push({
       tipo: "cliente",
       titulo: p.nome,
-      subtitulo: `Processo ${p.numero_processo}${p.tribunal ? ` · ${p.tribunal}` : ""}`,
+      subtitulo: `Processo ${p.numero_processo || "sem número"}${p.tribunal ? ` · ${p.tribunal}` : ""}`,
       href: `/clientes/${cpf ?? normalizeCpf(p.cpf)}`,
       cpf,
       telefone: p.telefone ?? null,

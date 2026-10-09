@@ -27,6 +27,8 @@ export type NovoPrazoInput = {
   cpf?: string;
   caso_id?: number;
   processo_id?: number;
+  /** Só tipo = 'pagamento'. */
+  valor_centavos?: number | null;
 } & AudienciaCamposInput;
 
 export type AtualizarPrazoInput = {
@@ -39,6 +41,8 @@ export type AtualizarPrazoInput = {
   lembretes?: LembreteInput[];
   /** Omitido = mantém; null/0 = remove vínculo */
   processo_id?: number | null;
+  /** Só tipo = 'pagamento'. Omitido = mantém. */
+  valor_centavos?: number | null;
 } & AudienciaCamposInput;
 
 /** Usados quando tipo = 'audiencia'. Omitido no update = mantém o valor atual. */
@@ -80,6 +84,19 @@ const DEFAULT_LEMBRETE_INPUTS: LembreteInput[] = [
 function revalidatePrazos() {
   revalidatePath("/prazos");
   revalidatePath("/audiencias");
+  revalidatePath("/pagamentos");
+}
+
+/** Valor em centavos (só pagamentos); outros tipos sempre null. */
+function valorPagamento(
+  tipo: PrazoTipo,
+  valor: number | null | undefined
+): { valor_centavos?: number | null } {
+  if (tipo !== "pagamento") return { valor_centavos: null };
+  if (valor === undefined) return {};
+  if (valor === null) return { valor_centavos: null };
+  if (!Number.isInteger(valor) || valor < 0) throw new Error("Valor do pagamento inválido");
+  return { valor_centavos: valor };
 }
 
 function assertDataPrazo(data: string) {
@@ -146,6 +163,7 @@ export async function criarPrazo(input: NovoPrazoInput) {
   const horaPrazo = assertHoraPrazo(input.hora_prazo);
   const lembretes = normalizeLembretes(input.lembretes);
   const audiencia = audienciaCampos(input);
+  const valor = valorPagamento(input.tipo, input.valor_centavos);
 
   // Optional FKs: omit empty/0 so inserts without vínculo don't hit *_fkey.
   const cpfNorm = input.cpf?.trim() ? normalizeCpf(input.cpf) : null;
@@ -173,6 +191,7 @@ export async function criarPrazo(input: NovoPrazoInput) {
       processo_id: processoId,
       criado_por: user.id,
       ...audiencia,
+      ...valor,
     })
     .select("id")
     .single();
@@ -206,6 +225,7 @@ export async function atualizarPrazo(input: AtualizarPrazoInput) {
   const horaPrazo = assertHoraPrazo(input.hora_prazo);
   const lembretes = normalizeLembretes(input.lembretes);
   const audiencia = audienciaCampos(input);
+  const valor = valorPagamento(input.tipo, input.valor_centavos);
   const processoPatch =
     input.processo_id === undefined
       ? {}
@@ -228,6 +248,7 @@ export async function atualizarPrazo(input: AtualizarPrazoInput) {
       lembrar_em: null,
       ...processoPatch,
       ...audiencia,
+      ...valor,
     })
     .eq("id", input.id);
 

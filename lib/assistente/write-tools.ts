@@ -144,14 +144,19 @@ export const ASSISTENTE_WRITE_TOOL_DEFINITIONS = [
     function: {
       name: "criar_prazo",
       description:
-        "Propõe criar um prazo (app_prazos). Confirmação na UI. Vínculo com cliente/caso/processo é OPCIONAL — título + data bastam. Tipos: exigencia_inss, recurso, pericia, audiencia, outro. Para audiência: informe modalidade (presencial|virtual) e local (presencial) ou link_audiencia (virtual).",
+        "Propõe criar um prazo (app_prazos). Confirmação na UI. Vínculo com cliente/caso/processo é OPCIONAL — título + data bastam. Tipos: exigencia_inss, recurso, pericia, audiencia, pagamento, outro. Pagamento (RPV, alvará, honorários a receber etc.) vai para a tela Pagamentos: informe valor quando souber. Para audiência: informe modalidade (presencial|virtual) e local (presencial) ou link_audiencia (virtual).",
       parameters: {
         type: "object",
         properties: {
           titulo: { type: "string" },
           tipo: {
             type: "string",
-            description: "exigencia_inss | recurso | pericia | audiencia | outro",
+            description: "exigencia_inss | recurso | pericia | audiencia | pagamento | outro",
+          },
+          valor: {
+            type: "string",
+            description:
+              "Opcional (só tipo pagamento) — valor em reais, ex.: \"1.518,00\".",
           },
           data_prazo: {
             type: "string",
@@ -346,7 +351,7 @@ export const ASSISTENTE_WRITE_TOOL_DEFINITIONS = [
     function: {
       name: "criar_processo",
       description:
-        "Propõe cadastrar um processo (processos_clientes) num dos 4 funis de processos: civel | administrativo | previdenciario (Judicial Previdenciário) | concedido. Confirmação na UI. OBRIGATÓRIO: nome, cpf e area; numero_processo é obrigatório (CNJ, 20 dígitos) em civel/previdenciario, e opcional em administrativo/concedido (nº do requerimento INSS / NB). Use buscar_pessoas antes. Coluna = chave de listar_colunas_funis do funil da área (omitida → primeira coluna). Benefício em todos menos Cível. No Cível, pergunte polo_passivo e tipo_acao se faltarem.",
+        "Propõe cadastrar um processo (processos_clientes) num dos 4 funis de processos: civel | administrativo | previdenciario (Judicial Previdenciário) | concedido. Confirmação na UI. OBRIGATÓRIO: nome, cpf e area; numero_processo é o CNJ (20 dígitos) em civel/previdenciario e o nº do requerimento INSS / NB em administrativo/concedido. Se o processo ainda não tem número, omita numero_processo: ele é cadastrado como 'sem número' e o número é adicionado depois (atualizar_processo). Use buscar_pessoas antes. Coluna = chave de listar_colunas_funis do funil da área (omitida → primeira coluna). Benefício em todos menos Cível. No Cível, pergunte polo_passivo e tipo_acao se faltarem.",
       parameters: {
         type: "object",
         properties: {
@@ -355,7 +360,7 @@ export const ASSISTENTE_WRITE_TOOL_DEFINITIONS = [
           numero_processo: {
             type: "string",
             description:
-              "Número CNJ (com ou sem máscara) nos funis judiciais; nº do requerimento/NB em administrativo/concedido (opcional)",
+              "Número CNJ (com ou sem máscara) nos funis judiciais; nº do requerimento/NB em administrativo/concedido. Omita se o processo ainda não tem número.",
           },
           area: { type: "string", description: AREAS_PROCESSO_DESC },
           telefone: { type: "string" },
@@ -470,7 +475,7 @@ export const ASSISTENTE_WRITE_TOOL_DEFINITIONS = [
                 numero_processo: {
                   type: "string",
                   description:
-                    "CNJ (20 dígitos) em civel/previdenciario; nº do requerimento/NB (ou vazio) em administrativo/concedido",
+                    "CNJ (20 dígitos) em civel/previdenciario; nº do requerimento/NB em administrativo/concedido. Vazio = processo ainda sem número (adicionado depois).",
                 },
                 cpf: { type: "string" },
                 nome: { type: "string", description: "Nome do cliente" },
@@ -1046,6 +1051,12 @@ function proposeCriarPrazo(
     };
   }
 
+  const valorRaw = tipo === "pagamento" ? str(args.valor) : "";
+  const valor_centavos = valorRaw ? parseValorReais(valorRaw) : null;
+  if (valorRaw && valor_centavos === null) {
+    return { ok: false, summary: `valor inválido: "${valorRaw}". Use reais, ex.: 1.518,00.` };
+  }
+
   const audienciaParts = [
     modalidade
       ? MODALIDADES_AUDIENCIA.find((m) => m.value === modalidade)?.label
@@ -1069,10 +1080,13 @@ function proposeCriarPrazo(
       ...(local ? { local } : {}),
       ...(modalidade ? { modalidade } : {}),
       ...(link_audiencia ? { link_audiencia } : {}),
+      ...(valor_centavos != null ? { valor_centavos } : {}),
     },
-    label: `Prazo: ${titulo}`,
+    label: `${tipo === "pagamento" ? "Pagamento" : "Prazo"}: ${titulo}`,
     summary:
-      `Criar prazo "${titulo}" (${prazoTipoLabel(tipo)}) em ${data_prazo} às ${String(hora_prazo).slice(0, 5)} · lembretes: ${lembretesSummaryLine(lembretes)}` +
+      `Criar ${tipo === "pagamento" ? "pagamento" : "prazo"} "${titulo}" (${prazoTipoLabel(tipo)})` +
+      (valor_centavos != null ? ` de ${formatValorCentavos(valor_centavos)}` : "") +
+      ` em ${data_prazo} às ${String(hora_prazo).slice(0, 5)} · lembretes: ${lembretesSummaryLine(lembretes)}` +
       (audienciaParts.length ? ` · ${audienciaParts.join(" · ")}` : "") +
       ".",
   };
@@ -1421,14 +1435,19 @@ async function parseProcessoFields(
     const areaEfetiva = normalizeAreaProcesso(
       fields.area ?? areaAtual ?? FUNIL_PROCESSO_PADRAO
     );
-    if (funilExigeCnj(areaEfetiva) && !isValidNumeroProcesso(numero)) {
-      return {
-        ok: false,
-        summary:
-          "numero_processo inválido — nos funis judiciais (Cível / Judicial Previdenciário) o número CNJ tem 20 dígitos. Em Administrativo/Concedidos use o nº do requerimento/NB ou deixe vazio.",
-      };
+    // Vazio = processo ainda sem número (só no cadastro; no update não apaga o atual).
+    if (!normalizeNumeroProcesso(numero)) {
+      if (!update) fields.numero_processo = null;
+    } else {
+      if (funilExigeCnj(areaEfetiva) && !isValidNumeroProcesso(numero)) {
+        return {
+          ok: false,
+          summary:
+            "numero_processo inválido — nos funis judiciais (Cível / Judicial Previdenciário) o número CNJ tem 20 dígitos. Se o processo ainda não tem número, deixe vazio (fica 'sem número').",
+        };
+      }
+      fields.numero_processo = normalizeNumeroProcesso(numero);
     }
-    fields.numero_processo = normalizeNumeroProcesso(numero);
   }
 
   for (const key of PROCESSO_TEXT_KEYS) {
@@ -2646,19 +2665,26 @@ async function execCriarPrazo(
     ...(local ? { local } : {}),
     ...(modalidade ? { modalidade } : {}),
     ...(link_audiencia ? { link_audiencia } : {}),
+    ...(tipo === "pagamento" && typeof args.valor_centavos === "number"
+      ? { valor_centavos: args.valor_centavos }
+      : {}),
   });
 
   const isAudiencia = tipo === "audiencia";
+  const isPagamento = tipo === "pagamento";
+  const nome = isPagamento ? "Pagamento" : isAudiencia ? "Audiência" : "Prazo";
   return {
     ok: true,
-    summary: `${isAudiencia ? "Audiência" : "Prazo"} "${titulo}" ${isAudiencia ? "criada" : "criado"} para ${data_prazo} às ${hora_prazo.slice(0, 5)}.${isAudiencia ? ` Link: ${audienciasHref()}.` : ""}`,
+    summary: `${nome} "${titulo}" ${isAudiencia ? "criada" : "criado"} para ${data_prazo} às ${hora_prazo.slice(0, 5)}.${isAudiencia ? ` Link: ${audienciasHref()}.` : ""}`,
     links: [
       ...(cpf
         ? [{ label: "Abrir ficha", href: assistenteFichaHref({ cpf }) }]
         : []),
       isAudiencia
         ? { label: "Ver audiências", href: audienciasHref() }
-        : { label: "Ver prazos", href: "/prazos" },
+        : isPagamento
+          ? { label: "Ver pagamentos", href: "/pagamentos" }
+          : { label: "Ver prazos", href: "/prazos" },
     ],
   };
 }
@@ -2858,7 +2884,7 @@ async function execCriarProcesso(
   const fields = asRecord(args.fields) as ProcessoFields;
   const funil = normalizeAreaProcesso(fields.area);
   const numero = fields.numero_processo ?? "";
-  if (!fields.nome || !fields.cpf || (funilExigeCnj(funil) && !numero)) {
+  if (!fields.nome || !fields.cpf) {
     return { ok: false, summary: "Dados incompletos para criar o processo." };
   }
   await upsertProcesso({
@@ -2876,9 +2902,9 @@ async function execCriarProcesso(
     .limit(1);
   rowQuery = numero
     ? rowQuery.eq("numero_processo", numero)
-    : rowQuery.eq("cpf", fields.cpf).eq("area", funil);
+    : rowQuery.eq("cpf", fields.cpf).eq("area", funil).is("numero_processo", null);
   const { data: row } = await rowQuery.maybeSingle();
-  const numeroFmt = numero ? formatNumeroProcesso(numero) : "(sem nº)";
+  const numeroFmt = numero ? formatNumeroProcesso(numero) : "(sem número — adicionar depois)";
   const funilLinks = processoLinks(funil, fields.cpf);
 
   return {
@@ -2980,7 +3006,7 @@ async function execCadastrarProcessosLote(
       if (it.acao === "criar") {
         const funil = normalizeAreaProcesso(fields.area);
         const numero = fields.numero_processo ?? "";
-        if (!fields.nome || !fields.cpf || (funilExigeCnj(funil) && !numero)) {
+        if (!fields.nome || !fields.cpf) {
           throw new Error("dados incompletos.");
         }
         const dupId = numero ? dupByNumero.get(numero) : undefined;

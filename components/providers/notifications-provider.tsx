@@ -23,6 +23,7 @@ import {
   subscriptionToPayload,
   unsubscribeBrowserPush,
 } from "@/lib/client/push";
+import { rotulosPrazo } from "@/lib/prazos/rotulos";
 
 export type PainelNotificacao = {
   id: string;
@@ -422,12 +423,12 @@ export function NotificationsProvider({
             data_prazo: string;
             hora_prazo?: string | null;
           };
-          const isAudiencia = prazo.tipo === "audiencia";
+          const rotulos = rotulosPrazo(prazo.tipo);
           push({
             kind: "prazo",
-            title: isAudiencia ? "⚖️ Nova audiência" : "📅 Novo prazo",
+            title: rotulos.novo,
             body: `${prazo.titulo} — ${formatPrazoDateTime(prazo.data_prazo, prazo.hora_prazo)}`,
-            href: isAudiencia ? "/audiencias" : "/prazos",
+            href: rotulos.href,
           });
         }
       )
@@ -466,16 +467,15 @@ export function NotificationsProvider({
           } catch {
             /* private mode */
           }
-          const isAudiencia = row.tipo === "audiencia";
-          const titulo =
-            row.titulo ?? `${isAudiencia ? "Audiência" : "Prazo"} #${row.id}`;
+          const rotulos = rotulosPrazo(row.tipo);
+          const titulo = row.titulo ?? `${rotulos.substantivo} #${row.id}`;
           const quando = row.quando ?? "lembrete";
           const body = `${titulo} — ${quando}`;
           pushRef.current({
             kind: "prazo",
-            title: isAudiencia ? "⚖️ Audiência" : "🔔 Lembrete de prazo",
+            title: rotulos.lembrete,
             body,
-            href: isAudiencia ? "/audiencias" : "/prazos",
+            href: rotulos.href,
           });
         }
         if (cancelled) return;

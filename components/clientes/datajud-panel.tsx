@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { formatDate, formatDateTime } from "@/lib/utils/dates";
+import { toastErroAcao } from "@/lib/client/erros";
 
 const MONITOR_OPCOES = [
   { value: "off", label: "Monitoramento: desligado" },
@@ -57,7 +58,7 @@ export function DataJudPanel({
       );
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro");
+      toastErroAcao(err, "Erro");
     }
   }
 
@@ -72,7 +73,7 @@ export function DataJudPanel({
         });
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro na consulta");
+      toastErroAcao(err, "Erro na consulta");
     } finally {
       setLoading(false);
     }

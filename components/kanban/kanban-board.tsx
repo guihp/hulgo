@@ -62,6 +62,7 @@ import {
   normalizeCasoStatus,
 } from "@/lib/data/kanban-lookups";
 import { cn } from "@/lib/utils";
+import { toastErroAcao, mensagemErro } from "@/lib/client/erros";
 
 type Caso = Tables<"casos_novos">;
 
@@ -472,7 +473,7 @@ export function KanbanBoard({
     } catch (err) {
       setCasos(prev);
       toast.error("Erro ao mover caso", {
-        description: err instanceof Error ? err.message : "Tente novamente",
+        description: mensagemErro(err, "Tente novamente"),
         action: { label: "Retry", onClick: () => moveCaso(casoId, newStatus) },
       });
     }
@@ -508,7 +509,7 @@ export function KanbanBoard({
         setNovaColunaOpen(false);
         toast.success(`Coluna "${created.label}" criada`);
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Erro ao criar coluna");
+        toastErroAcao(err, "Erro ao criar coluna");
       }
     });
   }

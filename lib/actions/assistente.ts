@@ -20,6 +20,10 @@ import type {
   AssistenteToolTraceItem,
 } from "@/lib/assistente/types";
 import {
+  ASSISTENTE_MENSAGEM_MAX,
+  mensagemMuitoLongaTexto,
+} from "@/lib/assistente/types";
+import {
   applyPendingAnexoToWriteArgs,
   executeAssistenteWriteTool,
   isWriteTool,
@@ -410,7 +414,9 @@ export async function enviarMensagemAssistente(input: {
   const content = input.content.trim();
   const anexo = input.anexo ?? null;
   if (!content && !anexo) throw new Error("Mensagem vazia");
-  if (content.length > 8000) throw new Error("Mensagem muito longa");
+  if (content.length > ASSISTENTE_MENSAGEM_MAX) {
+    throw new Error(mensagemMuitoLongaTexto(content.length));
+  }
   if (anexo && anexo.modo !== "interpretar" && anexo.modo !== "somente_salvar") {
     throw new Error("Escolha Interpretar ou Só salvar para o anexo");
   }

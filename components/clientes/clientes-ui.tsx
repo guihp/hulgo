@@ -29,6 +29,7 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { LinkButton } from "@/components/ui/link-button";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -102,6 +103,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { toastErroAcao } from "@/lib/client/erros";
 
 const inputShell =
   "border-[#e2e8f0] bg-white text-[#0b2148] placeholder:text-[#94a3b8] focus-visible:border-[#0b2148] focus-visible:ring-[#0b2148]/12";
@@ -166,6 +168,8 @@ type ProcessoFormState = {
   nome: string;
   cpf: string;
   numero_processo: string;
+  /** Cadastro antecipado: número ainda não existe (preenchido depois). */
+  sem_numero: boolean;
   telefone: string;
   tribunal: string;
   area: FunilProcesso;
@@ -194,6 +198,7 @@ const EMPTY_FORM: ProcessoFormState = {
   nome: "",
   cpf: "",
   numero_processo: "",
+  sem_numero: false,
   telefone: "",
   tribunal: "",
   area: "previdenciario",
@@ -245,6 +250,7 @@ function processoToForm(processo: Processo): ProcessoFormState {
     nome: processo.nome ?? "",
     cpf: maskCpfCnpjInput(processo.cpf),
     numero_processo: maskNumeroForFunil(processo.numero_processo ?? "", area),
+    sem_numero: !processo.numero_processo && funilExigeCnj(area),
     telefone: maskPhoneBrInput(processo.telefone ?? ""),
     tribunal: processo.tribunal ?? "",
     area,
@@ -375,10 +381,30 @@ function ProcessoFormFields({
           }
           inputMode="numeric"
           placeholder={
-            exigeCnj ? "0000000-00.0000.0.00.0000" : "Protocolo INSS ou NB (opcional)"
+            form.sem_numero
+              ? "Sem número por enquanto"
+              : exigeCnj
+                ? "0000000-00.0000.0.00.0000"
+                : "Protocolo INSS ou NB (opcional)"
           }
+          disabled={form.sem_numero}
           className="font-mono"
         />
+        {exigeCnj ? (
+          <label className="flex items-center gap-2 pt-1 text-xs text-muted-foreground">
+            <Checkbox
+              checked={form.sem_numero}
+              onCheckedChange={(v) =>
+                setForm((f) => ({
+                  ...f,
+                  sem_numero: v === true,
+                  numero_processo: v === true ? "" : f.numero_processo,
+                }))
+              }
+            />
+            Ainda sem número (adicionar depois)
+          </label>
+        ) : null}
       </div>
       <div className="space-y-1">
         <Label htmlFor={fieldId("tribunal")}>Tribunal</Label>
@@ -776,8 +802,13 @@ export function ProcessoDialog({
       toast.error(`${cpfLabel} inválido`);
       return;
     }
-    if (funilExigeCnj(form.area) && !isValidNumeroProcesso(numero)) {
-      toast.error("Número de processo CNJ inválido (20 dígitos)");
+    const semNumero = form.sem_numero || (!funilExigeCnj(form.area) && !numero);
+    if (funilExigeCnj(form.area) && !semNumero && !isValidNumeroProcesso(numero)) {
+      toast.error(
+        numero
+          ? "Número de processo CNJ inválido (20 dígitos)"
+          : "Informe o número do processo ou marque “Ainda sem número”"
+      );
       return;
     }
     if (form.data_nascimento && !dataIso) {
@@ -804,7 +835,7 @@ export function ProcessoDialog({
         id: form.id,
         nome,
         cpf,
-        numero_processo: numero,
+        numero_processo: semNumero ? null : numero,
         telefone: telefone || null,
         tribunal: form.tribunal || null,
         area: form.area,
@@ -832,7 +863,7 @@ export function ProcessoDialog({
       onSaved?.();
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao salvar");
+      toastErroAcao(err, "Erro ao salvar");
     } finally {
       setSaving(false);
     }
@@ -1651,7 +1682,7 @@ function NovoCasoFichaDialog({
       setColuna("em_atendimento");
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao criar caso");
+      toastErroAcao(err, "Erro ao criar caso");
     } finally {
       setLoading(false);
     }
@@ -1726,7 +1757,7 @@ function CasoResumoCard({
       toast.success("Benefício do caso atualizado");
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao salvar");
+      toastErroAcao(err, "Erro ao salvar");
     } finally {
       setSaving(false);
     }
@@ -1740,7 +1771,7 @@ function CasoResumoCard({
       toast.success("Caso movido no funil");
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao mover");
+      toastErroAcao(err, "Erro ao mover");
     } finally {
       setMoving(false);
     }
@@ -1893,7 +1924,9 @@ function ProcessoFichaCard({
                   {formatNumeroProcesso(p.numero_processo)}
                 </>
               ) : (
-                <span className="font-sans text-muted-foreground">Sem nº</span>
+                <span className="font-sans text-amber-700 dark:text-amber-400">
+                  Sem número ainda — use Editar para adicionar
+                </span>
               )}
             </p>
             <p className="text-xs text-muted-foreground">

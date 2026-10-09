@@ -5,6 +5,7 @@ import {
   formatPrazoDateTime,
   labelForOffset,
 } from "@/lib/prazos/lembretes";
+import { rotulosPrazo } from "@/lib/prazos/rotulos";
 
 export type LembreteNotificarResultado = {
   id: number;
@@ -89,6 +90,17 @@ async function processarLembretesPrazosInner(): Promise<ProcessarLembretesResult
     throw new Error(errLemb.message);
   }
 
+  // Lembretes já disparados: pula antes do insert (senão cada tick gera
+  // "duplicate key" no log do Postgres para todo lembrete vencido).
+  const lembreteIds = (lembretes ?? []).map((l) => l.id);
+  const { data: jaAlertados } = lembreteIds.length
+    ? await service
+        .from("app_prazos_alertas")
+        .select("lembrete_id")
+        .in("lembrete_id", lembreteIds)
+    : { data: [] as { lembrete_id: number | null }[] };
+  const alertados = new Set((jaAlertados ?? []).map((a) => a.lembrete_id));
+
   for (const row of lembretes ?? []) {
     const prazo = prazoMap.get(row.prazo_id);
     if (!prazo) continue;
@@ -101,6 +113,10 @@ async function processarLembretesPrazosInner(): Promise<ProcessarLembretesResult
     if (fireAt.getTime() > agora.getTime()) continue;
 
     candidatos += 1;
+    if (alertados.has(row.id)) {
+      relatorio.push({ id: prazo.id, lembrete_id: row.id, resultado: "já notificado" });
+      continue;
+    }
 
     const { error: dedupeErr } = await service.from("app_prazos_alertas").insert({
       prazo_id: prazo.id,
@@ -129,15 +145,16 @@ async function processarLembretesPrazosInner(): Promise<ProcessarLembretesResult
     const quando =
       row.label?.trim() || labelForOffset(row.offset_minutes);
 
-    const isAudiencia = prazo.tipo === "audiencia";
+    const rotulos = rotulosPrazo(prazo.tipo);
     const dataHora = formatPrazoDateTime(prazo.data_prazo, prazo.hora_prazo);
     const result = await emitPainelPush({
       kind: "prazo",
-      title: isAudiencia ? "⚖️ Audiência" : "🔔 Lembrete de prazo",
-      body: isAudiencia
-        ? `${prazo.titulo} — ${quando} (${dataHora})`
-        : `${prazo.titulo} — ${quando} (vence ${dataHora})`,
-      href: isAudiencia ? "/audiencias" : "/prazos",
+      title: rotulos.lembrete,
+      body:
+        rotulos.href === "/prazos"
+          ? `${prazo.titulo} — ${quando} (vence ${dataHora})`
+          : `${prazo.titulo} — ${quando} (${dataHora})`,
+      href: rotulos.href,
       tag: `prazo-lembrete-${row.id}`,
     });
 

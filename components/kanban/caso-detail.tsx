@@ -65,6 +65,7 @@ import { fichaPessoaHref } from "@/lib/utils/ficha";
 import { normalizeCpf } from "@/lib/utils/cpf";
 import { phoneToContactNorm } from "@/lib/utils/phone";
 import Link from "next/link";
+import { toastErroAcao } from "@/lib/client/erros";
 
 function statusLabel(
   status: string | null | undefined,
@@ -149,7 +150,7 @@ export function CasoDetail({
       toast.success(`${novos.length} documento(s) adicionados aos faltantes`);
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao aplicar checklist");
+      toastErroAcao(err, "Erro ao aplicar checklist");
     }
   }
 
@@ -162,7 +163,7 @@ export function CasoDetail({
       toast.success(`"${doc}" marcado como recebido`);
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao atualizar");
+      toastErroAcao(err, "Erro ao atualizar");
     }
   }
 
@@ -174,7 +175,7 @@ export function CasoDetail({
       toast.success("Nota adicionada");
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao salvar nota");
+      toastErroAcao(err, "Erro ao salvar nota");
     }
   }
 
@@ -184,7 +185,7 @@ export function CasoDetail({
       toast.success("Consultas salvas");
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao salvar");
+      toastErroAcao(err, "Erro ao salvar");
     }
   }
 
@@ -196,7 +197,7 @@ export function CasoDetail({
       setDialogOpen(false);
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao criar processo");
+      toastErroAcao(err, "Erro ao criar processo");
     }
   }
 
@@ -206,7 +207,7 @@ export function CasoDetail({
       toast.success("Status atualizado");
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao atualizar");
+      toastErroAcao(err, "Erro ao atualizar");
     }
   }
 

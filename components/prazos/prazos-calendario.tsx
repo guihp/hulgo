@@ -55,6 +55,8 @@ import {
   type PrazoVisao,
 } from "@/lib/prazos/calendario";
 import { formatNumeroProcesso } from "@/lib/utils/processo";
+import { formatValorCentavos } from "@/lib/utils/processos";
+import type { PrazoTipo } from "@/types/database";
 import { cn } from "@/lib/utils";
 
 const TODOS = "todos";
@@ -109,7 +111,7 @@ function KpiCard({
 }: {
   dotClass: string;
   label: string;
-  value: number;
+  value: number | string;
   sub: string;
 }) {
   return (
@@ -132,7 +134,45 @@ function KpiCard({
   );
 }
 
-/* ---------- Página /prazos e /audiencias ---------- */
+/* ---------- Página /prazos, /audiencias e /pagamentos ---------- */
+
+type ModoPagina = "prazos" | "audiencias" | "pagamentos";
+
+const TEXTOS: Record<
+  ModoPagina,
+  {
+    titulo: string;
+    fixedTipo?: PrazoTipo;
+    vazioDia: string;
+    nenhumNoDia: string;
+    noFiltro: string;
+    mostrarConcluidos: string;
+  }
+> = {
+  prazos: {
+    titulo: "Prazos",
+    vazioDia: "Sem prazos",
+    nenhumNoDia: "Nenhum prazo neste dia.",
+    noFiltro: "prazos no filtro",
+    mostrarConcluidos: "Mostrar concluídos",
+  },
+  audiencias: {
+    titulo: "Audiências",
+    fixedTipo: "audiencia",
+    vazioDia: "Sem audiências",
+    nenhumNoDia: "Nenhuma audiência neste dia.",
+    noFiltro: "audiências no filtro",
+    mostrarConcluidos: "Mostrar histórico",
+  },
+  pagamentos: {
+    titulo: "Pagamentos",
+    fixedTipo: "pagamento",
+    vazioDia: "Sem pagamentos",
+    nenhumNoDia: "Nenhum pagamento neste dia.",
+    noFiltro: "pagamentos no filtro",
+    mostrarConcluidos: "Mostrar pagos",
+  },
+};
 
 export function PrazosPageContent({
   prazos,
@@ -142,8 +182,8 @@ export function PrazosPageContent({
   todayIso,
 }: {
   prazos: PrazoEnriched[];
-  /** "audiencias": textos de audiência e "Nova audiência" com tipo fixo. */
-  mode?: "prazos" | "audiencias";
+  /** "audiencias" / "pagamentos": textos próprios e "Novo …" com tipo fixo. */
+  mode?: ModoPagina;
   /** Opções do seletor de processo nos diálogos. */
   processos?: PrazoProcessoOption[];
   parceiros?: PrazoParceiroOption[];
@@ -151,7 +191,9 @@ export function PrazosPageContent({
   todayIso: string;
 }) {
   const isAudiencias = mode === "audiencias";
-  const acoes = usePrazoAcoes({ audiencia: isAudiencias });
+  const isPagamentos = mode === "pagamentos";
+  const textos = TEXTOS[mode];
+  const acoes = usePrazoAcoes({ audiencia: isAudiencias, pagamento: isPagamentos });
   const [busca, setBusca] = useState("");
   const [tipoFiltro, setTipoFiltro] = useState<string>(TODOS);
   const [processoFiltro, setProcessoFiltro] = useState<string>(TODOS);
@@ -175,6 +217,16 @@ export function PrazosPageContent({
     }
     return { atrasados, hoje, prox7, concluidos };
   }, [prazos, todayIso]);
+
+  const totaisPagamento = useMemo(() => {
+    let pendente = 0;
+    let pago = 0;
+    for (const p of prazos) {
+      if (p.concluido) pago += p.valor_centavos ?? 0;
+      else pendente += p.valor_centavos ?? 0;
+    }
+    return { pendente, pago };
+  }, [prazos]);
 
   const processoFiltroOptions = useMemo(() => {
     const map = new Map<number, string>();
@@ -242,20 +294,47 @@ export function PrazosPageContent({
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-[#0b2148]">
-            {isAudiencias ? "Audiências" : "Prazos"}
+            {textos.titulo}
           </h1>
           <p className="mt-1 text-sm text-[#64748B]">
             {formatDiaLongo(todayIso)}
           </p>
         </div>
         <NovoPrazoDialog
-          fixedTipo={isAudiencias ? "audiencia" : undefined}
+          fixedTipo={textos.fixedTipo}
           processos={processos}
           triggerClassName="shadow-[0_8px_24px_rgba(11,33,72,0.18)]"
         />
       </div>
 
-      {isAudiencias ? (
+      {isPagamentos ? (
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+          <KpiCard
+            dotClass="bg-red-500"
+            label="Atrasados"
+            value={kpis.atrasados}
+            sub="Data passou e não foi pago"
+          />
+          <KpiCard
+            dotClass="bg-amber-500"
+            label="Hoje"
+            value={kpis.hoje}
+            sub="Pagamentos previstos para hoje"
+          />
+          <KpiCard
+            dotClass="bg-[#0b2148]"
+            label="Em aberto"
+            value={formatValorCentavos(totaisPagamento.pendente)}
+            sub={`${kpis.prox7} nos próximos 7 dias`}
+          />
+          <KpiCard
+            dotClass="bg-emerald-500"
+            label="Pagos"
+            value={formatValorCentavos(totaisPagamento.pago)}
+            sub={`${kpis.concluidos} pagamento(s) marcado(s) como pago`}
+          />
+        </div>
+      ) : isAudiencias ? (
         <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
           <KpiCard
             dotClass="bg-amber-500"
@@ -321,7 +400,9 @@ export function PrazosPageContent({
               placeholder={
                 isAudiencias
                   ? "Cliente (nome ou CPF), audiência, local..."
-                  : "Cliente (nome ou CPF), prazo, processo..."
+                  : isPagamentos
+                    ? "Cliente (nome ou CPF), pagamento, processo..."
+                    : "Cliente (nome ou CPF), prazo, processo..."
               }
               aria-label="Buscar por cliente"
               className={cn(inputShell, "h-10 pl-9")}
@@ -380,7 +461,7 @@ export function PrazosPageContent({
               </SelectContent>
             </Select>
           )}
-          {!isAudiencias && (
+          {mode === "prazos" && (
             <Select
               value={tipoFiltro}
               onValueChange={(v) => setTipoFiltro(v ? String(v) : TODOS)}
@@ -397,7 +478,7 @@ export function PrazosPageContent({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={TODOS}>Todos os tipos</SelectItem>
-                {PRAZO_TIPOS.map((t) => (
+                {PRAZO_TIPOS.filter((t) => t.value !== "pagamento").map((t) => (
                   <SelectItem key={t.value} value={t.value}>
                     {t.label}
                   </SelectItem>
@@ -425,24 +506,32 @@ export function PrazosPageContent({
                 onCheckedChange={setMostrarConcluidos}
                 className="data-checked:bg-[#0b2148]"
               />
-              {isAudiencias ? "Mostrar histórico" : "Mostrar concluídos"} (
+              {textos.mostrarConcluidos} (
               {kpis.concluidos})
             </label>
             <span className="text-xs text-[#94a3b8]">
-              Concluídos são apagados automaticamente após 30 dias.
+              {isPagamentos
+                ? "Pagamentos pagos ficam guardados como histórico."
+                : "Concluídos são apagados automaticamente após 30 dias."}
             </span>
           </div>
           <p className="text-sm text-[#64748B]">
             <span className="font-semibold text-[#0b2148]">
               {visiveis.length}
             </span>{" "}
-            {isAudiencias ? "audiências no filtro" : "prazos no filtro"}
+            {textos.noFiltro}
           </p>
         </div>
       </div>
 
       {prazos.length === 0 ? (
-        isAudiencias ? (
+        isPagamentos ? (
+          <EmptyState
+            icon={CalendarClock}
+            title="Nenhum pagamento cadastrado"
+            description="Cadastre RPVs, alvarás, honorários e outros pagamentos com data, valor e lembrete por push."
+          />
+        ) : isAudiencias ? (
           <EmptyState
             icon={CalendarClock}
             title="Nenhuma audiência cadastrada"
@@ -459,7 +548,7 @@ export function PrazosPageContent({
         <>
           <FaixaAtrasados
             atrasados={atrasados}
-            isAudiencias={isAudiencias}
+            modo={mode}
             acoes={acoes}
             processos={processos}
             todayIso={todayIso}
@@ -467,7 +556,7 @@ export function PrazosPageContent({
           <PrazosCalendario
             prazos={visiveis}
             todayIso={todayIso}
-            isAudiencias={isAudiencias}
+            modo={mode}
             acoes={acoes}
             processos={processos}
           />
@@ -481,13 +570,13 @@ export function PrazosPageContent({
 
 function FaixaAtrasados({
   atrasados,
-  isAudiencias,
+  modo,
   acoes,
   processos,
   todayIso,
 }: {
   atrasados: PrazoEnriched[];
-  isAudiencias: boolean;
+  modo: ModoPagina;
   acoes: Acoes;
   processos?: PrazoProcessoOption[];
   todayIso: string;
@@ -495,7 +584,7 @@ function FaixaAtrasados({
   const [aberta, setAberta] = useState(true);
   if (!atrasados.length) return null;
   const n = atrasados.length;
-  const titulo = isAudiencias
+  const titulo = modo === "audiencias"
     ? `${n} ${n === 1 ? "audiência passada" : "audiências passadas"} sem conclusão`
     : `${n} ${n === 1 ? "atrasado" : "atrasados"}`;
 
@@ -539,13 +628,13 @@ function FaixaAtrasados({
 function PrazosCalendario({
   prazos,
   todayIso,
-  isAudiencias,
+  modo,
   acoes,
   processos,
 }: {
   prazos: PrazoEnriched[];
   todayIso: string;
-  isAudiencias: boolean;
+  modo: ModoPagina;
   acoes: Acoes;
   processos?: PrazoProcessoOption[];
 }) {
@@ -666,7 +755,7 @@ function PrazosCalendario({
           acoes={acoes}
           processos={processos}
           onAbrirDia={abrirDia}
-          isAudiencias={isAudiencias}
+          modo={modo}
         />
       )}
       {visao === "dia" && (
@@ -676,7 +765,7 @@ function PrazosCalendario({
           itens={porDia.get(refIso) ?? []}
           acoes={acoes}
           processos={processos}
-          isAudiencias={isAudiencias}
+          modo={modo}
         />
       )}
     </section>
@@ -848,7 +937,7 @@ function VisaoSemana({
   acoes,
   processos,
   onAbrirDia,
-  isAudiencias,
+  modo,
 }: {
   dias: string[];
   todayIso: string;
@@ -856,7 +945,7 @@ function VisaoSemana({
   acoes: Acoes;
   processos?: PrazoProcessoOption[];
   onAbrirDia: (iso: string) => void;
-  isAudiencias: boolean;
+  modo: ModoPagina;
 }) {
   return (
     <div className="grid grid-cols-1 divide-y divide-[#e2e8f0] lg:grid-cols-7 lg:divide-x lg:divide-y-0">
@@ -898,7 +987,7 @@ function VisaoSemana({
             </button>
             {itens.length === 0 ? (
               <p className="px-1.5 text-xs text-[#cbd5e1] lg:hidden">
-                {isAudiencias ? "Sem audiências" : "Sem prazos"}
+                {TEXTOS[modo].vazioDia}
               </p>
             ) : (
               <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-1">
@@ -927,25 +1016,23 @@ function VisaoDia({
   itens,
   acoes,
   processos,
-  isAudiencias,
+  modo,
 }: {
   dia: string;
   todayIso: string;
   itens: PrazoEnriched[];
   acoes: Acoes;
   processos?: PrazoProcessoOption[];
-  isAudiencias: boolean;
+  modo: ModoPagina;
 }) {
   if (!itens.length) {
     return (
       <div className="flex flex-col items-center gap-3 p-8 text-center text-sm text-[#64748B]">
         <p>
-          {isAudiencias
-            ? "Nenhuma audiência neste dia."
-            : "Nenhum prazo neste dia."}
+          {TEXTOS[modo].nenhumNoDia}
         </p>
         <NovoPrazoDialog
-          fixedTipo={isAudiencias ? "audiencia" : undefined}
+          fixedTipo={TEXTOS[modo].fixedTipo}
           processos={processos}
           defaultDataIso={dia}
           triggerVariant="outline"

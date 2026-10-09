@@ -17,6 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { toastErroAcao } from "@/lib/client/erros";
 
 const cardShell = "rounded-2xl border border-[#e2e8f0] bg-white shadow-none";
 const inputShell =
@@ -107,7 +108,7 @@ export function ParceirosPanel({
           toast.success("Parceiro salvo");
         }
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Erro ao salvar");
+        toastErroAcao(err, "Erro ao salvar");
       }
     });
   }
@@ -127,7 +128,7 @@ export function ParceirosPanel({
         if (draft?.id === p.id) setDraft(null);
         toast.success("Parceiro excluído");
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Erro ao excluir");
+        toastErroAcao(err, "Erro ao excluir");
       }
     });
   }

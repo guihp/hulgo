@@ -29,6 +29,7 @@ import { Separator } from "@/components/ui/separator";
 import { formatRelative } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { toastErroAcao } from "@/lib/client/erros";
 
 const KIND_ICON: Record<PainelNotificacao["kind"], typeof Bell> = {
   mensagem: MessageSquare,
@@ -191,11 +192,7 @@ export function NotificationsBell() {
                       })
                     )
                     .catch((err) =>
-                      toast.error(
-                        err instanceof Error
-                          ? err.message
-                          : "Não foi possível ativar o push"
-                      )
+                      toastErroAcao(err, "Não foi possível ativar o push")
                     );
                 }}
               >

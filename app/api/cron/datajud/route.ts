@@ -49,14 +49,17 @@ export async function GET(req: NextRequest) {
   const agora = Date.now();
   const relatorio: Record<string, string>[] = [];
 
-  for (const p of processos ?? []) {
-    if (!isValidNumeroProcesso(p.numero_processo ?? "")) {
+  for (const row of processos ?? []) {
+    if (!row.numero_processo || !isValidNumeroProcesso(row.numero_processo)) {
       relatorio.push({
-        processo: p.numero_processo || `#${p.id}`,
-        resultado: "sem nº CNJ (administrativo/NB) — ignorado",
+        processo: row.numero_processo || `#${row.id}`,
+        resultado: row.numero_processo
+          ? "sem nº CNJ (administrativo/NB) — ignorado"
+          : "processo ainda sem número — ignorado",
       });
       continue;
     }
+    const p = { ...row, numero_processo: row.numero_processo };
     const dias = p.monitorar_dias ?? 0;
     const ultima = p.ultima_consulta_datajud
       ? new Date(p.ultima_consulta_datajud).getTime()

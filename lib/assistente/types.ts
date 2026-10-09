@@ -119,3 +119,10 @@ export type AssistenteConfirmResult = {
   /** Only when there is something beyond the result card (e.g. ask for a corrected CPF). */
   followUpMessage: AssistenteMessage | null;
 };
+
+/** Limite de caracteres por mensagem do assistente (lista grande de processos cabe). */
+export const ASSISTENTE_MENSAGEM_MAX = 30000;
+
+export function mensagemMuitoLongaTexto(tamanho: number): string {
+  return `Mensagem muito longa (${tamanho.toLocaleString("pt-BR")} caracteres). O limite é ${ASSISTENTE_MENSAGEM_MAX.toLocaleString("pt-BR")} — divida em partes menores (ex.: 30 processos por vez).`;
+}

@@ -15,6 +15,7 @@ import {
   type SandboxVersao,
 } from "@/lib/actions/agente-sandbox";
 import { cn } from "@/lib/utils";
+import { mensagemErro } from "@/lib/client/erros";
 
 const cardShell =
   "rounded-2xl border border-[#e2e8f0] bg-white shadow-none";
@@ -145,7 +146,7 @@ export function TestarAgentePanel({
       })
       .catch((e: unknown) => {
         if (cancelled) return;
-        const msg = e instanceof Error ? e.message : "Falha ao iniciar sandbox";
+        const msg = mensagemErro(e, "Falha ao iniciar sandbox");
         setBootError(msg);
         toast.error(msg);
       })
@@ -237,7 +238,7 @@ export function TestarAgentePanel({
         clearPendingMedia();
         setBootError(null);
       } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : "Falha ao reiniciar";
+        const msg = mensagemErro(e, "Falha ao reiniciar");
         toast.error(msg);
       }
     });
@@ -303,7 +304,7 @@ export function TestarAgentePanel({
           URL.revokeObjectURL(blobToRevoke);
         }
       } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : "Falha ao enviar";
+        const msg = mensagemErro(e, "Falha ao enviar");
         toast.error(msg);
         if (draftSnapshot.trim()) setDraft(draftSnapshot);
       } finally {

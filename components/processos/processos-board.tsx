@@ -81,10 +81,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { corBorder, corDot } from "@/components/processos/cores";
+import { AdicionarNumeroDialog } from "@/components/processos/adicionar-numero-dialog";
 import { ExcluirProcessoDialog } from "@/components/processos/excluir-processo-dialog";
 import { ProcessoColunaMenu } from "@/components/processos/processo-coluna-menu";
 import { TransferirProcessoDialog } from "@/components/processos/transferir-processo-dialog";
 import { cn } from "@/lib/utils";
+import { toastErroAcao, mensagemErro } from "@/lib/client/erros";
 
 type Processo = Tables<"processos_clientes">;
 
@@ -134,6 +136,7 @@ function ProcessoCard({
   colunas,
   onMove,
   onTransferir,
+  onAdicionarNumero,
 }: {
   processo: Processo;
   parceiroNome?: string | null;
@@ -148,6 +151,7 @@ function ProcessoCard({
   colunas?: ProcessoColunaMatch[];
   onMove?: (ids: number[], chave: string) => void;
   onTransferir?: (ids: number[]) => void;
+  onAdicionarNumero?: (processo: Processo) => void;
 }) {
   const podeMover = Boolean(onMove && colunas && colunas.length > 1);
   const cpf = processo.cpf ? normalizeCpf(processo.cpf) : "";
@@ -178,11 +182,30 @@ function ProcessoCard({
           </div>
         ) : null}
         <div className="min-w-0 flex-1">
-          <p className="truncate font-mono text-[11px] text-muted-foreground">
-            {processo.numero_processo
-              ? formatNumeroProcesso(processo.numero_processo)
-              : "Sem nº"}
-          </p>
+          {processo.numero_processo ? (
+            <p className="truncate font-mono text-[11px] text-muted-foreground">
+              {formatNumeroProcesso(processo.numero_processo)}
+            </p>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <Badge
+                variant="outline"
+                className="border-amber-300 bg-amber-50 text-[10px] text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300"
+              >
+                Sem número
+              </Badge>
+              {onAdicionarNumero ? (
+                <button
+                  type="button"
+                  onPointerDown={stopDrag}
+                  onClick={() => onAdicionarNumero(processo)}
+                  className="text-[11px] font-medium text-primary underline-offset-2 hover:underline"
+                >
+                  Adicionar nº
+                </button>
+              ) : null}
+            </div>
+          )}
           <p className="mt-0.5 text-sm font-medium leading-tight">
             {partesLabel(processo)}
           </p>
@@ -414,6 +437,7 @@ function ProcessoColumn({
   onMove,
   onTransferir,
   onDeleted,
+  onAdicionarNumero,
   edit,
 }: {
   coluna: ProcessoColunaMatch;
@@ -427,6 +451,7 @@ function ProcessoColumn({
   onMove: (ids: number[], chave: string) => void;
   onTransferir: (ids: number[]) => void;
   onDeleted?: (id: number) => void;
+  onAdicionarNumero: (processo: Processo) => void;
   /** Presente só para advogados com a coluna persistida no banco. */
   edit?: ColunaEditHandlers;
 }) {
@@ -476,6 +501,7 @@ function ProcessoColumn({
               colunas={colunas}
               onMove={onMove}
               onTransferir={onTransferir}
+              onAdicionarNumero={onAdicionarNumero}
             />
             <Select
               value={coluna.chave}
@@ -542,6 +568,8 @@ export function ProcessosBoard({
   const [pendingColuna, startColunaTransition] = useTransition();
   const [pendingBulk, startBulkTransition] = useTransition();
   const [transferIds, setTransferIds] = useState<number[] | null>(null);
+  const [numeroPara, setNumeroPara] = useState<Processo | null>(null);
+  const [soSemNumero, setSoSemNumero] = useState(false);
   const router = useRouter();
 
   const sensors = useSensors(
@@ -587,9 +615,15 @@ export function ProcessosBoard({
         (parceiroFilter === FILTER_NONE
           ? !p.parceiro_id
           : p.parceiro_id === parceiroFilter);
-      return matchSearch && matchSituacao && matchParceiro;
+      const matchNumero = !soSemNumero || !p.numero_processo;
+      return matchSearch && matchSituacao && matchParceiro && matchNumero;
     });
-  }, [processos, search, situacaoFilter, parceiroFilter]);
+  }, [processos, search, situacaoFilter, parceiroFilter, soSemNumero]);
+
+  const semNumeroCount = useMemo(
+    () => processos.filter((p) => !p.numero_processo).length,
+    [processos]
+  );
 
   const porColuna = useMemo(() => {
     const map: Record<string, Processo[]> = {};
@@ -713,7 +747,7 @@ export function ProcessosBoard({
     } catch (err) {
       setProcessos(prev);
       toast.error("Erro ao mover processo", {
-        description: err instanceof Error ? err.message : "Tente novamente",
+        description: mensagemErro(err, "Tente novamente"),
         action: { label: "Tentar de novo", onClick: () => moveProcessos(ids, chave) },
       });
     }
@@ -746,7 +780,7 @@ export function ProcessosBoard({
         setSelected(new Set());
       } catch (err) {
         setProcessos(prev);
-        toast.error(err instanceof Error ? err.message : "Erro ao definir situação");
+        toastErroAcao(err, "Erro ao definir situação");
       }
     });
   }
@@ -793,7 +827,7 @@ export function ProcessosBoard({
         setNovaColunaOpen(false);
         toast.success(`Coluna "${created.label}" criada`);
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Erro ao criar coluna");
+        toastErroAcao(err, "Erro ao criar coluna");
       }
     });
   }
@@ -826,7 +860,7 @@ export function ProcessosBoard({
       router.refresh();
     } catch (err) {
       setColunas(prev);
-      toast.error(err instanceof Error ? err.message : "Erro ao salvar coluna");
+      toastErroAcao(err, "Erro ao salvar coluna");
     }
   }
 
@@ -852,7 +886,7 @@ export function ProcessosBoard({
       router.refresh();
     } catch (err) {
       setColunas(prev);
-      toast.error(err instanceof Error ? err.message : "Erro ao reordenar colunas");
+      toastErroAcao(err, "Erro ao reordenar colunas");
     }
   }
 
@@ -883,7 +917,7 @@ export function ProcessosBoard({
       router.refresh();
       return true;
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao arquivar coluna");
+      toastErroAcao(err, "Erro ao arquivar coluna");
       void refresh();
       return false;
     }
@@ -1053,6 +1087,16 @@ export function ProcessosBoard({
             ))}
           </SelectContent>
         </Select>
+        {semNumeroCount > 0 || soSemNumero ? (
+          <Button
+            variant={soSemNumero ? "default" : "outline"}
+            size="sm"
+            onClick={() => setSoSemNumero((v) => !v)}
+            title="Mostrar só processos cadastrados sem número"
+          >
+            Sem número ({semNumeroCount})
+          </Button>
+        ) : null}
         {colunaActions}
       </div>
 
@@ -1146,6 +1190,7 @@ export function ProcessosBoard({
               onMove={(ids, chave) => void moveProcessos(ids, chave)}
               onTransferir={setTransferIds}
               onDeleted={canExcluir ? removerProcesso : undefined}
+              onAdicionarNumero={setNumeroPara}
             />
           ))}
         </div>
@@ -1166,6 +1211,17 @@ export function ProcessosBoard({
       </DndContext>
 
       {novaColunaDialog}
+      <AdicionarNumeroDialog
+        processo={numeroPara}
+        onOpenChange={(open) => {
+          if (!open) setNumeroPara(null);
+        }}
+        onSaved={(id, numero) =>
+          setProcessos((list) =>
+            list.map((p) => (p.id === id ? { ...p, numero_processo: numero } : p))
+          )
+        }
+      />
       <TransferirProcessoDialog
         ids={transferIds ?? []}
         funilAtual={funil}

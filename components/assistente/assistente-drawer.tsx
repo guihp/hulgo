@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { compressImageFile } from "@/lib/client/image-compress";
-import { toastErroAcao } from "@/lib/client/versao";
+import { toastErroAcao } from "@/lib/client/erros";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -55,6 +55,10 @@ import type {
   AssistenteSessaoListItem,
   AssistenteSessionResult,
   AssistenteToolTraceItem,
+} from "@/lib/assistente/types";
+import {
+  ASSISTENTE_MENSAGEM_MAX,
+  mensagemMuitoLongaTexto,
 } from "@/lib/assistente/types";
 import { labelForOffset } from "@/lib/prazos/lembretes";
 import { cn } from "@/lib/utils";
@@ -1181,6 +1185,10 @@ export function AssistenteDrawer() {
     }
     if (anexo && !anexo.modo) {
       toast.error("Escolha Interpretar ou Só salvar para o anexo");
+      return;
+    }
+    if (content.length > ASSISTENTE_MENSAGEM_MAX) {
+      toast.error(mensagemMuitoLongaTexto(content.length), { duration: 10000 });
       return;
     }
     setDraft("");

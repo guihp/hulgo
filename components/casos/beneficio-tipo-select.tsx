@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { mensagemErro } from "@/lib/client/erros";
 
 const NONE = "__none__";
 
@@ -92,7 +93,7 @@ export function BeneficioTipoSelect({
       .catch((err) => {
         if (!cancelled) {
           setTiposLocal([]);
-          setError(err instanceof Error ? err.message : "Erro ao carregar tipos");
+          setError(mensagemErro(err, "Erro ao carregar tipos"));
         }
       })
       .finally(() => {

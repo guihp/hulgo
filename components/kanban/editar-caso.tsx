@@ -27,6 +27,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { normalizeCpf } from "@/lib/utils/cpf";
 import { cn } from "@/lib/utils";
+import { toastErroAcao } from "@/lib/client/erros";
 
 type Caso = Tables<"casos_novos">;
 
@@ -108,7 +109,7 @@ export function EditarCasoDialog({
       setOpen(false);
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao salvar");
+      toastErroAcao(err, "Erro ao salvar");
     } finally {
       setLoading(false);
     }

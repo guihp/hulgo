@@ -23,6 +23,7 @@ import {
   valoresIniciais,
 } from "@/lib/utils/documentos";
 import { cn } from "@/lib/utils";
+import { mensagemErro } from "@/lib/client/erros";
 
 const COL_SPAN = {
   1: "sm:col-span-1",
@@ -106,7 +107,7 @@ export function DocumentoPdfEditor({
       setPreview(url);
       return url;
     } catch (e) {
-      setErro(e instanceof Error ? e.message : "Falha ao gerar o PDF");
+      setErro(mensagemErro(e, "Falha ao gerar o PDF"));
       return null;
     } finally {
       setGerando(false);

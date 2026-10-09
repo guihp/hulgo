@@ -10,6 +10,7 @@ import type { AppConfigMap } from "@/lib/config/app-config";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { toastErroAcao } from "@/lib/client/erros";
 
 const cardShell =
   "rounded-2xl border border-[#e2e8f0] bg-white shadow-none";
@@ -75,7 +76,7 @@ export function EscritorioPanel({
         });
         toast.success("Dados do escritório salvos");
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Erro ao salvar");
+        toastErroAcao(err, "Erro ao salvar");
       }
     });
   }

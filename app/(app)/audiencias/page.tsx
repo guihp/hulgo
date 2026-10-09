@@ -3,7 +3,7 @@ import { carregarPrazosPagina } from "@/lib/prazos/carregar-pagina";
 
 export default async function AudienciasPage() {
   const { prazos, processos, parceiros, todayIso } =
-    await carregarPrazosPagina({ somenteAudiencias: true });
+    await carregarPrazosPagina({ modo: "audiencias" });
 
   return (
     <PrazosPageContent

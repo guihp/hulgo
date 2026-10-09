@@ -14,6 +14,7 @@ import {
   CalendarClock,
   Scale,
   Gavel,
+  Wallet,
   Menu,
   LogOut,
   ChevronDown,
@@ -53,6 +54,7 @@ const NAV_ICONS: Record<
   CalendarClock,
   Scale,
   Gavel,
+  Wallet,
   Users,
   MessageSquare,
   FileBarChart,
@@ -78,6 +80,7 @@ function useBadgeCounts(): BadgeCounts {
         .from("app_prazos")
         .select("id", { count: "exact", head: true })
         .eq("concluido", false)
+        .neq("tipo", "pagamento")
         .lte("data_prazo", em7dias.toISOString().slice(0, 10)),
     ]);
     setCounts({ aprovacoes: aprov.count ?? 0, prazos: prazos.count ?? 0 });

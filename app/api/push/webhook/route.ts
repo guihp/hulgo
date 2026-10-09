@@ -4,6 +4,7 @@ import { CASO_STATUS } from "@/lib/constants";
 import { formatPrazoDateTime } from "@/lib/prazos/lembretes";
 import { formatPhone } from "@/lib/utils/phone";
 import { fichaPessoaHref } from "@/lib/utils/ficha";
+import { rotulosPrazo } from "@/lib/prazos/rotulos";
 
 export const dynamic = "force-dynamic";
 
@@ -185,12 +186,14 @@ export async function POST(req: NextRequest) {
       const quando = dataPrazo
         ? formatPrazoDateTime(dataPrazo, horaPrazo)
         : "";
-      const isAudiencia = record.tipo === "audiencia";
+      const rotulos = rotulosPrazo(
+        typeof record.tipo === "string" ? record.tipo : null
+      );
       const result = await emitPainelPush({
         kind: "prazo",
-        title: isAudiencia ? "⚖️ Nova audiência" : "📅 Novo prazo",
+        title: rotulos.novo,
         body: quando ? `${titulo} — ${quando}` : titulo,
-        href: isAudiencia ? "/audiencias" : "/prazos",
+        href: rotulos.href,
         tag: `prazo-${id || Date.now()}`,
       });
       return NextResponse.json({ ok: true, ...result });
