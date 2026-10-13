@@ -5,7 +5,12 @@
  * Uses fetch — no SDK dependency.
  */
 
-const OPENAI_BASE = "https://api.openai.com/v1";
+import {
+  detectarFormatoDocumento,
+  extrairTextoDocumento,
+} from "@/lib/documentos/extrair-texto";
+
+const OPENAI_BASE ="https://api.openai.com/v1";
 
 export function getOpenAIApiKey(): string {
   const key = process.env.OPENAI_API_KEY?.trim();
@@ -29,7 +34,8 @@ export function getOpenAITranscribeModel(): string {
 
 type ChatContentPart =
   | { type: "text"; text: string }
-  | { type: "image_url"; image_url: { url: string } };
+  | { type: "image_url"; image_url: { url: string } }
+  | { type: "file"; file: { filename: string; file_data: string } };
 
 type ChatMessage = {
   role: "system" | "user" | "assistant";
@@ -103,7 +109,8 @@ export async function openaiDescribeImage(input: {
 
 /**
  * Extract / describe document text for the n8n agent.
- * Text files are decoded locally; images use vision; other binaries get a
+ * Text files and PDF/Office/ODF are decoded locally; images use vision;
+ * scanned PDFs go to the model as a file; legacy binaries get a
  * best-effort printable extract + model cleanup.
  */
 export async function openaiExtractDocumentText(input: {
@@ -131,7 +138,46 @@ export async function openaiExtractDocumentText(input: {
     });
   }
 
-  // Best-effort: pull printable runs from binary (helps simple PDFs)
+  // PDF/DOCX/XLSX/PPTX/ODF: leitura estruturada local (tabelas viram "a | b | c").
+  const formato = detectarFormatoDocumento(input.bytes, name, mime);
+  if (formato) {
+    let extraido: string | null = null;
+    try {
+      extraido = await extrairTextoDocumento(input);
+    } catch (e) {
+      console.warn("[extrairTextoDocumento]", input.fileName, e);
+    }
+    if (extraido) return extraido;
+    // PDF sem camada de texto (digitalizado): o modelo lê as páginas como imagem.
+    if (formato === "pdf") {
+      return openaiChatCompletions([
+        {
+          role: "system",
+          content:
+            "Transcreva em português todo o texto legível deste PDF, preservando a ordem. " +
+            "Tabelas: uma linha por registro, colunas separadas por \" | \". Não invente; campo ilegível = \"ilegível\".",
+        },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: `Arquivo: ${input.fileName}` },
+            {
+              type: "file",
+              file: {
+                filename: input.fileName || "documento.pdf",
+                file_data: `data:application/pdf;base64,${input.bytes.toString("base64")}`,
+              },
+            },
+          ],
+        },
+      ]);
+    }
+    throw new Error(
+      "Não foi possível ler o texto deste documento. Envie em PDF, imagem ou .txt."
+    );
+  }
+
+  // Formatos antigos (.doc/.xls/.rtf): best-effort com trechos imprimíveis.
   const latin = input.bytes.toString("latin1");
   const printable = latin
     .replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g, " ")
