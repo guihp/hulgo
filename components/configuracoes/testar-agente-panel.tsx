@@ -516,7 +516,7 @@ export function TestarAgentePanel({
           <input
             ref={imageInputRef}
             type="file"
-            accept="image/*"
+            accept="image/*,.heic,.heif"
             className="hidden"
             onChange={(e) => {
               void onPickFile(e.target.files?.[0], "image");
@@ -536,7 +536,7 @@ export function TestarAgentePanel({
           <input
             ref={docInputRef}
             type="file"
-            accept=".pdf,.txt,.md,.doc,.docx,application/pdf,text/plain"
+            accept=".pdf,.txt,.md,.csv,.doc,.docx,.xlsx,.pptx,.odt,.ods,application/pdf,text/plain"
             className="hidden"
             onChange={(e) => {
               void onPickFile(e.target.files?.[0], "documento");

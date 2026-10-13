@@ -9,6 +9,7 @@ import {
   openaiExtractDocumentText,
   openaiTranscribeAudio,
 } from "@/lib/openai/sandbox";
+import { imagemParaVisao } from "@/lib/openai/imagem";
 import type {
   AssistenteAnexoInput,
   AssistenteAnexoKind,
@@ -29,7 +30,7 @@ export function classifyAssistenteAnexo(
 ): AssistenteAnexoKind | null {
   const mime = (mimeType || "").toLowerCase();
   const name = fileName || "";
-  if (mime.startsWith("image/") || /\.(jpe?g|png|gif|webp|bmp|heic)$/i.test(name)) {
+  if (mime.startsWith("image/") || /\.(jpe?g|png|gif|webp|bmp|hei[cf])$/i.test(name)) {
     return "image";
   }
   if (mime.startsWith("video/") || /\.(mp4|webm|mov|mkv|avi|m4v)$/i.test(name)) {
@@ -239,7 +240,7 @@ export async function prepareAssistenteAnexo(input: {
 
   try {
     if (kind === "image") {
-      const dataUrl = `data:${mime};base64,${bytes.toString("base64")}`;
+      const dataUrl = await imagemParaVisao({ bytes, mimeType: mime, fileName });
       transcript = await openaiDescribeImage({
         dataUrl,
         caption: userText || undefined,

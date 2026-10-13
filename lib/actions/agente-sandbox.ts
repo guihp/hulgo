@@ -8,6 +8,7 @@ import {
   openaiExtractDocumentText,
   openaiTranscribeAudio,
 } from "@/lib/openai/sandbox";
+import { imagemParaVisao } from "@/lib/openai/imagem";
 import {
   chamarWebhookTesteIA,
   type TesteIAHistoricoTurn,
@@ -338,7 +339,11 @@ export async function enviarMensagemSandbox(input: {
 
     if (media.kind === "image") {
       tipo = "imagem";
-      const dataUrl = `data:${mediaMime};base64,${mediaBytes.toString("base64")}`;
+      const dataUrl = await imagemParaVisao({
+        bytes: mediaBytes,
+        mimeType: mediaMime,
+        fileName: media.fileName,
+      });
       imagemDescricao = await openaiDescribeImage({
         dataUrl,
         caption: text || undefined,

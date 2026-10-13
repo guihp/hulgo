@@ -70,7 +70,8 @@ const inputShell =
 const MAX_ANEXO_BYTES = 25 * 1024 * 1024;
 
 const ACCEPT_FILES =
-  "image/*,video/*,.pdf,.txt,.md,.doc,.docx,.csv,application/pdf,text/plain";
+  "image/*,.heic,.heif,video/*,audio/*,.pdf,.txt,.md,.csv,.json,.rtf," +
+  ".doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,application/pdf,text/plain";
 
 type PendingAnexo = {
   kind: AssistenteAnexoKind;
@@ -98,7 +99,7 @@ function fileToBase64(file: File): Promise<string> {
 function classifyFile(file: File): AssistenteAnexoKind {
   const mime = (file.type || "").toLowerCase();
   const name = file.name || "";
-  if (mime.startsWith("image/") || /\.(jpe?g|png|gif|webp|bmp)$/i.test(name)) {
+  if (mime.startsWith("image/") || /\.(jpe?g|png|gif|webp|bmp|hei[cf])$/i.test(name)) {
     return "image";
   }
   if (mime.startsWith("video/") || /\.(mp4|webm|mov|mkv|m4v)$/i.test(name)) {

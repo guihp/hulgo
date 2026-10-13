@@ -9,6 +9,7 @@ import {
   detectarFormatoDocumento,
   extrairTextoDocumento,
 } from "@/lib/documentos/extrair-texto";
+import { imagemParaVisao } from "@/lib/openai/imagem";
 
 const OPENAI_BASE ="https://api.openai.com/v1";
 
@@ -130,8 +131,8 @@ export async function openaiExtractDocumentText(input: {
     return text.slice(0, 80_000);
   }
 
-  if (mime.startsWith("image/") || /\.(jpe?g|png|gif|webp|bmp)$/i.test(name)) {
-    const dataUrl = `data:${mime || "image/jpeg"};base64,${input.bytes.toString("base64")}`;
+  if (mime.startsWith("image/") || /\.(jpe?g|png|gif|webp|bmp|hei[cf])$/i.test(name)) {
+    const dataUrl = await imagemParaVisao(input);
     return openaiDescribeImage({
       dataUrl,
       caption: `Documento: ${input.fileName}`,
