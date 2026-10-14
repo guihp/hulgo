@@ -32,6 +32,7 @@ export const NAV_ICON_NAMES = [
   "FileBarChart",
   "FileText",
   "Settings",
+  "Bot",
 ] as const;
 
 export type NavIconName = (typeof NAV_ICON_NAMES)[number];
@@ -64,6 +65,7 @@ export const NAV_GROUPS: { title: string; items: NavItemDef[] }[] = [
     items: [
       { href: "/relatorios", label: "Relatórios", icon: "FileBarChart" },
       { href: "/documentos", label: "Modelos de documentos", icon: "FileText" },
+      { href: "/ia-whatsapp", label: "IA do WhatsApp", icon: "Bot", advogadoOnly: true },
       { href: "/configuracoes", label: "Configurações", icon: "Settings", advogadoOnly: true },
     ],
   },

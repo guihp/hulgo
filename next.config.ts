@@ -17,8 +17,8 @@ const buildId = process.env.SOURCE_COMMIT || `${Date.now()}`;
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  // libheif (wasm) usa require dinâmico — o webpack não empacota; roda direto do node_modules.
-  serverExternalPackages: ["heic-convert"],
+  // libheif (wasm) e unpdf (import.meta) não empacotam bem no webpack; rodam direto do node_modules.
+  serverExternalPackages: ["heic-convert", "unpdf"],
   env: {
     NEXT_PUBLIC_BUILD_ID: buildId,
   },

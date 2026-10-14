@@ -1,11 +1,13 @@
 import "server-only";
 
+import { despausarIA, pausarIA, type MotivoPausa } from "@/lib/ia-whatsapp/estado";
+
 /**
- * Controle da IA no n8n (block no Redis).
+ * Pausa/despausa a IA do WhatsApp para um cliente.
  * - "pausar": advogado assumiu a conversa → IA fica muda para o cliente.
  * - "despausar": libera a IA de volta (ex.: após aprovação enviada).
- * Fluxo n8n correspondente: docs/n8n-controle-ia.json
- * Env: N8N_WEBHOOK_CONTROLE_IA (fallback: N8N_WEBHOOK_APROVACAO).
+ * Estado em app_ia_estado (motor no sistema). Enquanto o fluxo antigo do n8n
+ * existir, também avisa o webhook N8N_WEBHOOK_CONTROLE_IA (best-effort).
  */
 export type ControleIAResult = {
   configured: boolean;
@@ -17,34 +19,36 @@ export async function controlarIA(
   acao: "pausar" | "despausar",
   telefone: string,
   instancia: string | null | undefined,
-  extra?: Record<string, unknown>
+  extra?: Record<string, unknown> & { motivo?: MotivoPausa }
 ): Promise<ControleIAResult> {
+  try {
+    if (acao === "pausar") await pausarIA(telefone, extra?.motivo ?? "painel");
+    else await despausarIA(telefone);
+  } catch (e) {
+    return {
+      configured: true,
+      ok: false,
+      error: e instanceof Error ? e.message : "Falha ao controlar a IA",
+    };
+  }
+
   const webhookUrl =
     process.env.N8N_WEBHOOK_CONTROLE_IA || process.env.N8N_WEBHOOK_APROVACAO;
-  if (!webhookUrl) return { configured: false, ok: false };
-
-  const body = JSON.stringify({
-    acao,
-    telefone: telefone.replace(/@.*$/, "").replace(/\D/g, ""),
-    instancia: instancia ?? null,
-    origem: "sistema",
-    ...extra,
-  });
-
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const res = await fetch(webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body,
-      });
-      if (res.ok) return { configured: true, ok: true };
-    } catch {
-      // retry
-    }
-    await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+  if (webhookUrl) {
+    void fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        acao,
+        telefone: telefone.replace(/@.*$/, "").replace(/\D/g, ""),
+        instancia: instancia ?? null,
+        origem: "sistema",
+        ...extra,
+      }),
+    }).catch(() => {});
   }
-  return { configured: true, ok: false, error: "Falha após 3 tentativas" };
+
+  return { configured: true, ok: true };
 }
 
 /** Sandbox "Testar agente" → fluxo n8n Webhook → AI Agent → Respond to Webhook */

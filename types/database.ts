@@ -699,6 +699,150 @@ export type Database = {
         };
         Relationships: [];
       };
+      app_ia_whatsapp_config: {
+        Row: {
+          id: number;
+          modo: "desligado" | "teste" | "publico";
+          numeros_teste: string[];
+          usar_rascunho_no_teste: boolean;
+          debounce_segundos: number;
+          grupo_advogado: string | null;
+          numeros_advogado: string[];
+          webhook_token: string;
+          updated_at: string;
+          updated_by: string | null;
+        };
+        Insert: {
+          id?: number;
+          modo?: "desligado" | "teste" | "publico";
+          numeros_teste?: string[];
+          usar_rascunho_no_teste?: boolean;
+          debounce_segundos?: number;
+          grupo_advogado?: string | null;
+          numeros_advogado?: string[];
+          webhook_token?: string;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Update: {
+          id?: number;
+          modo?: "desligado" | "teste" | "publico";
+          numeros_teste?: string[];
+          usar_rascunho_no_teste?: boolean;
+          debounce_segundos?: number;
+          grupo_advogado?: string | null;
+          numeros_advogado?: string[];
+          webhook_token?: string;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Relationships: [];
+      };
+      app_ia_estado: {
+        Row: {
+          telefone: string;
+          pausada: boolean;
+          pausada_em: string | null;
+          pausada_motivo: string | null;
+          nome_contato: string | null;
+          memoria_desde: string | null;
+          ultima_mensagem_id: number | null;
+          updated_at: string;
+        };
+        Insert: {
+          telefone: string;
+          pausada?: boolean;
+          pausada_em?: string | null;
+          pausada_motivo?: string | null;
+          nome_contato?: string | null;
+          memoria_desde?: string | null;
+          ultima_mensagem_id?: number | null;
+          updated_at?: string;
+        };
+        Update: {
+          telefone?: string;
+          pausada?: boolean;
+          pausada_em?: string | null;
+          pausada_motivo?: string | null;
+          nome_contato?: string | null;
+          memoria_desde?: string | null;
+          ultima_mensagem_id?: number | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      app_ia_fila: {
+        Row: {
+          telefone: string;
+          instancia: string | null;
+          processar_apos: string;
+          travado_em: string | null;
+          tentativas: number;
+          ultimo_erro: string | null;
+          created_at: string;
+        };
+        Insert: {
+          telefone: string;
+          instancia?: string | null;
+          processar_apos: string;
+          travado_em?: string | null;
+          tentativas?: number;
+          ultimo_erro?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          telefone?: string;
+          instancia?: string | null;
+          processar_apos?: string;
+          travado_em?: string | null;
+          tentativas?: number;
+          ultimo_erro?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      app_ia_execucoes: {
+        Row: {
+          id: number;
+          created_at: string;
+          telefone: string;
+          status: "ok" | "erro" | "pausada" | "sem_resposta";
+          entrada: string | null;
+          respostas: Json;
+          ferramentas: Json;
+          modelo: string | null;
+          prompt_origem: string | null;
+          duracao_ms: number | null;
+          erro: string | null;
+        };
+        Insert: {
+          id?: number;
+          created_at?: string;
+          telefone: string;
+          status: "ok" | "erro" | "pausada" | "sem_resposta";
+          entrada?: string | null;
+          respostas?: Json;
+          ferramentas?: Json;
+          modelo?: string | null;
+          prompt_origem?: string | null;
+          duracao_ms?: number | null;
+          erro?: string | null;
+        };
+        Update: {
+          id?: number;
+          created_at?: string;
+          telefone?: string;
+          status?: "ok" | "erro" | "pausada" | "sem_resposta";
+          entrada?: string | null;
+          respostas?: Json;
+          ferramentas?: Json;
+          modelo?: string | null;
+          prompt_origem?: string | null;
+          duracao_ms?: number | null;
+          erro?: string | null;
+        };
+        Relationships: [];
+      };
       app_erros_log: {
         Row: {
           action_id: string | null;
@@ -944,6 +1088,7 @@ export type Database = {
           contact_norm: string | null;
           conteudo_media: string | null;
           created_at: string;
+          ia_conteudo: string | null;
           id: number;
           instancia: string | null;
           mensage_type: string | null;
@@ -958,6 +1103,7 @@ export type Database = {
           contact_norm?: string | null;
           conteudo_media?: string | null;
           created_at?: string;
+          ia_conteudo?: string | null;
           id?: number;
           instancia?: string | null;
           mensage_type?: string | null;
@@ -972,6 +1118,7 @@ export type Database = {
           contact_norm?: string | null;
           conteudo_media?: string | null;
           created_at?: string;
+          ia_conteudo?: string | null;
           id?: number;
           instancia?: string | null;
           mensage_type?: string | null;
@@ -1085,6 +1232,43 @@ export type Database = {
     Views: Record<string, never>;
     Functions: {
       app_get_papel: { Args: Record<string, never>; Returns: string };
+      ia_fila_agendar: {
+        Args: { p_telefone: string; p_instancia: string | null; p_segundos: number };
+        Returns: undefined;
+      };
+      ia_fila_pegar: {
+        Args: { p_limite?: number };
+        Returns: {
+          telefone: string;
+          instancia: string | null;
+          processar_apos: string;
+          tentativas: number;
+        }[];
+      };
+      ia_fila_concluir: {
+        Args: { p_telefone: string; p_processar_apos: string; p_erro?: string | null };
+        Returns: undefined;
+      };
+      atualizar_dados_caso: {
+        Args: {
+          p_telefone: string;
+          p_nome?: string | null;
+          p_cpf?: string | null;
+          p_data_nascimento?: string | null;
+          p_beneficio_identificado?: string | null;
+          p_area?: string | null;
+          p_tipo_segurado?: string | null;
+          p_ja_negou_inss?: boolean | null;
+          p_motivo_negativa?: string | null;
+          p_ja_tem_processo?: boolean | null;
+          p_ja_recebe_beneficio?: string | null;
+          p_requisitos_preenchidos?: string | null;
+          p_requisitos_pendentes?: string | null;
+          p_pontos_analise_juridica?: string | null;
+          p_beneficios_alternativos?: string | null;
+        };
+        Returns: { caso_id: number; status: string; campos_atualizados: string | null }[];
+      };
       upsert_mensagem: {
         Args: {
           p_phone: string;

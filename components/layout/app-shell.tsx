@@ -19,6 +19,7 @@ import {
   LogOut,
   ChevronDown,
   Settings,
+  Bot,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { buttonVariants } from "@/components/ui/button";
@@ -60,6 +61,7 @@ const NAV_ICONS: Record<
   FileBarChart,
   FileText,
   Settings,
+  Bot,
 };
 
 type BadgeCounts = { aprovacoes: number; prazos: number };

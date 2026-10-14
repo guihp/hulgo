@@ -313,6 +313,11 @@ async function evogoFetch<T = unknown>(
   path: string,
   body: Record<string, unknown>
 ): Promise<T> {
+  // Teste local: EVOGO_DRY_RUN=1 não envia nada para o WhatsApp, só registra no log.
+  if (process.env.EVOGO_DRY_RUN === "1" && path.startsWith("/send/")) {
+    console.log(`[evogo dry-run] ${path}`, JSON.stringify(body).slice(0, 500));
+    return { messageId: `DRYRUN-${crypto.randomUUID()}` } as T;
+  }
   return evogoRequest<T>("POST", path, body);
 }
 

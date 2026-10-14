@@ -1,4 +1,3 @@
-import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 
 export type AppConfigKey =
@@ -21,7 +20,8 @@ const EMPTY_CONFIG: AppConfigMap = {
 };
 
 export async function getAppConfig(): Promise<AppConfigMap> {
-  const supabase = await createClient();
+  // Service role: também é lido fora de request (webhook/worker da IA do WhatsApp).
+  const supabase = createServiceClient();
   const { data, error } = await supabase
     .from("app_config")
     .select("chave, valor")
@@ -56,7 +56,7 @@ export async function getAppConfigValue(key: AppConfigKey): Promise<string> {
 
 export async function getWhatsAppInstancia(contactNorm?: string): Promise<string> {
   if (contactNorm) {
-    const supabase = await createClient();
+    const supabase = createServiceClient();
     const { data } = await supabase
       .from("mensagens")
       .select("instancia")

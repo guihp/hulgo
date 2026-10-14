@@ -45,3 +45,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 !.env.local.example
+
+# Exports do n8n com chaves (service_role, EvoGo) — não versionar
+docs/n8n-ia/

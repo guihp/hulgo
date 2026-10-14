@@ -33,17 +33,17 @@ export function getOpenAITranscribeModel(): string {
   return process.env.OPENAI_TRANSCRIBE_MODEL?.trim() || "whisper-1";
 }
 
-type ChatContentPart =
+export type ChatContentPart =
   | { type: "text"; text: string }
   | { type: "image_url"; image_url: { url: string } }
   | { type: "file"; file: { filename: string; file_data: string } };
 
-type ChatMessage = {
+export type ChatMessage = {
   role: "system" | "user" | "assistant";
   content: string | ChatContentPart[];
 };
 
-async function openaiChatCompletions(messages: ChatMessage[]): Promise<string> {
+export async function openaiChatCompletions(messages: ChatMessage[]): Promise<string> {
   const apiKey = getOpenAIApiKey();
   const model = getOpenAIChatModel();
 

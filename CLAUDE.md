@@ -71,3 +71,8 @@
 - **Pagamentos** (`/pagamentos`): `app_prazos` com `tipo='pagamento'` + `valor_centavos`; some de /prazos;
   "Marcar pago"; pagos não entram na limpeza de 30 dias. Rótulos de push em `lib/prazos/rotulos.ts`.
 - Assistente: limite de mensagem subiu de 8.000 para 30.000 caracteres (`ASSISTENTE_MENSAGEM_MAX`).
+- **IA do WhatsApp no sistema** (2026-10-13): substitui o fluxo n8n. Webhook EvoGo em
+  `/api/whatsapp/webhook?token=` → `lib/ia-whatsapp/*` (fila com debounce, agente com as 9 tools,
+  comandos #aprovar no grupo). Página `/ia-whatsapp` (modo desligado/teste/público, números de teste,
+  pausas, log). Pausa da IA agora em `app_ia_estado` (sem Redis). Detalhes: `docs/IA-WHATSAPP.md`.
+  Teste local: `EVOGO_DRY_RUN=1` não envia WhatsApp. Corrigida a RPC `atualizar_dados_caso` (array_append).

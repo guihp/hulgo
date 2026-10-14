@@ -24,6 +24,7 @@ export async function updateSession(request: NextRequest) {
     request.nextUrl.pathname.startsWith("/api/integracao") ||
     request.nextUrl.pathname.startsWith("/api/cron") ||
     request.nextUrl.pathname.startsWith("/api/push/webhook") ||
+    request.nextUrl.pathname.startsWith("/api/whatsapp/webhook") ||
     request.nextUrl.pathname === "/api/health";
 
   const pathname = request.nextUrl.pathname;
