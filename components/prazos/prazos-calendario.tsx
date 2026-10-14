@@ -8,6 +8,8 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  FileDown,
+  ListFilter,
   Search,
   X,
 } from "lucide-react";
@@ -29,7 +31,6 @@ import {
   PrazoRowFull,
   diasAtePrazo,
   inputShell,
-  matchesBusca,
   prazoChipClasses,
   tipoLabel,
   usePrazoAcoes,
@@ -38,6 +39,14 @@ import {
   type PrazoProcessoOption,
 } from "@/components/prazos/prazos-ui";
 import { PRAZO_TIPOS } from "@/lib/utils/beneficios";
+import {
+  PRAZO_SITUACOES,
+  filtrarPrazos,
+  ordenarPrazos,
+  relatorioPrazosHref,
+  situacaoLabel,
+  type PrazoSituacao,
+} from "@/lib/prazos/filtro";
 import { horaPrazoForInput } from "@/lib/prazos/lembretes";
 import {
   DIAS_SEMANA_CURTOS,
@@ -108,14 +117,25 @@ function KpiCard({
   label,
   value,
   sub,
+  onClick,
+  ativo = false,
 }: {
   dotClass: string;
   label: string;
   value: number | string;
   sub: string;
+  /** Clicar no card aplica o filtro de situação correspondente. */
+  onClick?: () => void;
+  ativo?: boolean;
 }) {
-  return (
-    <Card className="border-[#e2e8f0] bg-white shadow-sm">
+  const card = (
+    <Card
+      className={cn(
+        "h-full border-[#e2e8f0] bg-white shadow-sm transition-colors",
+        onClick && "hover:border-[#0b2148]/30",
+        ativo && "border-[#0b2148] ring-2 ring-[#0b2148]/12"
+      )}
+    >
       <CardContent className="p-4 sm:p-5">
         <div className="flex items-start gap-3">
           <span className={cn("mt-1.5 size-2 shrink-0 rounded-full", dotClass)} />
@@ -131,6 +151,17 @@ function KpiCard({
         </div>
       </CardContent>
     </Card>
+  );
+  if (!onClick) return card;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={ativo}
+      className="rounded-xl text-left focus-visible:ring-2 focus-visible:ring-[#0b2148]/30 focus-visible:outline-none"
+    >
+      {card}
+    </button>
   );
 }
 
@@ -199,6 +230,9 @@ export function PrazosPageContent({
   const [processoFiltro, setProcessoFiltro] = useState<string>(TODOS);
   const [parceiroFiltro, setParceiroFiltro] = useState<string>(TODOS);
   const [mostrarConcluidos, setMostrarConcluidos] = useState(false);
+  const [situacao, setSituacao] = useState<PrazoSituacao>("todos");
+  const alternarSituacao = (s: PrazoSituacao) =>
+    setSituacao((atual) => (atual === s ? "todos" : s));
 
   const kpis = useMemo(() => {
     let atrasados = 0;
@@ -247,27 +281,55 @@ export function PrazosPageContent({
 
   const filtrosAtivos =
     busca.trim() !== "" ||
+    situacao !== "todos" ||
     tipoFiltro !== TODOS ||
     processoFiltro !== TODOS ||
     parceiroFiltro !== TODOS;
 
   function limparFiltros() {
     setBusca("");
+    setSituacao("todos");
     setTipoFiltro(TODOS);
     setProcessoFiltro(TODOS);
     setParceiroFiltro(TODOS);
   }
 
-  const filtradosSemStatus = useMemo(() => {
-    return prazos.filter((p) => {
-      if (tipoFiltro !== TODOS && p.tipo !== tipoFiltro) return false;
-      if (processoFiltro !== TODOS && String(p.processo_id) !== processoFiltro)
-        return false;
-      if (parceiroFiltro !== TODOS && p.parceiro_id !== parceiroFiltro)
-        return false;
-      return matchesBusca(p, busca);
-    });
-  }, [prazos, busca, tipoFiltro, processoFiltro, parceiroFiltro]);
+  const filtrosBase = useMemo(
+    () => ({
+      busca,
+      tipo: tipoFiltro !== TODOS ? tipoFiltro : null,
+      processoId: processoFiltro !== TODOS ? Number(processoFiltro) : null,
+      parceiroId: parceiroFiltro !== TODOS ? parceiroFiltro : null,
+    }),
+    [busca, tipoFiltro, processoFiltro, parceiroFiltro]
+  );
+
+  const filtradosSemStatus = useMemo(
+    () => filtrarPrazos(prazos, filtrosBase, todayIso),
+    [prazos, filtrosBase, todayIso]
+  );
+
+  /** Situação escolhida: lista em vez de calendário (atrasados ficam em meses passados). */
+  const listaSituacao = useMemo(
+    () =>
+      situacao === "todos"
+        ? []
+        : ordenarPrazos(
+            filtrarPrazos(prazos, { ...filtrosBase, situacao }, todayIso),
+            situacao
+          ),
+    [prazos, filtrosBase, situacao, todayIso]
+  );
+
+  // O PDF traz o que a tela mostra: a situação escolhida ou, no calendário, abertos/todos.
+  const situacaoRelatorio: PrazoSituacao =
+    situacao !== "todos" ? situacao : mostrarConcluidos ? "todos" : "abertos";
+  const abrirRelatorio = () =>
+    window.open(
+      relatorioPrazosHref({ modo: mode, ...filtrosBase, situacao: situacaoRelatorio }),
+      "_blank",
+      "noopener"
+    );
 
   const visiveis = useMemo(
     () =>
@@ -300,11 +362,23 @@ export function PrazosPageContent({
             {formatDiaLongo(todayIso)}
           </p>
         </div>
-        <NovoPrazoDialog
-          fixedTipo={textos.fixedTipo}
-          processos={processos}
-          triggerClassName="shadow-[0_8px_24px_rgba(11,33,72,0.18)]"
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="gap-1.5 border-[#e2e8f0] text-[#0b2148]"
+            onClick={abrirRelatorio}
+            disabled={prazos.length === 0}
+          >
+            <FileDown className="size-4" />
+            Relatório PDF
+          </Button>
+          <NovoPrazoDialog
+            fixedTipo={textos.fixedTipo}
+            processos={processos}
+            triggerClassName="shadow-[0_8px_24px_rgba(11,33,72,0.18)]"
+          />
+        </div>
       </div>
 
       {isPagamentos ? (
@@ -314,24 +388,32 @@ export function PrazosPageContent({
             label="Atrasados"
             value={kpis.atrasados}
             sub="Data passou e não foi pago"
+            onClick={() => alternarSituacao("atrasados")}
+            ativo={situacao === "atrasados"}
           />
           <KpiCard
             dotClass="bg-amber-500"
             label="Hoje"
             value={kpis.hoje}
             sub="Pagamentos previstos para hoje"
+            onClick={() => alternarSituacao("hoje")}
+            ativo={situacao === "hoje"}
           />
           <KpiCard
             dotClass="bg-[#0b2148]"
             label="Em aberto"
             value={formatValorCentavos(totaisPagamento.pendente)}
             sub={`${kpis.prox7} nos próximos 7 dias`}
+            onClick={() => alternarSituacao("abertos")}
+            ativo={situacao === "abertos"}
           />
           <KpiCard
             dotClass="bg-emerald-500"
             label="Pagos"
             value={formatValorCentavos(totaisPagamento.pago)}
             sub={`${kpis.concluidos} pagamento(s) marcado(s) como pago`}
+            onClick={() => alternarSituacao("concluidos")}
+            ativo={situacao === "concluidos"}
           />
         </div>
       ) : isAudiencias ? (
@@ -341,24 +423,32 @@ export function PrazosPageContent({
             label="Hoje"
             value={kpis.hoje}
             sub="Audiências marcadas para hoje"
+            onClick={() => alternarSituacao("hoje")}
+            ativo={situacao === "hoje"}
           />
           <KpiCard
             dotClass="bg-[#0b2148]"
             label="Esta semana"
             value={kpis.prox7}
             sub="Nos próximos 7 dias"
+            onClick={() => alternarSituacao("proximos_7")}
+            ativo={situacao === "proximos_7"}
           />
           <KpiCard
             dotClass="bg-red-500"
             label="Passadas em aberto"
             value={kpis.atrasados}
             sub="Já ocorreram e não foram concluídas"
+            onClick={() => alternarSituacao("atrasados")}
+            ativo={situacao === "atrasados"}
           />
           <KpiCard
             dotClass="bg-slate-400"
             label="Histórico"
             value={kpis.concluidos}
             sub="Audiências concluídas"
+            onClick={() => alternarSituacao("concluidos")}
+            ativo={situacao === "concluidos"}
           />
         </div>
       ) : (
@@ -368,24 +458,32 @@ export function PrazosPageContent({
             label="Atrasados"
             value={kpis.atrasados}
             sub="Precisam de ação imediata"
+            onClick={() => alternarSituacao("atrasados")}
+            ativo={situacao === "atrasados"}
           />
           <KpiCard
             dotClass="bg-amber-500"
             label="Vencem hoje"
             value={kpis.hoje}
             sub="Data limite é hoje"
+            onClick={() => alternarSituacao("hoje")}
+            ativo={situacao === "hoje"}
           />
           <KpiCard
             dotClass="bg-[#0b2148]"
             label="Próximos 7 dias"
             value={kpis.prox7}
             sub="Na semana que vem"
+            onClick={() => alternarSituacao("proximos_7")}
+            ativo={situacao === "proximos_7"}
           />
           <KpiCard
             dotClass="bg-slate-400"
             label="Concluídos"
             value={kpis.concluidos}
             sub="Encerrados no sistema"
+            onClick={() => alternarSituacao("concluidos")}
+            ativo={situacao === "concluidos"}
           />
         </div>
       )}
@@ -408,6 +506,37 @@ export function PrazosPageContent({
               className={cn(inputShell, "h-10 pl-9")}
             />
           </div>
+          <Select
+            value={situacao}
+            onValueChange={(v) =>
+              setSituacao(
+                PRAZO_SITUACOES.includes(v as PrazoSituacao)
+                  ? (v as PrazoSituacao)
+                  : "todos"
+              )
+            }
+          >
+            <SelectTrigger
+              className={cn(
+                inputShell,
+                "h-10 w-full lg:w-[220px]",
+                situacao === "atrasados" && "border-red-300 text-red-700"
+              )}
+              aria-label="Filtrar por situação"
+            >
+              <ListFilter className="size-4 text-[#94a3b8]" />
+              <SelectValue>
+                {(v) => situacaoLabel((v as PrazoSituacao) || "todos", mode)}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {PRAZO_SITUACOES.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {situacaoLabel(s, mode)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Select
             value={processoFiltro}
             onValueChange={(v) => setProcessoFiltro(v ? String(v) : TODOS)}
@@ -504,6 +633,7 @@ export function PrazosPageContent({
               <Switch
                 checked={mostrarConcluidos}
                 onCheckedChange={setMostrarConcluidos}
+                disabled={situacao !== "todos"}
                 className="data-checked:bg-[#0b2148]"
               />
               {textos.mostrarConcluidos} (
@@ -517,7 +647,7 @@ export function PrazosPageContent({
           </div>
           <p className="text-sm text-[#64748B]">
             <span className="font-semibold text-[#0b2148]">
-              {visiveis.length}
+              {situacao !== "todos" ? listaSituacao.length : visiveis.length}
             </span>{" "}
             {textos.noFiltro}
           </p>
@@ -545,6 +675,17 @@ export function PrazosPageContent({
           />
         )
       ) : (
+        situacao !== "todos" ? (
+          <ListaSituacao
+            prazos={listaSituacao}
+            titulo={situacaoLabel(situacao, mode)}
+            modo={mode}
+            acoes={acoes}
+            processos={processos}
+            todayIso={todayIso}
+            onVerCalendario={() => setSituacao("todos")}
+          />
+        ) : (
         <>
           <FaixaAtrasados
             atrasados={atrasados}
@@ -561,8 +702,73 @@ export function PrazosPageContent({
             processos={processos}
           />
         </>
+        )
       )}
     </div>
+  );
+}
+
+/* ---------- Lista filtrada por situação ---------- */
+
+function ListaSituacao({
+  prazos,
+  titulo,
+  modo,
+  acoes,
+  processos,
+  todayIso,
+  onVerCalendario,
+}: {
+  prazos: PrazoEnriched[];
+  titulo: string;
+  modo: ModoPagina;
+  acoes: Acoes;
+  processos?: PrazoProcessoOption[];
+  todayIso: string;
+  onVerCalendario: () => void;
+}) {
+  const valorTotal =
+    modo === "pagamentos"
+      ? prazos.reduce((s, p) => s + (p.valor_centavos ?? 0), 0)
+      : 0;
+  return (
+    <section className="rounded-xl border border-[#e2e8f0] bg-white shadow-sm">
+      <div className="flex flex-wrap items-center gap-2 border-b border-[#e2e8f0] px-3 py-2.5">
+        <h2 className="text-sm font-bold text-[#0b2148] sm:text-base">{titulo}</h2>
+        <span className="text-sm text-[#64748B]">
+          · {prazos.length}
+          {valorTotal > 0 && ` · ${formatValorCentavos(valorTotal)}`}
+        </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="ml-auto text-[#64748B] hover:text-[#0b2148]"
+          onClick={onVerCalendario}
+        >
+          <CalendarClock />
+          Ver calendário
+        </Button>
+      </div>
+      {prazos.length === 0 ? (
+        <p className="p-6 text-center text-sm text-[#64748B]">
+          Nada nesta situação com os filtros atuais.
+        </p>
+      ) : (
+        <ul className="space-y-2 p-3">
+          {prazos.map((p) => (
+            <PrazoRowFull
+              key={p.id}
+              prazo={p}
+              onToggle={acoes.toggle}
+              onRemove={acoes.remover}
+              processos={processos}
+              todayIso={todayIso}
+            />
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

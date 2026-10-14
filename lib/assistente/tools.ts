@@ -52,6 +52,13 @@ import {
 } from "@/lib/relatorios/processos-dados";
 import { relatorioProcessosHref } from "@/lib/relatorios/processos-href";
 import {
+  carregarRelatorioPrazos,
+  RelatorioPrazosParamError,
+  TITULO_MODO,
+} from "@/lib/relatorios/prazos-dados";
+import { relatorioPrazosHref, situacaoLabel } from "@/lib/prazos/filtro";
+import { diffDaysIso, todaySaoPauloIso } from "@/lib/prazos/calendario";
+import {
   carregarDadosDocumento,
   criarDocumentoGerado,
   documentoGeradoEditorHref,
@@ -155,7 +162,7 @@ export const ASSISTENTE_TOOL_DEFINITIONS = [
     function: {
       name: "listar_prazos",
       description:
-        "Lista prazos (app_prazos). Filtros: CPF, tipo (ex.: audiencia), próximos N dias, só abertos. Audiências trazem local, modalidade e link.",
+        "Lista prazos, audiências e pagamentos (app_prazos). Filtros: CPF, tipo (ex.: audiencia, pagamento), situação (atrasados), próximos N dias, só abertos. Audiências trazem local, modalidade e link; pagamentos trazem valor.",
       parameters: {
         type: "object",
         properties: {
@@ -163,7 +170,12 @@ export const ASSISTENTE_TOOL_DEFINITIONS = [
           tipo: {
             type: "string",
             description:
-              "exigencia_inss | recurso | pericia | audiencia | outro. Use audiencia para 'quais audiências tenho'.",
+              "exigencia_inss | recurso | pericia | audiencia | pagamento | outro. Use audiencia para 'quais audiências tenho' e pagamento para RPV/alvará/honorários.",
+          },
+          situacao: {
+            type: "string",
+            description:
+              "atrasados = data já passou e não foi concluído/pago (ignora 'dias'). Omitir = sem filtro de situação.",
           },
           dias: {
             type: "number",
@@ -239,6 +251,39 @@ export const ASSISTENTE_TOOL_DEFINITIONS = [
               "Chave da coluna (listar_colunas_funis) para relatório de uma coluna só. Exige funil. Omitir = todas as colunas.",
           },
         },
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "gerar_relatorio_prazos",
+      description:
+        "Gera o RELATÓRIO EM PDF de pagamentos, prazos ou audiências (mesmo PDF do botão \"Relatório PDF\" das telas /pagamentos, /prazos e /audiencias), com resumo, valor total e dias de atraso. Use quando pedirem relatório/PDF/lista para imprimir de pagamentos atrasados, prazos vencidos, pagamentos do mês etc. Devolve o link do PDF e os totais — cite os números e diga para clicar no botão. Somente leitura (sem confirmação).",
+      parameters: {
+        type: "object",
+        properties: {
+          tela: {
+            type: "string",
+            enum: ["pagamentos", "prazos", "audiencias"],
+            description: "pagamentos (RPV, alvará, honorários), prazos (exigência, recurso, perícia...) ou audiencias.",
+          },
+          situacao: {
+            type: "string",
+            enum: ["atrasados", "hoje", "proximos_7", "abertos", "concluidos", "todos"],
+            description:
+              "atrasados = data passou e não foi pago/concluído; abertos = todos não pagos/concluídos; concluidos = pagos/concluídos. Padrão: abertos.",
+          },
+          busca: {
+            type: "string",
+            description: "Opcional: nome ou CPF do cliente, nº do processo ou palavra do título.",
+          },
+          tipo: {
+            type: "string",
+            description: "Só para tela=prazos: exigencia_inss | recurso | pericia | outro.",
+          },
+        },
+        required: ["tela"],
       },
     },
   },
@@ -790,20 +835,24 @@ async function toolListarPrazos(
   let query = supabase
     .from("app_prazos")
     .select(
-      "id, titulo, tipo, data_prazo, hora_prazo, descricao, cpf, caso_id, processo_id, concluido, local, modalidade, link_audiencia"
+      "id, titulo, tipo, data_prazo, hora_prazo, descricao, cpf, caso_id, processo_id, concluido, local, modalidade, link_audiencia, valor_centavos"
     )
     .order("data_prazo", { ascending: true })
     .order("hora_prazo", { ascending: true, nullsFirst: false })
     .limit(limite);
+  const soAtrasados = str(args.situacao).toLowerCase().startsWith("atrasad");
 
   if (apenasAbertos) query = query.eq("concluido", false);
   if (cpf) query = query.eq("cpf", cpf);
   if (tipo) query = query.eq("tipo", tipo);
-  if (dias != null) {
-    const hoje = new Date();
-    const fim = new Date(hoje.getTime() + dias * 24 * 60 * 60 * 1000);
+  const hojeIso = todaySaoPauloIso();
+  if (soAtrasados) {
+    query = query.eq("concluido", false).lt("data_prazo", hojeIso);
+  } else if (dias != null) {
+    const fim = new Date(`${hojeIso}T12:00:00Z`);
+    fim.setUTCDate(fim.getUTCDate() + dias);
     query = query
-      .gte("data_prazo", hoje.toISOString().slice(0, 10))
+      .gte("data_prazo", hojeIso)
       .lte("data_prazo", fim.toISOString().slice(0, 10));
   }
 
@@ -812,14 +861,14 @@ async function toolListarPrazos(
 
   const rows = data ?? [];
   const soAudiencias = tipo === "audiencia";
-  const listaHref = soAudiencias ? "/audiencias" : "/prazos";
+  const listaHref = soAudiencias ? "/audiencias" : tipo === "pagamento" ? "/pagamentos" : "/prazos";
   if (!rows.length) {
     return {
       ok: true,
       summary: soAudiencias
         ? "Nenhuma audiência encontrada."
         : "Nenhum prazo encontrado.",
-      links: [{ label: soAudiencias ? "Audiências" : "Prazos", href: listaHref }],
+      links: [{ label: soAudiencias ? "Audiências" : tipo === "pagamento" ? "Pagamentos" : "Prazos", href: listaHref }],
       data: [],
     };
   }
@@ -838,7 +887,7 @@ async function toolListarPrazos(
       return { label: p.titulo, href: listaHref };
     })
     .slice(0, 12);
-  links.push({ label: soAudiencias ? "Audiências" : "Prazos", href: listaHref });
+  links.push({ label: soAudiencias ? "Audiências" : tipo === "pagamento" ? "Pagamentos" : "Prazos", href: listaHref });
 
   const items = rows.map((p) =>
     p.tipo === "audiencia"
@@ -853,6 +902,11 @@ async function toolListarPrazos(
           cpf: p.cpf,
           caso_id: p.caso_id,
           processo_id: p.processo_id,
+          valor: p.valor_centavos != null ? formatValorCentavos(p.valor_centavos) : null,
+          dias_atraso:
+            !p.concluido && p.data_prazo < hojeIso
+              ? diffDaysIso(hojeIso, p.data_prazo)
+              : null,
           concluido: p.concluido || null,
         })
   );
@@ -1685,6 +1739,55 @@ async function toolGerarRelatorioProcessos(
   }
 }
 
+async function toolGerarRelatorioPrazos(
+  args: Record<string, unknown>
+): Promise<AssistenteToolResult> {
+  const tela = str(args.tela).toLowerCase() || "pagamentos";
+  const situacao = str(args.situacao).toLowerCase() || "abertos";
+  const busca = str(args.busca);
+  const tipo = str(args.tipo).toLowerCase() || null;
+  try {
+    const dados = await carregarRelatorioPrazos({ modo: tela, situacao, busca, tipo });
+    const href = relatorioPrazosHref({
+      modo: dados.modo,
+      situacao: dados.situacao,
+      busca,
+      tipo: dados.modo === "prazos" ? tipo : null,
+    });
+    const { resumo } = dados;
+    const partes = [
+      `Relatório PDF pronto — ${TITULO_MODO[dados.modo]}, ${situacaoLabel(dados.situacao, dados.modo).toLowerCase()}${busca ? `, busca "${busca}"` : ""}: ${resumo.total} item(ns).`,
+      resumo.atrasados ? `${resumo.atrasados} atrasado(s), o mais antigo há ${resumo.maiorAtraso} dia(s).` : "",
+      resumo.valorTotal > 0 ? `Valor total ${formatValorCentavos(resumo.valorTotal)}.` : "",
+      resumo.valorAtrasado > 0 && resumo.valorAtrasado !== resumo.valorTotal
+        ? `Em atraso: ${formatValorCentavos(resumo.valorAtrasado)}.`
+        : "",
+      'O botão "Abrir relatório PDF" já aparece abaixo da resposta — NÃO escreva a URL nem link em markdown.',
+    ];
+    return {
+      ok: true,
+      summary: partes.filter(Boolean).join(" "),
+      links: [{ label: "Abrir relatório PDF", href }],
+      data: {
+        href,
+        ...resumo,
+        itens: dados.itens.slice(0, 15).map((p) =>
+          compact({
+            data: p.data_prazo,
+            titulo: p.titulo,
+            cliente: p.cliente_nome,
+            valor: p.valor_centavos != null ? formatValorCentavos(p.valor_centavos) : null,
+            concluido: p.concluido || null,
+          })
+        ),
+      },
+    };
+  } catch (e) {
+    if (e instanceof RelatorioPrazosParamError) return { ok: false, summary: e.message };
+    throw e;
+  }
+}
+
 /** Aceita chave ou nome ("judicial", "cível", "concedidos"...). */
 function normalizeFunilArg(raw: string): string {
   if (isFunilProcesso(raw)) return raw;
@@ -1726,6 +1829,8 @@ export async function executeAssistenteTool(
         return await toolPreencherDocumento(args);
       case "gerar_relatorio_processos":
         return await toolGerarRelatorioProcessos(args);
+      case "gerar_relatorio_prazos":
+        return await toolGerarRelatorioPrazos(args);
       case "verificar_processos_lote":
         return await toolVerificarProcessosLote(args);
       case "listar_parceiros":

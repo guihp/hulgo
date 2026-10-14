@@ -271,29 +271,6 @@ function dateBlockParts(dataPrazo: string, horaPrazo?: string | null) {
   };
 }
 
-export function matchesBusca(prazo: PrazoEnriched, q: string) {
-  if (!q.trim()) return true;
-  const needle = q.trim().toLowerCase();
-  const hay = [
-    prazo.titulo,
-    prazo.descricao,
-    prazo.cpf,
-    prazo.cliente_nome,
-    prazo.numero_processo,
-    prazo.local,
-    tipoLabel(prazo.tipo),
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-  if (hay.includes(needle)) return true;
-  const digits = needle.replace(/\D/g, "");
-  if (digits.length < 3) return false;
-  return [prazo.cpf, prazo.numero_processo].some((v) =>
-    (v ?? "").replace(/\D/g, "").includes(digits)
-  );
-}
-
 /** Classes do chip na grade do calendário (urgência > tipo). */
 export function prazoChipClasses(prazo: Prazo, todayIso?: string) {
   if (prazo.concluido) {

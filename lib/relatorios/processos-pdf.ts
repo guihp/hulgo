@@ -39,7 +39,7 @@ const CELL_PAD_X = 5;
 const CELL_PAD_Y = 5;
 const MAX_LINHAS_CELULA = 9;
 
-const hex = (h: string): RGB => {
+export const hex = (h: string): RGB => {
   const n = parseInt(h.replace("#", ""), 16);
   return rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
 };
@@ -82,7 +82,7 @@ const WINANSI_EXTRA = new Set(
   Array.from("€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ")
 );
 
-function pdfSafe(raw: string | null | undefined): string {
+export function pdfSafe(raw: string | null | undefined): string {
   if (!raw) return "";
   let out = "";
   for (const ch of raw.normalize("NFC").replace(/\r\n?/g, "\n").replace(/\t/g, " ")) {
@@ -102,7 +102,7 @@ function pdfSafe(raw: string | null | undefined): string {
   return out;
 }
 
-function wrapText(
+export function wrapText(
   text: string,
   font: PDFFont,
   size: number,
@@ -147,7 +147,7 @@ function wrapText(
   return lines;
 }
 
-function dataBr(iso: string | null | undefined): string {
+export function dataBr(iso: string | null | undefined): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso ?? "");
   return m ? `${m[3]}/${m[2]}/${m[1]}` : "";
 }
