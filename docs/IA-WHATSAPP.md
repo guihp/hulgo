@@ -39,10 +39,19 @@ EvoGo ─► /api/whatsapp/webhook?token=…      (responde 200 na hora)
 - `app_ia_fila` — debounce com `FOR UPDATE SKIP LOCKED` (RPCs `ia_fila_*`).
 - `app_ia_execucoes` — log de cada resposta (60 dias). Página `/ia-whatsapp`.
 
+## Versão em teste (rascunho) × publicada
+
+- Configurações → Agente → **Salvar rascunho** grava `persona_rascunho`; **Publicar** copia para `persona`.
+- Com `usar_rascunho_no_teste` ligado, **os números de teste usam o rascunho em qualquer modo**
+  (inclusive `publico`); os demais clientes seguem na versão publicada (`processar.ts`).
+- `/ia-whatsapp` mostra se há versão em teste e tem "Publicar para todos os clientes"
+  (`publicarVersaoEmTeste` → `publicarAgenteConfig`, guarda a anterior no histórico).
+
 ## Colocar no ar
 
 1. Coolify → variáveis:
-   - `EVOGO_WEBHOOK_URL` = URL mostrada em **/ia-whatsapp → Conexão com a EvoGo**
+   - `EVOGO_WEBHOOK_URL` = URL mostrada em **/ia-whatsapp?suporte=1 → Conexão com a EvoGo**
+     (o cartão técnico só aparece com `?suporte=1`; a cliente não vê)
    - `APP_URL` = `https://advocacia.iafeoficial.com` (links mandados ao advogado)
    - opcional `LOCATIONIQ_API_KEY` (endereço de localização/link do Maps)
    - opcional `IA_WHATSAPP_REASONING` (`high` padrão)

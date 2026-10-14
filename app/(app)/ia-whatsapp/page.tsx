@@ -10,7 +10,13 @@ function seteDiasAtras() {
   return new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 }
 
-export default async function IaWhatsappPage() {
+export default async function IaWhatsappPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ suporte?: string }>;
+}) {
+  // Conexão com a EvoGo/agendamento é coisa do suporte técnico: só aparece com ?suporte=1.
+  const { suporte } = await searchParams;
   const user = await getAppUser();
   if (!user) redirect("/login");
   if (user.papel !== "advogado") redirect("/");
@@ -37,7 +43,11 @@ export default async function IaWhatsappPage() {
       .select("status, duracao_ms, ferramentas, telefone")
       .gte("created_at", seteDias)
       .limit(5000),
-    supabase.from("app_agente_config").select("versao, persona_rascunho").eq("id", 1).maybeSingle(),
+    supabase
+      .from("app_agente_config")
+      .select("versao, persona, persona_rascunho, updated_at")
+      .eq("id", 1)
+      .maybeSingle(),
   ]);
 
   const linhas = semana.data ?? [];
@@ -74,7 +84,12 @@ export default async function IaWhatsappPage() {
       nomes={Object.fromEntries((nomes ?? []).map((n) => [n.telefone, n.nome_contato ?? ""]))}
       estatisticas={estatisticas}
       promptVersao={prompt.data?.versao ?? 0}
-      temRascunho={Boolean(prompt.data?.persona_rascunho?.trim())}
+      versaoEmTeste={
+        Boolean(prompt.data?.persona_rascunho?.trim()) &&
+        prompt.data?.persona_rascunho?.trim() !== (prompt.data?.persona ?? "").trim()
+      }
+      rascunhoAtualizadoEm={prompt.data?.updated_at ?? null}
+      mostrarSuporte={suporte === "1"}
     />
   );
 }

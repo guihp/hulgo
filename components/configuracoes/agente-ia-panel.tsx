@@ -236,8 +236,10 @@ export function AgenteIaPanel({
         </Button>
       </div>
       <p className="mt-3 text-xs text-[#94a3b8]">
-        Prompt e mensagem de abertura são salvos no Supabase. Publique para
-        marcar uma versão; o rascunho fica disponível ao reabrir esta aba.
+        <strong>Salvar rascunho</strong>: só os números de teste do WhatsApp
+        conversam com a versão nova (veja em IA do WhatsApp). Os clientes não são
+        afetados. <strong>Publicar versão</strong>: passa a valer para todos os
+        clientes, e a versão anterior fica no histórico.
       </p>
     </section>
   );

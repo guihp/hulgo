@@ -2,7 +2,7 @@ import "server-only";
 
 import { MENSAGEM_ENCAMINHAMENTO_ANALISE } from "@/lib/casos/encaminhamento-analise";
 import { rodarAgente, type ChamadaRegistrada } from "@/lib/ia-whatsapp/agente";
-import { getIaConfig, iaAtendeTelefone } from "@/lib/ia-whatsapp/config";
+import { ehNumeroDeTeste, getIaConfig, iaAtendeTelefone } from "@/lib/ia-whatsapp/config";
 import { atrasoDigitacaoMs, dividirResposta } from "@/lib/ia-whatsapp/dividir";
 import { enviarTextoCliente, pausa } from "@/lib/ia-whatsapp/enviar";
 import { getIaEstado, iaEstaPausada } from "@/lib/ia-whatsapp/estado";
@@ -128,7 +128,10 @@ async function processarTelefone(item: ItemFila): Promise<void> {
       .filter((m) => m.content.trim());
 
     // 3) Prompt
-    const usarRascunho = config.modo === "teste" && config.usar_rascunho_no_teste;
+    // Números de teste usam a versão em teste (rascunho) em qualquer modo — inclusive com a
+    // IA liberada ao público, para testar mudanças antes de publicar. Os demais clientes
+    // seguem na versão publicada.
+    const usarRascunho = config.usar_rascunho_no_teste && ehNumeroDeTeste(config, tel);
     const persona = await carregarPersona(usarRascunho);
     const urlsMidia = pendentes.map((m) => m.conteudo_media).filter((u): u is string => Boolean(u));
     const systemPrompt = montarSystemPrompt(persona.texto, {

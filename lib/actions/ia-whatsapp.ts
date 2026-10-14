@@ -3,6 +3,7 @@
 import { randomBytes } from "crypto";
 import { revalidatePath } from "next/cache";
 import { getAppUser } from "@/lib/actions/auth";
+import { getAgenteConfig, publicarAgenteConfig } from "@/lib/actions/configuracoes";
 import { normalizarTelefone, type IaModo } from "@/lib/ia-whatsapp/config";
 import { despausarIA, pausarIA, reiniciarMemoriaIA } from "@/lib/ia-whatsapp/estado";
 import { processarFilaIA } from "@/lib/ia-whatsapp/processar";
@@ -97,4 +98,20 @@ export async function gerarNovoTokenWebhook() {
   if (error) throw new Error(error.message);
   revalidatePath("/ia-whatsapp");
   return { token };
+}
+
+/** Publica para todos os clientes a versão das instruções que está em teste (rascunho). */
+export async function publicarVersaoEmTeste() {
+  await exigirAdvogado();
+  const config = await getAgenteConfig();
+  if (!config) throw new Error("As instruções da IA ainda não foram configuradas.");
+  if (config.persona.trim() === config.persona_publicada.trim()) {
+    throw new Error("Não há alteração em teste para publicar.");
+  }
+  const publicado = await publicarAgenteConfig({
+    persona: config.persona,
+    mensagem_abertura: config.mensagem_abertura || config.mensagem_abertura_publicada,
+  });
+  revalidatePath("/ia-whatsapp");
+  return { versao: publicado.versao };
 }

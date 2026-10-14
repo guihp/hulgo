@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
@@ -11,6 +12,7 @@ import {
   CheckCircle2,
   ChevronDown,
   Copy,
+  FlaskConical,
   Hourglass,
   PauseCircle,
   Play,
@@ -22,6 +24,7 @@ import {
   alterarPausaIA,
   gerarNovoTokenWebhook,
   processarFilaIAAgora,
+  publicarVersaoEmTeste,
   reiniciarMemoriaIAAction,
   salvarConfigIA,
 } from "@/lib/actions/ia-whatsapp";
@@ -74,17 +77,19 @@ const MODOS: { value: Modo; label: string; descricao: string }[] = [
   {
     value: "desligado",
     label: "Desligada",
-    descricao: "Mensagens chegam no painel, mas a IA não responde ninguém.",
+    descricao: "As mensagens continuam chegando no painel, mas a IA não responde ninguém.",
   },
   {
     value: "teste",
     label: "Modo teste",
-    descricao: "Responde só os números de teste. Os outros clientes só ficam salvos.",
+    descricao:
+      "A IA responde apenas os números de teste da equipe. As mensagens dos clientes chegam no painel normalmente, para o escritório responder.",
   },
   {
     value: "publico",
     label: "Liberada para o público",
-    descricao: "Responde todos os clientes, exceto conversas pausadas.",
+    descricao:
+      "A IA responde todos os clientes, menos as conversas em que o escritório assumiu o atendimento.",
   },
 ];
 
@@ -98,10 +103,29 @@ const MOTIVO_PAUSA: Record<string, string> = {
 
 const STATUS_EXEC: Record<Execucao["status"], { label: string; cls: string }> = {
   ok: { label: "Respondeu", cls: "border-emerald-200 bg-emerald-50 text-emerald-800" },
-  erro: { label: "Erro", cls: "border-red-200 bg-red-50 text-red-700" },
+  erro: { label: "Não conseguiu responder", cls: "border-red-200 bg-red-50 text-red-700" },
   pausada: { label: "Pausada", cls: "border-amber-200 bg-amber-50 text-amber-800" },
   sem_resposta: { label: "Sem resposta", cls: "border-slate-200 bg-slate-50 text-slate-600" },
 };
+
+/** O que cada ferramenta da IA faz, em linguagem do escritório. */
+const ACAO_FERRAMENTA: Record<string, string> = {
+  atualizar_dados_caso: "Atualizou a ficha do caso",
+  consultar_cliente_kanban: "Consultou o cliente no funil de vendas",
+  mover_cliente_kanban: "Moveu o cliente no funil de vendas",
+  registrar_documento_cliente: "Guardou um documento enviado pelo cliente",
+  checklist_beneficios: "Consultou os documentos necessários para o benefício",
+  registrar_caso_para_advogado: "Registrou o caso para o advogado",
+  enviar_para_aprovacao_advogado: "Pediu a aprovação do advogado",
+  buscar_processos_por_cpf: "Buscou os processos do cliente pelo CPF",
+  consultar_processo_datajud: "Consultou o andamento do processo",
+};
+
+function versaoLegivel(origem: string | null): string | null {
+  if (!origem) return null;
+  if (origem === "rascunho") return "versão em teste (não publicada)";
+  return origem.replace(/^publicado/, "versão publicada");
+}
 
 function telefoneLegivel(t: string) {
   try {
@@ -135,7 +159,11 @@ export function IaWhatsappUi(props: {
   nomes: Record<string, string>;
   estatisticas: Estatisticas;
   promptVersao: number;
-  temRascunho: boolean;
+  /** Há alteração nas instruções salva e ainda não publicada. */
+  versaoEmTeste: boolean;
+  rascunhoAtualizadoEm: string | null;
+  /** Mostra a área técnica (conexão/agendamento) — só para o suporte. */
+  mostrarSuporte: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -178,9 +206,10 @@ export function IaWhatsappUi(props: {
           <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-[#0b2148]">
             <Bot className="h-6 w-6" aria-hidden /> IA do WhatsApp
           </h1>
-          <p className="text-sm text-[#64748B]">
-            Atendimento automático rodando no próprio sistema. Teste com os números liberados e
-            acompanhe as respostas antes de abrir para o público.
+          <p className="max-w-2xl text-sm text-[#64748B]">
+            A IA atende os clientes pelo WhatsApp do escritório: tira dúvidas, organiza os
+            documentos e avisa o advogado quando um caso precisa de atenção. Aqui você escolhe quem
+            ela atende, testa mudanças com a equipe e acompanha cada resposta.
           </p>
         </div>
         <Badge
@@ -198,11 +227,22 @@ export function IaWhatsappUi(props: {
 
       <Prontidao estatisticas={props.estatisticas} modo={props.config.modo} />
 
+      <VersaoTesteCard
+        modo={props.config.modo}
+        ativo={props.config.usar_rascunho_no_teste}
+        versaoEmTeste={props.versaoEmTeste}
+        promptVersao={props.promptVersao}
+        atualizadoEm={props.rascunhoAtualizadoEm}
+        qtdNumerosTeste={props.config.numeros_teste.length}
+        pending={pending}
+        onPublicar={() =>
+          acao(() => publicarVersaoEmTeste(), "Pronto! A versão nova já vale para todos os clientes")
+        }
+      />
+
       <div className="grid gap-6 lg:grid-cols-2">
         <ConfigCard
           config={props.config}
-          temRascunho={props.temRascunho}
-          promptVersao={props.promptVersao}
           pending={pending}
           onSalvar={(dados) => acao(() => salvarConfigIA(dados), "Configuração salva")}
         />
@@ -216,8 +256,10 @@ export function IaWhatsappUi(props: {
                 </h2>
               </div>
               <p className="text-xs text-[#64748B]">
-                A IA fica muda quando alguém do escritório responde (celular ou painel) ou enquanto
-                uma aprovação está pendente.
+                Quando alguém do escritório responde o cliente (pelo celular ou pelo painel), a IA
+                para de falar naquela conversa para não atropelar o atendimento. O mesmo acontece
+                enquanto um pedido espera a aprovação do advogado. Clique em &quot;Liberar IA&quot;
+                para ela voltar a atender.
               </p>
               {props.pausados.length === 0 ? (
                 <p className="rounded-lg border border-dashed p-4 text-center text-sm text-[#94a3b8]">
@@ -257,7 +299,7 @@ export function IaWhatsappUi(props: {
             <CardContent className="flex flex-col gap-3 p-5">
               <div className="flex items-center justify-between gap-2">
                 <h2 className="flex items-center gap-2 font-semibold text-[#0b2148]">
-                  <Hourglass className="h-4 w-4" aria-hidden /> Fila ({props.fila.length})
+                  <Hourglass className="h-4 w-4" aria-hidden /> Aguardando resposta ({props.fila.length})
                 </h2>
                 <Button
                   size="sm"
@@ -265,11 +307,14 @@ export function IaWhatsappUi(props: {
                   disabled={pending}
                   onClick={() => acao(() => processarFilaIAAgora(), "Fila processada")}
                 >
-                  <RefreshCw className="mr-1 h-3.5 w-3.5" /> Processar agora
+                  <RefreshCw className="mr-1 h-3.5 w-3.5" /> Responder agora
                 </Button>
               </div>
               {props.fila.length === 0 ? (
-                <p className="text-sm text-[#94a3b8]">Nenhuma conversa esperando resposta.</p>
+                <p className="text-sm text-[#94a3b8]">
+                  Nenhuma conversa esperando. A IA aguarda alguns segundos antes de responder para
+                  juntar mensagens que o cliente manda picadas.
+                </p>
               ) : (
                 <ul className="divide-y rounded-lg border text-sm">
                   {props.fila.map((f) => (
@@ -278,9 +323,8 @@ export function IaWhatsappUi(props: {
                         {props.nomes[f.telefone] || telefoneLegivel(f.telefone)}
                       </span>
                       <span className="text-xs text-[#64748B]">
-                        {f.travado_em ? "respondendo…" : `responde ${format(new Date(f.processar_apos), "HH:mm:ss")}`}
-                        {f.tentativas > 1 ? ` · tentativa ${f.tentativas}` : ""}
-                        {f.ultimo_erro ? ` · ${f.ultimo_erro}` : ""}
+                        {f.travado_em ? "respondendo…" : `responde às ${format(new Date(f.processar_apos), "HH:mm:ss")}`}
+                        {f.tentativas > 1 ? " · tentando de novo" : ""}
                       </span>
                     </li>
                   ))}
@@ -289,12 +333,14 @@ export function IaWhatsappUi(props: {
             </CardContent>
           </Card>
 
-          <ConexaoCard
-            webhookUrl={props.webhookUrl}
-            cronUrl={props.cronUrl}
-            pending={pending}
-            onNovoToken={() => acao(() => gerarNovoTokenWebhook(), "Novo token gerado — atualize a EvoGo")}
-          />
+          {props.mostrarSuporte ? (
+            <ConexaoCard
+              webhookUrl={props.webhookUrl}
+              cronUrl={props.cronUrl}
+              pending={pending}
+              onNovoToken={() => acao(() => gerarNovoTokenWebhook(), "Novo token gerado — atualize a EvoGo")}
+            />
+          ) : null}
         </div>
       </div>
 
@@ -312,9 +358,9 @@ function Prontidao({ estatisticas: e, modo }: { estatisticas: Estatisticas; modo
   const taxaErro = e.total ? Math.round((e.erros / e.total) * 100) : 0;
   const itens = [
     { label: "Respostas (7 dias)", valor: e.respondidas },
-    { label: "Conversas testadas", valor: e.conversas },
-    { label: "Erros", valor: `${e.erros}${e.total ? ` (${taxaErro}%)` : ""}`, alerta: e.erros > 0 },
-    { label: "Ferramentas com falha", valor: e.ferramentasComErro, alerta: e.ferramentasComErro > 0 },
+    { label: "Conversas atendidas", valor: e.conversas },
+    { label: "Não conseguiu responder", valor: `${e.erros}${e.total ? ` (${taxaErro}%)` : ""}`, alerta: e.erros > 0 },
+    { label: "Ações que falharam", valor: e.ferramentasComErro, alerta: e.ferramentasComErro > 0 },
     { label: "Tempo médio de resposta", valor: e.tempoMedioS ? `${e.tempoMedioS}s` : "—" },
   ];
   const pronta = e.respondidas >= 20 && e.conversas >= 3 && taxaErro <= 5;
@@ -333,7 +379,7 @@ function Prontidao({ estatisticas: e, modo }: { estatisticas: Estatisticas; modo
               {pronta ? <CheckCircle2 className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
               {pronta
                 ? "Os testes da semana estão estáveis."
-                : "Ainda faltam testes: o ideal é 20+ respostas em 3+ conversas com até 5% de erro."}
+                : "Ainda vale testar mais: o ideal é ter 20 respostas ou mais, em pelo menos 3 conversas, quase sem falhas."}
             </span>
           ) : null}
         </div>
@@ -350,10 +396,109 @@ function Prontidao({ estatisticas: e, modo }: { estatisticas: Estatisticas; modo
   );
 }
 
+function VersaoTesteCard(props: {
+  modo: Modo;
+  ativo: boolean;
+  versaoEmTeste: boolean;
+  promptVersao: number;
+  atualizadoEm: string | null;
+  qtdNumerosTeste: number;
+  pending: boolean;
+  onPublicar: () => void;
+}) {
+  const emTeste = props.ativo && props.versaoEmTeste;
+  const publicada = props.promptVersao > 0 ? `versão ${props.promptVersao}` : "versão publicada";
+  const clientes =
+    props.modo === "publico"
+      ? `Os clientes continuam sendo atendidos pela ${publicada}`
+      : props.modo === "teste"
+        ? `Quando a IA for liberada ao público, os clientes serão atendidos pela ${publicada}`
+        : `A IA está desligada; quando for ligada, os clientes serão atendidos pela ${publicada}`;
+
+  return (
+    <Card className={cn(emTeste && "border-amber-300")}>
+      <CardContent className="flex flex-col gap-4 p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="flex items-center gap-2 font-semibold text-[#0b2148]">
+              <FlaskConical className="h-4 w-4" aria-hidden /> Testar mudanças antes de publicar
+            </h2>
+            <p className="mt-1 max-w-2xl text-sm text-[#64748B]">
+              Mudou as instruções da IA? Salve como <strong>rascunho</strong> em vez de publicar.
+              Assim só os números de teste conversam com a versão nova, e os clientes não são
+              afetados até você publicar.
+            </p>
+          </div>
+          <Link
+            href="/configuracoes?tab=agente"
+            className={cn(buttonVariants({ variant: "outline", size: "sm" }), "shrink-0")}
+          >
+            Editar instruções da IA
+          </Link>
+        </div>
+
+        {emTeste ? (
+          <div className="flex flex-col gap-3 rounded-lg border border-amber-200 bg-amber-50/60 p-4">
+            <p className="text-sm font-semibold text-amber-900">
+              Há uma versão nova em teste
+              {props.atualizadoEm
+                ? ` (salva ${formatDistanceToNow(new Date(props.atualizadoEm), { locale: ptBR, addSuffix: true })})`
+                : ""}
+            </p>
+            <ul className="flex flex-col gap-1 text-sm text-[#0b2148]">
+              <li>
+                • <strong>Números de teste ({props.qtdNumerosTeste})</strong>: conversam com a
+                versão nova.
+              </li>
+              <li>
+                • <strong>Clientes</strong>: {clientes.charAt(0).toLowerCase() + clientes.slice(1)}.
+              </li>
+            </ul>
+            <p className="text-xs text-[#64748B]">
+              Converse com a IA de um número de teste e confira as respostas em &quot;Últimas
+              respostas&quot; abaixo. Gostou? Publique para todos. Não gostou? Edite de novo ou volte
+              para a versão publicada no histórico das instruções.
+            </p>
+            <AlertDialog>
+              <AlertDialogTrigger
+                disabled={props.pending}
+                className={cn(buttonVariants(), "self-start bg-[#0b2148] text-white hover:bg-[#0b2148]/90")}
+              >
+                Publicar para todos os clientes
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Publicar a versão em teste?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    A partir de agora todos os clientes passam a ser atendidos com as instruções
+                    novas. A versão atual fica guardada no histórico, caso precise voltar.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                  <AlertDialogAction onClick={props.onPublicar}>Publicar</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+        ) : props.versaoEmTeste ? (
+          <p className="rounded-lg border border-dashed p-3 text-sm text-[#64748B]">
+            Há uma versão nova salva como rascunho, mas o teste pelos números da equipe está
+            desligado (opção em &quot;Quem a IA atende&quot;). Por enquanto todos usam a {publicada}.
+          </p>
+        ) : (
+          <p className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50/60 p-3 text-sm text-emerald-900">
+            <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden />
+            Nenhuma mudança em teste. Todos estão usando a {publicada} das instruções.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function ConfigCard(props: {
   config: Config;
-  temRascunho: boolean;
-  promptVersao: number;
   pending: boolean;
   onSalvar: (dados: Parameters<typeof salvarConfigIA>[0]) => void;
 }) {
@@ -374,14 +519,14 @@ function ConfigCard(props: {
     numerosAdvogado: linhas(numerosAdvogado),
   };
   const virandoPublico = modo === "publico" && c.modo !== "publico";
+  const [avancado, setAvancado] = useState(false);
 
   return (
     <Card>
       <CardContent className="flex flex-col gap-5 p-5">
-        <h2 className="font-semibold text-[#0b2148]">Configuração</h2>
+        <h2 className="font-semibold text-[#0b2148]">Quem a IA atende</h2>
 
         <div className="flex flex-col gap-2">
-          <Label>Quem a IA responde</Label>
           <div className="grid gap-2">
             {MODOS.map((m) => (
               <button
@@ -403,7 +548,7 @@ function ConfigCard(props: {
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="numeros-teste">Números de teste (um por linha)</Label>
+          <Label htmlFor="numeros-teste">Números de teste da equipe (um por linha)</Label>
           <Textarea
             id="numeros-teste"
             rows={5}
@@ -412,8 +557,9 @@ function ConfigCard(props: {
             placeholder="5598999999999"
           />
           <p className="text-xs text-[#64748B]">
-            Com DDD; o 55 e o 9º dígito são completados sozinhos. Esses números podem mandar{" "}
-            <code>/reset</code> para a IA esquecer a conversa.
+            Celulares da equipe usados para conversar com a IA como se fossem clientes. Basta o DDD
+            e o número. Para começar uma conversa do zero, mande <strong>/reset</strong> de um desses
+            números.
           </p>
         </div>
 
@@ -421,19 +567,29 @@ function ConfigCard(props: {
           <Switch
             checked={rascunho}
             onCheckedChange={setRascunho}
-            disabled={!props.temRascunho}
             className="mt-0.5 data-checked:bg-[#0b2148]"
           />
           <span>
-            Usar o <strong>rascunho</strong> do prompt no modo teste
+            Números de teste experimentam as alterações antes de publicar
             <span className="block text-xs text-[#64748B]">
-              {props.temRascunho
-                ? `Assim dá para testar mudanças no WhatsApp antes de publicar. Desligado = versão publicada (v${props.promptVersao}).`
-                : "Não há rascunho salvo em Configurações → Agente."}
+              Ligado: a equipe conversa com a versão nova das instruções, ainda não publicada.
+              Desligado: a equipe usa a mesma versão que os clientes.
             </span>
           </span>
         </label>
 
+        <button
+          type="button"
+          onClick={() => setAvancado((v) => !v)}
+          className="flex items-center gap-1.5 self-start text-sm font-medium text-[#64748B] hover:text-[#0b2148]"
+          aria-expanded={avancado}
+        >
+          Ajustes avançados
+          <ChevronDown className={cn("h-4 w-4 transition-transform", avancado && "rotate-180")} />
+        </button>
+
+        {avancado ? (
+        <>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="debounce">Esperar antes de responder (segundos)</Label>
           <Input
@@ -446,26 +602,35 @@ function ConfigCard(props: {
             className="w-32"
           />
           <p className="text-xs text-[#64748B]">
-            Junta mensagens picadas: cada mensagem nova reinicia a contagem.
+            Muitos clientes mandam várias mensagens seguidas. A IA espera esse tempo depois da
+            última mensagem para responder tudo de uma vez.
           </p>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="grupo">Grupo do advogado</Label>
+            <Label htmlFor="grupo">Grupo de avisos do advogado</Label>
             <Input id="grupo" value={grupo} onChange={(e) => setGrupo(e.target.value)} placeholder="1203…@g.us" />
-            <p className="text-xs text-[#64748B]">Recebe casos novos e pedidos de aprovação.</p>
+            <p className="text-xs text-[#64748B]">
+              Grupo do WhatsApp que recebe os casos novos e os pedidos de aprovação. Só altere com
+              ajuda do suporte.
+            </p>
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="advogados">Quem pode usar #aprovar</Label>
+            <Label htmlFor="advogados">Quem pode aprovar pelo grupo</Label>
             <Textarea
               id="advogados"
               rows={2}
               value={numerosAdvogado}
               onChange={(e) => setNumerosAdvogado(e.target.value)}
             />
+            <p className="text-xs text-[#64748B]">
+              Números que podem responder #aprovar, #responder ou #recusar no grupo.
+            </p>
           </div>
         </div>
+        </>
+        ) : null}
 
         {virandoPublico ? (
           <AlertDialog>
@@ -608,7 +773,7 @@ function LogExecucoes(props: {
         </div>
         {lista.length === 0 ? (
           <p className="rounded-lg border border-dashed p-6 text-center text-sm text-[#94a3b8]">
-            Nenhuma resposta ainda. Mande uma mensagem de um número de teste para começar.
+            Nenhuma resposta ainda. Mande uma mensagem de um dos números de teste para começar.
           </p>
         ) : (
           <ul className="flex flex-col gap-2">
@@ -636,6 +801,7 @@ function ExecucaoItem(props: {
 }) {
   const e = props.execucao;
   const [aberto, setAberto] = useState(false);
+  const [tecnico, setTecnico] = useState(false);
   const respostas = Array.isArray(e.respostas) ? (e.respostas as string[]) : [];
   const ferramentas = Array.isArray(e.ferramentas)
     ? (e.ferramentas as { nome: string; argumentos: unknown; resultado: unknown; erro?: string }[])
@@ -656,10 +822,11 @@ function ExecucaoItem(props: {
         <span className="text-xs text-[#64748B]">
           {format(new Date(e.created_at), "dd/MM HH:mm")}
           {e.duracao_ms ? ` · ${(e.duracao_ms / 1000).toFixed(0)}s` : ""}
-          {ferramentas.length ? ` · ${ferramentas.length} ferramenta(s)` : ""}
+          {ferramentas.length ? ` · ${ferramentas.length} ${ferramentas.length === 1 ? "ação" : "ações"}` : ""}
+          {e.prompt_origem === "rascunho" ? " · versão em teste" : ""}
         </span>
         <span className="min-w-0 flex-1 truncate text-xs text-[#94a3b8]">
-          {e.erro ?? respostas[0] ?? e.entrada ?? ""}
+          {respostas[0] ?? e.entrada ?? ""}
         </span>
         <ChevronDown className={cn("h-4 w-4 text-[#94a3b8] transition-transform", aberto && "rotate-180")} />
       </button>
@@ -671,18 +838,23 @@ function ExecucaoItem(props: {
             </Bloco>
           ) : null}
           {ferramentas.length ? (
-            <Bloco titulo="Ferramentas usadas">
-              <ul className="flex flex-col gap-2">
+            <Bloco titulo="O que a IA fez">
+              <ul className="flex flex-col gap-1.5">
                 {ferramentas.map((f, i) => (
                   <li key={i} className={cn("rounded border p-2", f.erro && "border-red-200 bg-red-50")}>
-                    <p className="flex items-center gap-1.5 font-mono text-xs font-semibold text-[#0b2148]">
-                      <Wrench className="h-3 w-3" /> {f.nome}
+                    <p className="flex items-center gap-1.5 text-xs font-semibold text-[#0b2148]">
+                      <Wrench className="h-3 w-3" /> {ACAO_FERRAMENTA[f.nome] ?? f.nome}
+                      {f.erro ? <span className="font-normal text-red-700">· não deu certo</span> : null}
                     </p>
-                    <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-[11px] text-[#64748B]">
-                      {JSON.stringify(f.argumentos, null, 1)}
-                      {"\n→ "}
-                      {JSON.stringify(f.resultado, null, 1)}
-                    </pre>
+                    {tecnico ? (
+                      <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-[11px] text-[#64748B]">
+                        {f.nome}
+                        {"\n"}
+                        {JSON.stringify(f.argumentos, null, 1)}
+                        {"\n→ "}
+                        {JSON.stringify(f.resultado, null, 1)}
+                      </pre>
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -700,14 +872,24 @@ function ExecucaoItem(props: {
             </Bloco>
           ) : null}
           {e.erro ? (
-            <Bloco titulo="Erro">
-              <p className="text-red-700">{e.erro}</p>
+            <Bloco titulo="Não conseguiu responder">
+              <p className="text-red-700">
+                O cliente ficou sem resposta automática. Vale responder pelo painel.
+              </p>
+              {tecnico ? <p className="mt-1 text-xs text-[#64748B]">{e.erro}</p> : null}
             </Bloco>
           ) : null}
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#94a3b8]">
-            <span>
-              {e.modelo ?? ""}
-              {e.prompt_origem ? ` · prompt ${e.prompt_origem}` : ""}
+            <span className="flex flex-wrap items-center gap-x-2">
+              {versaoLegivel(e.prompt_origem) ? <span>Instruções: {versaoLegivel(e.prompt_origem)}</span> : null}
+              <button
+                type="button"
+                className="underline-offset-2 hover:underline"
+                onClick={() => setTecnico((v) => !v)}
+              >
+                {tecnico ? "Ocultar detalhes técnicos" : "Detalhes técnicos"}
+              </button>
+              {tecnico && e.modelo ? <span>· {e.modelo}</span> : null}
             </span>
             <Button size="sm" variant="ghost" disabled={props.pending} onClick={props.onReset}>
               <RotateCcw className="mr-1 h-3.5 w-3.5" /> Reiniciar memória desta conversa
