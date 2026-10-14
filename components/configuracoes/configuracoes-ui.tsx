@@ -10,6 +10,7 @@ import { TestarAgentePanel } from "@/components/configuracoes/testar-agente-pane
 import { EscritorioPanel } from "@/components/configuracoes/escritorio-panel";
 import { ParceirosPanel } from "@/components/configuracoes/parceiros-panel";
 import { AppCelularPanel } from "@/components/configuracoes/app-celular-panel";
+import { IaOpenAIPanel } from "@/components/configuracoes/ia-openai-panel";
 import type { AppConfigMap } from "@/lib/config/app-config";
 import type { TipoCasoMatch } from "@/lib/actions/tipos-caso";
 import type { KanbanColunaMatch } from "@/lib/data/kanban-colunas";
@@ -44,6 +45,11 @@ const TABS = [
     value: "agente",
     label: "Agente de IA",
     subtitle: "Prompt, persona e regras de comportamento do agente.",
+  },
+  {
+    value: "ia",
+    label: "Inteligência artificial",
+    subtitle: "Chave da OpenAI e modelos usados pelo WhatsApp e pelo assistente.",
   },
   {
     value: "testar",
@@ -203,6 +209,15 @@ export function ConfiguracoesUi({
               initial={agente}
               onGoTest={() => goTab("testar")}
             />
+          </div>
+        ) : null}
+        {mounted.ia ? (
+          <div
+            role="tabpanel"
+            hidden={tab !== "ia"}
+            className={tab === "ia" ? undefined : "hidden"}
+          >
+            <IaOpenAIPanel />
           </div>
         ) : null}
         {mounted.testar ? (

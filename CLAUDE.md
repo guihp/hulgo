@@ -76,3 +76,7 @@
   comandos #aprovar no grupo). Página `/ia-whatsapp` (modo desligado/teste/público, números de teste,
   pausas, log). Pausa da IA agora em `app_ia_estado` (sem Redis). Detalhes: `docs/IA-WHATSAPP.md`.
   Teste local: `EVOGO_DRY_RUN=1` não envia WhatsApp. Corrigida a RPC `atualizar_dados_caso` (array_append).
+- **Chave/modelos da OpenAI no painel** (2026-10-14): Configurações → Inteligência artificial. Chave cifrada
+  (AES-256-GCM, `lib/crypto/segredos.ts`, senha mestra = env `APP_ENCRYPTION_KEY`) em `app_ia_credenciais`
+  (RLS sem policies: só service_role). Nunca volta ao navegador (só os 4 últimos). Leitura central em
+  `lib/openai/credenciais.ts` (painel → fallback envs `OPENAI_*`); `getOpenAIApiKey/ChatModel` agora são async.

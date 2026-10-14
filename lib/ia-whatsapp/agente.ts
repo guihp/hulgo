@@ -5,7 +5,7 @@ import {
   FERRAMENTAS,
   type ContextoFerramenta,
 } from "@/lib/ia-whatsapp/ferramentas";
-import { getOpenAIApiKey, getOpenAIChatModel } from "@/lib/openai/sandbox";
+import { exigirChaveOpenAI, getOpenAIConfig } from "@/lib/openai/credenciais";
 
 const OPENAI_BASE = "https://api.openai.com/v1";
 const MAX_RODADAS = 10;
@@ -50,12 +50,14 @@ function textoDaResposta(body: RespostaApi): string {
 }
 
 async function chamarModelo(input: Entrada[], anterior?: string): Promise<RespostaApi & { id: string }> {
+  const config = await getOpenAIConfig();
+  const apiKey = await exigirChaveOpenAI();
   const payload: Record<string, unknown> = {
-    model: getOpenAIChatModel(),
+    model: config.modeloWhatsapp,
     input,
     tools: FERRAMENTAS,
     tool_choice: "auto",
-    reasoning: { effort: process.env.IA_WHATSAPP_REASONING?.trim() || "high" },
+    reasoning: { effort: config.raciocinioWhatsapp },
   };
   if (anterior) payload.previous_response_id = anterior;
 
@@ -63,7 +65,7 @@ async function chamarModelo(input: Entrada[], anterior?: string): Promise<Respos
   for (let tentativa = 0; tentativa < 3; tentativa++) {
     const res = await fetch(`${OPENAI_BASE}/responses`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${getOpenAIApiKey()}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
     const body = (await res.json().catch(() => null)) as RespostaApi | null;
@@ -99,7 +101,7 @@ export async function rodarAgente(input: {
       (o): o is ChamadaFuncao => o.type === "function_call" && typeof o.call_id === "string"
     );
     if (!funcoes.length) {
-      return { resposta: textoDaResposta(body), chamadas, modelo: getOpenAIChatModel() };
+      return { resposta: textoDaResposta(body), chamadas, modelo: (await getOpenAIConfig()).modeloWhatsapp };
     }
 
     const saidas: Entrada[] = [];

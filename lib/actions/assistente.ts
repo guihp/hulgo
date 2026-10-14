@@ -215,7 +215,7 @@ async function insertAudit(input: {
 export async function iniciarSessaoAssistente(): Promise<AssistenteSessionResult> {
   const user = await requireAppUser();
   const supabase = await createClient();
-  const model = getOpenAIChatModel();
+  const model = await getOpenAIChatModel();
 
   const reused = await findEmptySessaoId(user.id);
   if (reused) {
@@ -238,7 +238,7 @@ export async function iniciarSessaoAssistente(): Promise<AssistenteSessionResult
 export async function novaSessaoAssistente(): Promise<AssistenteSessionResult> {
   const user = await requireAppUser();
   const supabase = await createClient();
-  const model = getOpenAIChatModel();
+  const model = await getOpenAIChatModel();
 
   const reused = await findEmptySessaoId(user.id);
 
@@ -378,7 +378,7 @@ export async function abrirSessaoAssistente(
   return {
     sessaoId,
     messages,
-    model: getOpenAIChatModel(),
+    model: await getOpenAIChatModel(),
   };
 }
 
@@ -388,7 +388,7 @@ export async function reiniciarSessaoAssistente(input?: {
 }): Promise<AssistenteSessionResult> {
   const user = await requireAppUser();
   const supabase = await createClient();
-  const model = getOpenAIChatModel();
+  const model = await getOpenAIChatModel();
 
   if (input?.sessaoId) {
     await assertSessaoOwn(input.sessaoId, user.id);
@@ -494,7 +494,7 @@ export async function enviarMensagemAssistente(input: {
 
   let loopContent: string;
   let loopTrace: AssistenteToolTraceItem[] = [];
-  let loopModel = getOpenAIChatModel();
+  let loopModel = await getOpenAIChatModel();
 
   if (anexoErro) {
     loopContent =

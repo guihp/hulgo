@@ -126,8 +126,8 @@ async function createResponse(input: {
   functionCalls: ResponsesFunctionCall[];
   text: string;
 }> {
-  const apiKey = getOpenAIApiKey();
-  const model = getOpenAIChatModel();
+  const apiKey = await getOpenAIApiKey();
+  const model = await getOpenAIChatModel();
 
   const payload: Record<string, unknown> = {
     model,
@@ -191,7 +191,7 @@ export async function runAssistenteToolLoop(input: {
   pendingAnexo?: AssistentePendingAnexo | null;
   onTool?: (item: AssistenteToolTraceItem) => Promise<void>;
 }): Promise<AssistenteLoopResult> {
-  const model = getOpenAIChatModel();
+  const model = await getOpenAIChatModel();
   const toolTrace: AssistenteToolTraceItem[] = [];
 
   let previousResponseId: string | undefined;

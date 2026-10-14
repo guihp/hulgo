@@ -699,6 +699,42 @@ export type Database = {
         };
         Relationships: [];
       };
+      app_ia_credenciais: {
+        Row: {
+          id: number;
+          openai_key_cifrada: string | null;
+          openai_key_final: string | null;
+          modelo_chat: string | null;
+          modelo_whatsapp: string | null;
+          modelo_transcricao: string | null;
+          raciocinio_whatsapp: "low" | "medium" | "high" | null;
+          updated_at: string;
+          updated_by: string | null;
+        };
+        Insert: {
+          id?: number;
+          openai_key_cifrada?: string | null;
+          openai_key_final?: string | null;
+          modelo_chat?: string | null;
+          modelo_whatsapp?: string | null;
+          modelo_transcricao?: string | null;
+          raciocinio_whatsapp?: "low" | "medium" | "high" | null;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Update: {
+          id?: number;
+          openai_key_cifrada?: string | null;
+          openai_key_final?: string | null;
+          modelo_chat?: string | null;
+          modelo_whatsapp?: string | null;
+          modelo_transcricao?: string | null;
+          raciocinio_whatsapp?: "low" | "medium" | "high" | null;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Relationships: [];
+      };
       app_ia_whatsapp_config: {
         Row: {
           id: number;

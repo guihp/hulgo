@@ -9,28 +9,24 @@ import {
   detectarFormatoDocumento,
   extrairTextoDocumento,
 } from "@/lib/documentos/extrair-texto";
+import { exigirChaveOpenAI, getOpenAIConfig } from "@/lib/openai/credenciais";
 import { imagemParaVisao } from "@/lib/openai/imagem";
 
 const OPENAI_BASE ="https://api.openai.com/v1";
 
-export function getOpenAIApiKey(): string {
-  const key = process.env.OPENAI_API_KEY?.trim();
-  if (!key) {
-    throw new Error(
-      "OPENAI_API_KEY não configurada. Adicione no .env.local e reinicie o servidor."
-    );
-  }
-  return key;
+/** Chave da OpenAI: painel (cifrada) ou env OPENAI_API_KEY — ver lib/openai/credenciais.ts. */
+export async function getOpenAIApiKey(): Promise<string> {
+  return exigirChaveOpenAI();
 }
 
-/** Multimodal model for vision / doc describe. Override with OPENAI_MODEL. */
-export function getOpenAIChatModel(): string {
-  return process.env.OPENAI_MODEL?.trim() || "gpt-5.6-luna";
+/** Modelo do assistente e da leitura de imagens/documentos (painel ou OPENAI_MODEL). */
+export async function getOpenAIChatModel(): Promise<string> {
+  return (await getOpenAIConfig()).modeloChat;
 }
 
-/** Whisper model for audio transcription. Override with OPENAI_TRANSCRIBE_MODEL. */
-export function getOpenAITranscribeModel(): string {
-  return process.env.OPENAI_TRANSCRIBE_MODEL?.trim() || "whisper-1";
+/** Modelo de transcrição de áudio (painel ou OPENAI_TRANSCRIBE_MODEL). */
+export async function getOpenAITranscribeModel(): Promise<string> {
+  return (await getOpenAIConfig()).modeloTranscricao;
 }
 
 export type ChatContentPart =
@@ -44,8 +40,8 @@ export type ChatMessage = {
 };
 
 export async function openaiChatCompletions(messages: ChatMessage[]): Promise<string> {
-  const apiKey = getOpenAIApiKey();
-  const model = getOpenAIChatModel();
+  const apiKey = await getOpenAIApiKey();
+  const model = await getOpenAIChatModel();
 
   const res = await fetch(`${OPENAI_BASE}/chat/completions`, {
     method: "POST",
@@ -212,8 +208,8 @@ export async function openaiTranscribeAudio(input: {
   fileName: string;
   mimeType: string;
 }): Promise<string> {
-  const apiKey = getOpenAIApiKey();
-  const model = getOpenAITranscribeModel();
+  const apiKey = await getOpenAIApiKey();
+  const model = await getOpenAITranscribeModel();
 
   const form = new FormData();
   form.append("model", model);
