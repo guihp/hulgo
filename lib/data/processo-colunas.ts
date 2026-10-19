@@ -21,6 +21,7 @@ export type ProcessoColunaMatch = {
 
 const FALLBACK: Record<FunilProcesso, [string, string, string][]> = {
   previdenciario: [
+    ["a_ajuizar", "Petição inicial / A ajuizar", "slate"],
     ["ajuizado", "Ajuizado", "blue"],
     ["pericia_audiencia", "Perícia / Audiência", "violet"],
     ["sentenca", "Sentença", "amber"],
