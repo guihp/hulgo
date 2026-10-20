@@ -236,21 +236,30 @@ export function DocsAdvogado({
                 {doc.descricao && (
                   <p className="text-xs text-muted-foreground">{doc.descricao}</p>
                 )}
+                {!doc.url_media && (
+                  <p className="text-xs text-muted-foreground">
+                    Arquivo enviado ao cliente (não fica guardado no sistema).
+                  </p>
+                )}
                 <div className="mt-2 flex flex-wrap gap-2">
-                  <a
-                    href={doc.url_media}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1")}
-                  >
-                    <ExternalLink className="h-3.5 w-3.5" /> Abrir
-                  </a>
+                  {doc.url_media ? (
+                    <a
+                      href={doc.url_media}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1")}
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" /> Abrir
+                    </a>
+                  ) : null}
                   {user.papel === "advogado" && (
                     <>
-                      <Button size="sm" className="gap-1" onClick={() => abrirEnvio(doc)}>
-                        <Send className="h-3.5 w-3.5" />
-                        {doc.enviado_cliente_em ? "Reenviar" : "Enviar ao cliente"}
-                      </Button>
+                      {doc.url_media ? (
+                        <Button size="sm" className="gap-1" onClick={() => abrirEnvio(doc)}>
+                          <Send className="h-3.5 w-3.5" />
+                          {doc.enviado_cliente_em ? "Reenviar" : "Enviar ao cliente"}
+                        </Button>
+                      ) : null}
                       {doc.requer_assinatura && !doc.assinado_em && (
                         <Button
                           size="sm"

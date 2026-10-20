@@ -10,10 +10,12 @@ import {
   FileText,
   FolderOpen,
   ListChecks,
+  UserX,
 } from "lucide-react";
 import {
   addNotaCaso,
   marcarProcessoCriado,
+  removerDoFunilNaoCliente,
   updateCasoFields,
   updateCasoStatus,
 } from "@/lib/actions/casos";
@@ -105,6 +107,23 @@ export function CasoDetail({
   const [nota, setNota] = useState("");
   const [numeroProcesso, setNumeroProcesso] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [naoClienteOpen, setNaoClienteOpen] = useState(false);
+  const [removendo, setRemovendo] = useState(false);
+
+  async function handleNaoCliente() {
+    setRemovendo(true);
+    try {
+      await removerDoFunilNaoCliente(caso.id);
+      toast.success("Card retirado do Funil de vendas");
+      setNaoClienteOpen(false);
+      if (embedded) router.refresh();
+      else router.push("/kanban");
+    } catch (err) {
+      toastErroAcao(err, "Não foi possível tirar do funil");
+    } finally {
+      setRemovendo(false);
+    }
+  }
   const [colunas, setColunas] = useState<KanbanColunaMatch[]>(() =>
     CASO_STATUS.map((s, i) => ({
       id: null,
@@ -368,6 +387,29 @@ export function CasoDetail({
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {user.papel === "advogado" ? (
+          <Dialog open={naoClienteOpen} onOpenChange={setNaoClienteOpen}>
+            <DialogTrigger className={buttonVariants({ variant: "outline" })}>
+              <UserX className="mr-2 h-4 w-4" /> Não é cliente
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Tirar do Funil de vendas?</DialogTitle>
+              </DialogHeader>
+              <p className="text-sm text-muted-foreground">
+                Use para contatos que não são clientes (outros escritórios, fornecedores…). O card sai
+                do funil e não volta quando esse número mandar mensagem. A conversa continua em
+                Atendimentos.
+              </p>
+              <DialogFooter>
+                <Button variant="destructive" disabled={removendo} onClick={handleNaoCliente}>
+                  {removendo ? "Removendo…" : "Tirar do funil"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        ) : null}
       </div>
 
       <ProcessosDoCaso

@@ -402,6 +402,11 @@ export async function enviarDocumentoCliente(input: {
     .eq("id", input.docId)
     .single();
   if (docErr || !doc) throw new Error("Documento não encontrado");
+  if (!doc.url_media) {
+    throw new Error(
+      "Este documento já foi enviado e o arquivo não fica guardado. Suba o arquivo de novo para reenviar."
+    );
+  }
 
   let caso: {
     id: number;
@@ -450,8 +455,18 @@ export async function enviarDocumentoCliente(input: {
     p_plataforma: "whatsapp",
     p_instancia: instancia,
     p_session_id: null,
-    p_conteudo_media: doc.url_media,
+    p_conteudo_media: null,
   });
+
+  // Arquivo enviado pela equipe não fica guardado: o cliente já recebeu.
+  // Fica só o registro (nome, data de envio e assinatura).
+  const marcador = "/mensagens-media/";
+  const i = doc.url_media.indexOf(marcador);
+  if (i >= 0) {
+    const path = decodeURIComponent(doc.url_media.slice(i + marcador.length).split("?")[0]);
+    const { error: rmErr } = await service.storage.from("mensagens-media").remove([path]);
+    if (rmErr) console.error("[documentos] remover arquivo enviado", rmErr.message);
+  }
 
   // 3) pendência de assinatura vira "documento faltante" (a IA cobra)
   if (caso && doc.requer_assinatura && !doc.assinado_em) {
@@ -470,7 +485,7 @@ export async function enviarDocumentoCliente(input: {
 
   await service
     .from("documentos_cliente")
-    .update({ enviado_cliente_em: new Date().toISOString() })
+    .update({ enviado_cliente_em: new Date().toISOString(), url_media: "" })
     .eq("id", doc.id);
 
   await logEvent(doc.id, "enviado_cliente", {

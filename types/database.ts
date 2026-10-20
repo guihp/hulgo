@@ -822,6 +822,27 @@ export type Database = {
         };
         Relationships: [];
       };
+      funil_contatos_ignorados: {
+        Row: {
+          telefone: string;
+          nome: string | null;
+          criado_por: string | null;
+          created_at: string;
+        };
+        Insert: {
+          telefone: string;
+          nome?: string | null;
+          criado_por?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          telefone?: string;
+          nome?: string | null;
+          criado_por?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       app_ia_estado: {
         Row: {
           telefone: string;

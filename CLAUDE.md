@@ -126,3 +126,11 @@
   baixada em `ingest.ts`; envio pelo painel (`enviarMensagem` kind media) sobe ao storage só para a EvoGo buscar
   e apaga logo depois (`conteudo_media` null). O chat mostra "Foto enviada pela equipe (não fica guardado)".
   Arquivos do cliente e "Documentos do escritório" (ficha) continuam guardados; nada é apagado automaticamente.
+- **"Não é cliente" no funil** (2026-10-21): botão no caso (`removerDoFunilNaoCliente`, só advogado, bloqueia se tiver
+  processo ou arquivo) apaga o card e grava o número em `funil_contatos_ignorados`; `garantir_caso_contato` não recria
+  card para esses números. Migration `20261021120000_funil_contatos_ignorados.sql`.
+- **Filtro por parceiro** em /atendimentos: chips `parc:{nome}` (a partir de `parceiroMeta`); a busca também acha pelo
+  nome do parceiro.
+- **Documentos do escritório enviados não ficam guardados** (2026-10-21): `enviarDocumentoCliente` apaga o arquivo do
+  storage depois do envio e grava `url_media = ''` (fica o registro: nome, envio, assinatura). Listas de arquivos
+  (`lib/data/arquivos.ts`) ignoram `url_media = ''`; para reenviar é preciso subir de novo.

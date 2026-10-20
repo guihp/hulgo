@@ -142,7 +142,7 @@ type Conversation = {
 };
 
 type ContactNameMap = Record<string, string>;
-type Filtro = "todas" | "nao_lidas" | "humano" | `etq:${number}`;
+type Filtro = "todas" | "nao_lidas" | "humano" | `etq:${number}` | `parc:${string}`;
 
 type EstadoIA = {
   chave: "desligada_geral" | "fora_do_teste" | "pausada" | "ligada";
@@ -659,7 +659,12 @@ function ConversationList({
   onSearchChange: (v: string) => void;
   filtro: Filtro;
   onFiltroChange: (f: Filtro) => void;
-  counts: { naoLidas: number; humano: number; porEtiqueta: Record<number, number> };
+  counts: {
+    naoLidas: number;
+    humano: number;
+    porEtiqueta: Record<number, number>;
+    porParceiro: Record<string, number>;
+  };
   onSelect: (contact: string) => void;
   inboxEmpty?: boolean;
   onToggleNaoLida: (conv: Conversation) => void;
@@ -668,7 +673,7 @@ function ConversationList({
 }) {
   const [menuAberto, setMenuAberto] = useState<string | null>(null);
 
-  const chips: { key: Filtro; label: string; count?: number; cor?: string }[] = [
+  const chips: { key: Filtro; label: string; count?: number; cor?: string; parceiro?: boolean }[] = [
     { key: "todas", label: "Todas" },
     { key: "nao_lidas", label: "Não lidas", count: counts.naoLidas },
     { key: "humano", label: "Pedem humano", count: counts.humano },
@@ -678,6 +683,14 @@ function ConversationList({
       count: counts.porEtiqueta[e.id] ?? 0,
       cor: e.cor,
     })),
+    ...Object.keys(counts.porParceiro)
+      .sort((a, b) => a.localeCompare(b, "pt-BR"))
+      .map((nome) => ({
+        key: `parc:${nome}` as Filtro,
+        label: nome,
+        count: counts.porParceiro[nome],
+        parceiro: true,
+      })),
   ];
 
   return (
@@ -706,6 +719,11 @@ function ConversationList({
               )}
             >
               {chip.cor ? <EtiquetaDot cor={chip.cor} /> : null}
+              {chip.parceiro ? (
+                <Handshake
+                  className={cn("size-3", filtro === chip.key ? "text-white" : "text-amber-600")}
+                />
+              ) : null}
               {chip.label}
               {chip.count ? (
                 <span className={cn(filtro === chip.key ? "text-white/80" : "text-[#94a3b8]")}>
@@ -1504,13 +1522,16 @@ export function AtendimentosPanel({
 
   const counts = useMemo(() => {
     const porEtiqueta: Record<number, number> = {};
+    const porParceiro: Record<string, number> = {};
     for (const c of conversations) {
       for (const id of c.etiquetas) porEtiqueta[id] = (porEtiqueta[id] ?? 0) + 1;
+      for (const nome of c.parceiros) porParceiro[nome] = (porParceiro[nome] ?? 0) + 1;
     }
     return {
       naoLidas: conversations.filter(temNaoLida).length,
       humano: conversations.filter((c) => c.pedeHumano).length,
       porEtiqueta,
+      porParceiro,
     };
   }, [conversations]);
 
@@ -1524,6 +1545,9 @@ export function AtendimentosPanel({
     } else if (filtro.startsWith("etq:")) {
       const id = Number(filtro.slice(4));
       list = list.filter((c) => c.etiquetas.includes(id));
+    } else if (filtro.startsWith("parc:")) {
+      const nome = filtro.slice(5);
+      list = list.filter((c) => c.parceiros.includes(nome));
     }
     const q = normalizarBusca(search.trim());
     if (!q) return list;
@@ -1533,6 +1557,7 @@ export function AtendimentosPanel({
         .map((id) => etiquetaById.get(id)?.nome ?? "")
         .join(" ");
       return (
+        normalizarBusca(c.parceiros.join(" ")).includes(q) ||
         (digitos.length >= 3 && c.phone.replace(/\D/g, "").includes(digitos)) ||
         normalizarBusca(c.displayName ?? "").includes(q) ||
         normalizarBusca(c.lastMessage).includes(q) ||

@@ -1320,3 +1320,51 @@ export async function desvincularProcessoDoCaso(processoId: number) {
   revalidatePath("/clientes");
   return { success: true as const };
 }
+
+/**
+ * "Não é cliente": tira o card do Funil de vendas e anota o número para a próxima
+ * mensagem não criar o card de novo. A conversa continua em Atendimentos.
+ * Card com processo ou arquivos não sai por aqui (os arquivos iriam junto).
+ */
+export async function removerDoFunilNaoCliente(casoId: number) {
+  const user = await getAppUser();
+  if (!user) throw new Error("Não autenticado");
+  if (user.papel !== "advogado") throw new Error("Apenas advogados podem remover cards do funil");
+  const supabase = await createClient();
+
+  const { data: caso, error } = await supabase
+    .from("casos_novos")
+    .select("id, nome, telefone")
+    .eq("id", casoId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!caso) throw new Error("Card não encontrado");
+
+  const [{ count: procs }, { count: docs }] = await Promise.all([
+    supabase.from("processos_clientes").select("id", { count: "exact", head: true }).eq("caso_id", casoId),
+    supabase.from("documentos_cliente").select("id", { count: "exact", head: true }).eq("caso_id", casoId),
+  ]);
+  if (procs) throw new Error("Este card tem processo vinculado. Desvincule o processo antes.");
+  if (docs) throw new Error("Este card tem arquivos guardados e não pode ser removido.");
+
+  const telefone = phoneToContactNorm(caso.telefone);
+  if (telefone) {
+    const { error: ignErr } = await supabase
+      .from("funil_contatos_ignorados")
+      .upsert({ telefone, nome: caso.nome, criado_por: user.id }, { onConflict: "telefone" });
+    if (ignErr) throw new Error(ignErr.message);
+  }
+
+  const { data: apagados, error: delErr } = await supabase
+    .from("casos_novos")
+    .delete()
+    .eq("id", casoId)
+    .select("id");
+  if (delErr) throw new Error(delErr.message);
+  if (!apagados?.length) throw new Error("Sem permissão para remover este card");
+
+  await logEvent("casos_novos", casoId, "remover_nao_cliente", { nome: caso.nome, telefone });
+  revalidatePath("/kanban");
+  revalidatePath("/atendimentos");
+  return { success: true as const };
+}

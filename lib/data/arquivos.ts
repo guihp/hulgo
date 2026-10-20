@@ -44,6 +44,7 @@ export async function fetchAllDocumentos(): Promise<DocumentoComCaso[]> {
   const { data: docs } = await supabase
     .from("documentos_cliente")
     .select("*")
+    .neq("url_media", "")
     .order("created_at", { ascending: false });
 
   if (!docs?.length) return [];
@@ -108,6 +109,7 @@ export async function fetchArquivosByContact(
     const { data: docs } = await supabase
       .from("documentos_cliente")
       .select("*")
+      .neq("url_media", "")
       .in("caso_id", casoIds)
       .order("created_at", { ascending: false });
 
@@ -190,6 +192,7 @@ export async function fetchFichaArquivos(opts: {
       ? supabase
           .from("documentos_cliente")
           .select("*")
+          .neq("url_media", "")
           .or(docParts.join(","))
           .order("created_at", { ascending: false })
       : Promise.resolve({ data: [] as Tables<"documentos_cliente">[] }),
