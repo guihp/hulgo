@@ -180,3 +180,23 @@ export function formatChatDateSeparator(date: string | null | undefined): string
     year: "numeric",
   }).format(d);
 }
+
+/** Hora na lista de conversas, como no WhatsApp: 14:32 · Ontem · terça · 03/10/2026. */
+export function formatChatListTime(date: string | null | undefined): string {
+  const d = parseDate(date);
+  if (!d) return "";
+  const today = new Date();
+  if (isSameBrazilDay(d, today)) return formatChatTime(date);
+  if (isSameBrazilDay(d, subDays(today, 1))) return "Ontem";
+  if (today.getTime() - d.getTime() < 6 * 24 * 60 * 60 * 1000) {
+    return new Intl.DateTimeFormat("pt-BR", { timeZone: BRAZIL_TZ, weekday: "long" })
+      .format(d)
+      .replace("-feira", "");
+  }
+  return new Intl.DateTimeFormat("pt-BR", {
+    timeZone: BRAZIL_TZ,
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(d);
+}

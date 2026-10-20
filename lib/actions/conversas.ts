@@ -17,7 +17,24 @@ export async function marcarConversaLida(contactNorm: string) {
       user_id: user.id,
       contact_norm: contactNorm,
       lida_em: new Date().toISOString(),
+      nao_lida: false,
     },
+    { onConflict: "user_id,contact_norm" }
+  );
+  if (error) throw new Error(error.message);
+  return { success: true };
+}
+
+/** "Marcar como não lida": mantém o lida_em e acende o badge até abrir de novo. */
+export async function marcarConversaNaoLida(contactNorm: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Não autenticado");
+
+  const { error } = await supabase.from("app_conversas_lidas").upsert(
+    { user_id: user.id, contact_norm: contactNorm, nao_lida: true },
     { onConflict: "user_id,contact_norm" }
   );
   if (error) throw new Error(error.message);

@@ -80,3 +80,12 @@
   (AES-256-GCM, `lib/crypto/segredos.ts`, senha mestra = env `APP_ENCRYPTION_KEY`) em `app_ia_credenciais`
   (RLS sem policies: só service_role). Nunca volta ao navegador (só os 4 últimos). Leitura central em
   `lib/openai/credenciais.ts` (painel → fallback envs `OPENAI_*`); `getOpenAIApiKey/ChatModel` agora são async.
+- **Atendimentos estilo WhatsApp** (2026-10-20): lista vem da RPC `listar_conversas` (última msg por contato,
+  não lidas por usuário — resposta da equipe conta como leitura, a da IA `session_id='ia'` não —, pausa da IA,
+  foto, etiquetas); abre no fim, faixa "N não lidas", botão ↓, Esc fecha, "Marcar como não lida"
+  (`app_conversas_lidas.nao_lida`). Botão da IA mostra o estado real (modo geral/teste/pausa).
+  **Etiquetas**: `app_etiquetas` + `app_conversa_etiquetas` (`lib/actions/etiquetas.ts`, filtro na lista).
+  **Foto de perfil**: webhook → `lib/ia-whatsapp/foto-perfil.ts` (EvoGo `/user/avatar` só com JID
+  `@s.whatsapp.net` — com número puro trava), copiada para `mensagens-media/avatars/`, 7 dias de validade.
+  Migration: `20261020120000_atendimentos_etiquetas_fotos.sql`. Base UI: `DropdownMenuLabel` precisa de
+  `DropdownMenuGroup` em volta (senão a página quebra). Dev com CSS velho: apagar `.next/dev/cache`.

@@ -484,16 +484,19 @@ export type Database = {
         Row: {
           contact_norm: string;
           lida_em: string;
+          nao_lida: boolean;
           user_id: string;
         };
         Insert: {
           contact_norm: string;
           lida_em?: string;
+          nao_lida?: boolean;
           user_id: string;
         };
         Update: {
           contact_norm?: string;
           lida_em?: string;
+          nao_lida?: boolean;
           user_id?: string;
         };
         Relationships: [];
@@ -774,6 +777,48 @@ export type Database = {
         };
         Relationships: [];
       };
+      app_etiquetas: {
+        Row: {
+          id: number;
+          nome: string;
+          cor: string;
+          ordem: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: never;
+          nome: string;
+          cor?: string;
+          ordem?: number;
+          created_at?: string;
+        };
+        Update: {
+          id?: never;
+          nome?: string;
+          cor?: string;
+          ordem?: number;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      app_conversa_etiquetas: {
+        Row: {
+          contact_norm: string;
+          etiqueta_id: number;
+          created_at: string;
+        };
+        Insert: {
+          contact_norm: string;
+          etiqueta_id: number;
+          created_at?: string;
+        };
+        Update: {
+          contact_norm?: string;
+          etiqueta_id?: number;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       app_ia_estado: {
         Row: {
           telefone: string;
@@ -781,6 +826,9 @@ export type Database = {
           pausada_em: string | null;
           pausada_motivo: string | null;
           nome_contato: string | null;
+          foto_url: string | null;
+          foto_verificada_em: string | null;
+          whatsapp_jid: string | null;
           memoria_desde: string | null;
           ultima_mensagem_id: number | null;
           updated_at: string;
@@ -791,6 +839,9 @@ export type Database = {
           pausada_em?: string | null;
           pausada_motivo?: string | null;
           nome_contato?: string | null;
+          foto_url?: string | null;
+          foto_verificada_em?: string | null;
+          whatsapp_jid?: string | null;
           memoria_desde?: string | null;
           ultima_mensagem_id?: number | null;
           updated_at?: string;
@@ -801,6 +852,9 @@ export type Database = {
           pausada_em?: string | null;
           pausada_motivo?: string | null;
           nome_contato?: string | null;
+          foto_url?: string | null;
+          foto_verificada_em?: string | null;
+          whatsapp_jid?: string | null;
           memoria_desde?: string | null;
           ultima_mensagem_id?: number | null;
           updated_at?: string;
@@ -1268,6 +1322,25 @@ export type Database = {
     Views: Record<string, never>;
     Functions: {
       app_get_papel: { Args: Record<string, never>; Returns: string };
+      listar_conversas: {
+        Args: { p_limite?: number };
+        Returns: {
+          contact_norm: string;
+          phone: string | null;
+          ultima_em: string;
+          ultima_tipo: string | null;
+          ultima_texto: string | null;
+          ultima_media: string | null;
+          ultima_mensage_type: string | null;
+          nao_lidas: number;
+          marcada_nao_lida: boolean;
+          lida_em: string | null;
+          ia_pausada: boolean;
+          nome_whatsapp: string | null;
+          foto_url: string | null;
+          etiquetas: number[];
+        }[];
+      };
       ia_fila_agendar: {
         Args: { p_telefone: string; p_instancia: string | null; p_segundos: number };
         Returns: undefined;

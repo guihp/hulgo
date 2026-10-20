@@ -503,6 +503,26 @@ export async function logoutInstance(): Promise<void> {
   }
 }
 
+/**
+ * URL (temporária, do CDN do WhatsApp) da foto de perfil. Precisa do JID
+ * completo ("...@s.whatsapp.net"): só com o número a EvoGo trava.
+ * Null quando a pessoa não tem foto ou a esconde.
+ */
+export async function getProfilePictureUrl(jid: string): Promise<string | null> {
+  try {
+    const data = await evogoRequest("POST", "/user/avatar", {
+      number: jid,
+      preview: false,
+    });
+    return readString(unwrapEvoGoData(data).url) || null;
+  } catch (err) {
+    if (err instanceof Error && /profile picture|not-authorized|item-not-found/i.test(err.message)) {
+      return null;
+    }
+    throw err;
+  }
+}
+
 export async function sendText(number: string, text: string): Promise<string> {
   const data = await evogoFetch("/send/text", { number, text });
   return extractMessageId(data);

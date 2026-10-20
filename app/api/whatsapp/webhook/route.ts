@@ -3,6 +3,7 @@ import { tratarComandoAdvogado, ehComandoAdvogado } from "@/lib/ia-whatsapp/advo
 import { ehAdvogado, getIaConfig, iaAtendeTelefone, ehNumeroDeTeste } from "@/lib/ia-whatsapp/config";
 import { foiEnviadoPeloSistema, enviarTextoCliente } from "@/lib/ia-whatsapp/enviar";
 import { pausarIA, reiniciarMemoriaIA } from "@/lib/ia-whatsapp/estado";
+import { atualizarFotoPerfil } from "@/lib/ia-whatsapp/foto-perfil";
 import { parseEvogoWebhook } from "@/lib/ia-whatsapp/evogo-payload";
 import { salvarMensagemRecebida } from "@/lib/ia-whatsapp/ingest";
 import { processarFilaIA } from "@/lib/ia-whatsapp/processar";
@@ -43,6 +44,7 @@ export async function POST(req: Request) {
   if (!msg.telefone) return NextResponse.json({ ok: true, ignorada: true });
 
   await salvarMensagemRecebida(msg);
+  after(() => atualizarFotoPerfil(msg.telefone, msg.jid));
 
   if (msg.doEscritorio) {
     // Advogado respondeu pelo celular → IA pausa para este cliente.

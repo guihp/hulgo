@@ -23,6 +23,8 @@ export type MensagemRecebida = {
   chat: string;
   /** Telefone do contato (conversa privada) — dígitos normalizados. */
   telefone: string;
+  /** JID "@s.whatsapp.net" do contato (conversa privada); "" se só veio @lid. */
+  jid: string;
   /** Quem enviou (em grupo é o participante) — dígitos normalizados. */
   remetente: string;
   ehGrupo: boolean;
@@ -70,6 +72,14 @@ function desembrulhar(message: Obj | null): Obj | null {
   return m;
 }
 
+/** JID real do contato: o próprio, ou o *Alt quando o chat vem como "@lid". */
+function jidReal(jid: string, alternativos: string[]): string {
+  const real = jid.endsWith("@s.whatsapp.net")
+    ? jid
+    : alternativos.find((a) => a.endsWith("@s.whatsapp.net")) ?? "";
+  return real.replace(/:\d+@/, "@"); // tira o sufixo de aparelho ("5598...:12@")
+}
+
 /** JID → telefone. Para "@lid" usa o campo *Alt, que traz o número real. */
 function telefoneDoJid(jid: string, alternativos: string[]): string {
   if (jid && !jid.endsWith("@lid")) return normalizarTelefone(jid);
@@ -101,6 +111,9 @@ export function parseEvogoWebhook(body: unknown): MensagemRecebida | null {
     ? ""
     : telefoneDoJid(chat, doEscritorio ? [recipientAlt, senderAlt] : [senderAlt, sender, recipientAlt]);
   const remetente = telefoneDoJid(sender, [senderAlt]);
+  const jid = ehGrupo
+    ? ""
+    : jidReal(chat, doEscritorio ? [recipientAlt, senderAlt] : [senderAlt, sender, recipientAlt]);
 
   const base64 = str(pick(message, "base64") ?? pick(data, "base64")) || null;
 
@@ -109,6 +122,7 @@ export function parseEvogoWebhook(body: unknown): MensagemRecebida | null {
     id: str(info.ID),
     chat,
     telefone,
+    jid,
     remetente,
     ehGrupo,
     doEscritorio,
