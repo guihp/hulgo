@@ -119,3 +119,6 @@
   telefone, sem duplicar) e todo contato novo vira card "Em atendimento" com o nome do WhatsApp — antes o card
   só nascia quando a IA registrava o caso. Números de teste e da equipe (`numeros_advogado`) ficam de fora;
   `registrar_caso` da IA atualiza esse mesmo card. Migration `20261021090000_caso_na_primeira_mensagem.sql`.
+- **Etiqueta do parceiro no chat** (2026-10-21): `/atendimentos` monta `parceiroMeta` (processo com `parceiro_id`
+  ligado ao contato pelo telefone, pelo `caso_id` ou pelo CPF do card) e mostra o chip âmbar com o nome do
+  parceiro na lista e no topo da conversa. `contactInitials` ignora emoji (cortava surrogate → erro de hidratação).

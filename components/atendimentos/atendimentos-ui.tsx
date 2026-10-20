@@ -18,6 +18,7 @@ import {
   ChevronDown,
   Contact,
   FileText,
+  Handshake,
   ImageIcon,
   MapPin,
   MessageSquare,
@@ -96,6 +97,21 @@ export type CasoMeta = {
 
 export type CasoMetaMap = Record<string, CasoMeta>;
 
+/** Contato → nomes dos parceiros dos processos ligados a ele. */
+export type ParceiroMetaMap = Record<string, string[]>;
+
+function ParceiroChip({ nome }: { nome: string }) {
+  return (
+    <span
+      className="inline-flex max-w-[160px] items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800"
+      title={`Processo vinculado ao parceiro ${nome}`}
+    >
+      <Handshake className="size-3 shrink-0" />
+      <span className="truncate">{nome}</span>
+    </span>
+  );
+}
+
 /** Modo geral da IA (página IA do WhatsApp) — define se o botão por conversa vale. */
 export type IaInfo = {
   modo: "desligado" | "teste" | "publico";
@@ -122,6 +138,7 @@ type Conversation = {
   beneficio: string | null;
   cpf: string | null;
   pedeHumano: boolean;
+  parceiros: string[];
 };
 
 type ContactNameMap = Record<string, string>;
@@ -236,7 +253,8 @@ const PREVIEW_LABEL: Record<Conversation["lastKind"], string> = {
 function toConversation(
   row: ConversaRow,
   nameMap: ContactNameMap,
-  casoMeta: CasoMetaMap
+  casoMeta: CasoMetaMap,
+  parceiroMeta: ParceiroMetaMap
 ): Conversation {
   const key = row.contact_norm;
   const caso = lookupCaso(casoMeta, key);
@@ -267,6 +285,8 @@ function toConversation(
     beneficio: caso?.beneficio ?? null,
     cpf: caso?.cpf ?? null,
     pedeHumano: caso?.status === "atendimento_humano",
+    parceiros:
+      parceiroMeta[key] ?? parceiroMeta[phoneToContactNorm(key)] ?? [],
   };
 }
 
@@ -804,8 +824,11 @@ function ConversationList({
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
-                      {statusText || etqs.length > 0 ? (
+                      {statusText || etqs.length > 0 || c.parceiros.length > 0 ? (
                         <div className="mt-1.5 flex flex-wrap gap-1">
+                          {c.parceiros.map((nome) => (
+                            <ParceiroChip key={nome} nome={nome} />
+                          ))}
                           {statusText ? (
                             <span
                               className={cn(
@@ -1067,8 +1090,11 @@ function ConversationThread({
               <span className="mx-1.5 text-[#cbd5e1]">·</span>
               {benefitLabel}
             </p>
-            {etqs.length > 0 ? (
+            {etqs.length > 0 || conv.parceiros.length > 0 ? (
               <div className="mt-1 flex flex-wrap gap-1">
+                {conv.parceiros.map((nome) => (
+                  <ParceiroChip key={nome} nome={nome} />
+                ))}
                 {etqs.map((e) => (
                   <EtiquetaChip key={e.id} etiqueta={e} />
                 ))}
@@ -1334,6 +1360,7 @@ export function AtendimentosPanel({
   contactNames = {},
   whatsappInstancia,
   casoMeta = {},
+  parceiroMeta = {},
   ia,
 }: {
   initialConversas: ConversaRow[];
@@ -1342,6 +1369,7 @@ export function AtendimentosPanel({
   contactNames?: ContactNameMap;
   whatsappInstancia?: string;
   casoMeta?: CasoMetaMap;
+  parceiroMeta?: ParceiroMetaMap;
   ia: IaInfo;
 }) {
   const router = useRouter();
@@ -1420,12 +1448,12 @@ export function AtendimentosPanel({
   const conversations = useMemo(
     () =>
       rows.map((r) => {
-        const c = toConversation(r, contactNames, casoMeta);
+        const c = toConversation(r, contactNames, casoMeta, parceiroMeta);
         return c.contact_norm === selectedContact && abaVisivel
           ? { ...c, unread: 0, marcadaNaoLida: false }
           : c;
       }),
-    [rows, contactNames, casoMeta, selectedContact, abaVisivel]
+    [rows, contactNames, casoMeta, parceiroMeta, selectedContact, abaVisivel]
   );
 
   const etiquetaById = useMemo(

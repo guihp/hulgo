@@ -25,11 +25,13 @@ export function isAgentMessage(type: string | null | undefined): boolean {
 }
 
 export function contactInitials(phone: string | null | undefined, name?: string | null): string {
-  if (name?.trim()) {
-    const parts = name.trim().split(/\s+/);
-    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-    return parts[0].slice(0, 2).toUpperCase();
-  }
+  // Só letras e números: emoji no nome ("Shay 🐆") partia pela metade e quebrava a tela.
+  const parts = (name ?? "")
+    .split(/\s+/)
+    .map((p) => Array.from(p.normalize("NFC")).filter((ch) => /[\p{L}\p{N}]/u.test(ch)))
+    .filter((p) => p.length > 0);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  if (parts.length === 1) return parts[0].slice(0, 2).join("").toUpperCase();
   const digits = (phone ?? "").replace(/\D/g, "");
   return digits.slice(-2) || "??";
 }
