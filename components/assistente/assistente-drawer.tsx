@@ -207,22 +207,37 @@ function ChatMarkdown({
   return <div className={cn("space-y-0.5 [&_p]:m-0", className)}>{blocks}</div>;
 }
 
-function WaitingDots() {
+/** Pedido que provavelmente consulta a base do CNJ (resposta demora). */
+const PEDIDO_JUSTICA_RE = /andamento|movimenta|justi[cç]a|cnj|datajud|tribunal/i;
+
+function WaitingDots({ pedido }: { pedido: string }) {
+  const consultaJustica = PEDIDO_JUSTICA_RE.test(pedido);
+  const [demorando, setDemorando] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setDemorando(true), 12_000);
+    return () => clearTimeout(t);
+  }, []);
+  const dica = consultaJustica
+    ? "Consultando a Justiça (CNJ) — pode levar 1 a 2 minutos…"
+    : demorando
+      ? "Ainda trabalhando no seu pedido…"
+      : null;
   return (
-    <div
-      className="flex max-w-[4.5rem] items-center justify-center gap-1 rounded-2xl border border-[#e2e8f0] bg-white px-3.5 py-3"
-      role="status"
-      aria-label="Assistente respondendo"
-    >
-      <span className="size-1.5 animate-bounce rounded-full bg-[#0b2148]/35 [animation-delay:-0.3s]" />
-      <span className="size-1.5 animate-bounce rounded-full bg-[#0b2148]/45 [animation-delay:-0.15s]" />
-      <span className="size-1.5 animate-bounce rounded-full bg-[#0b2148]/55" />
+    <div className="flex items-center gap-2" role="status" aria-label="Assistente respondendo">
+      <div className="flex max-w-[4.5rem] items-center justify-center gap-1 rounded-2xl border border-[#e2e8f0] bg-white px-3.5 py-3">
+        <span className="size-1.5 animate-bounce rounded-full bg-[#0b2148]/35 [animation-delay:-0.3s]" />
+        <span className="size-1.5 animate-bounce rounded-full bg-[#0b2148]/45 [animation-delay:-0.15s]" />
+        <span className="size-1.5 animate-bounce rounded-full bg-[#0b2148]/55" />
+      </div>
+      {dica ? <span className="text-xs text-[#64748b]">{dica}</span> : null}
     </div>
   );
 }
 
 function toolLabel(name: string): string {
   switch (name) {
+    case "consultar_andamento_justica":
+      return "Consulta na Justiça";
     case "enviar_whatsapp":
       return "Enviar WhatsApp";
     case "criar_prazo":
@@ -1556,7 +1571,11 @@ export function AssistenteDrawer() {
             </div>
           ) : null}
 
-          {awaitingReply ? <WaitingDots /> : null}
+          {awaitingReply ? (
+            <WaitingDots
+              pedido={[...messages].reverse().find((m) => m.role === "user")?.content ?? ""}
+            />
+          ) : null}
         </div>
 
         <div className="shrink-0 border-t border-[#e2e8f0] bg-white p-3">

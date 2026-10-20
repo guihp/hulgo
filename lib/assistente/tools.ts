@@ -37,6 +37,8 @@ import {
   assistenteKanbanHref,
 } from "@/lib/assistente/links";
 import { createClient } from "@/lib/supabase/server";
+import { consultarAoVivoERegistrar } from "@/lib/datajud-monitor";
+import type { ResultadoDataJud } from "@/lib/datajud";
 import { brazilCalendarDayBounds } from "@/lib/utils/dates";
 import { formatCpf, isValidCpf, normalizeCpf } from "@/lib/utils/cpf";
 import { phoneToContactNorm } from "@/lib/utils/phone";
@@ -186,6 +188,22 @@ export const ASSISTENTE_TOOL_DEFINITIONS = [
             description: "Se true (padrão), só prazos não concluídos",
           },
           limite: { type: "number", description: "Máximo (padrão 30, máx. 50)" },
+        },
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "consultar_andamento_justica",
+      description:
+        "Consulta AGORA o andamento do processo na base oficial da Justiça (DataJud/CNJ) e grava a movimentação no sistema. Use quando pedirem para consultar/atualizar o andamento na Justiça, no tribunal ou no CNJ. Informe processo_id (de listar_processos/buscar_pessoas), ou numero_processo, ou cpf (consulta até 3 processos do cliente). Devolve a última atualização que já estava no sistema e o resultado da consulta de agora (o próprio sistema tenta 3 vezes). Demora: pode levar 1–2 minutos. Somente leitura (sem confirmação).",
+      parameters: {
+        type: "object",
+        properties: {
+          processo_id: { type: "number", description: "id do processo (processos_clientes)" },
+          numero_processo: { type: "string", description: "Nº CNJ (20 dígitos, com ou sem pontuação)" },
+          cpf: { type: "string", description: "CPF do cliente" },
         },
       },
     },
@@ -1710,6 +1728,154 @@ async function toolPreencherDocumento(
   };
 }
 
+function dataHoraBr(iso: string | null | undefined, comHora = false): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return new Intl.DateTimeFormat("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    dateStyle: "short",
+    ...(comHora ? { timeStyle: "short" as const } : {}),
+  }).format(d);
+}
+
+async function toolConsultarAndamentoJustica(
+  args: Record<string, unknown>
+): Promise<AssistenteToolResult> {
+  const supabase = await createClient();
+  const processoId = num(args.processo_id, 0);
+  const numeroArg = str(args.numero_processo).replace(/\D/g, "");
+  const cpfArg = str(args.cpf) ? normalizeCpf(str(args.cpf)) : "";
+
+  let query = supabase
+    .from("processos_clientes")
+    .select(
+      "id, nome, cpf, telefone, numero_processo, ultimo_movimento, ultimo_andamento_data, ultima_consulta_datajud, datajud_mov_chave, datajud_mov_data, datajud_mov_texto"
+    )
+    .limit(50);
+  if (processoId) query = query.eq("id", processoId);
+  else if (numeroArg) query = query.ilike("numero_processo", `%${numeroArg.slice(0, 7)}%`);
+  else if (cpfArg.length === 11) query = query.in("cpf", [cpfArg, formatCpf(cpfArg)]);
+  else return { ok: false, summary: "Informe processo_id, numero_processo ou cpf." };
+
+  const { data, error } = await query;
+  if (error) return { ok: false, summary: error.message };
+  let rows = (data ?? []).filter(
+    (r) => r.numero_processo && isValidNumeroProcesso(r.numero_processo)
+  );
+  if (numeroArg) rows = rows.filter((r) => r.numero_processo!.replace(/\D/g, "") === numeroArg);
+
+  // Nº informado que não está cadastrado: consulta mesmo assim (sem gravar).
+  if (!rows.length && numeroArg.length === 20) {
+    const { consulta, tentativas } = await consultarAoVivoERegistrar(numeroArg, []);
+    return montarRespostaAndamento([
+      { numero: numeroArg, linhas: [], consulta, tentativas, novidade: false },
+    ]);
+  }
+  if (!rows.length) {
+    return {
+      ok: false,
+      summary: (data ?? []).length
+        ? "O processo encontrado não tem número judicial (CNJ) — requerimento administrativo do INSS ou ainda sem número. Não dá para consultar na base do CNJ."
+        : "Nenhum processo encontrado com esse filtro.",
+    };
+  }
+
+  const porNumero = new Map<string, typeof rows>();
+  for (const r of rows) {
+    const n = r.numero_processo!.replace(/\D/g, "");
+    porNumero.set(n, [...(porNumero.get(n) ?? []), r]);
+  }
+  const numeros = [...porNumero.keys()].slice(0, 3);
+  const itens = [];
+  for (const n of numeros) {
+    const linhas = porNumero.get(n)!;
+    const r = await consultarAoVivoERegistrar(
+      n,
+      linhas.map((l) => ({ ...l, numero_processo: l.numero_processo! }))
+    );
+    itens.push({ numero: n, linhas, ...r });
+  }
+  const res = montarRespostaAndamento(itens);
+  if (porNumero.size > numeros.length) {
+    res.summary += ` Consultei só os ${numeros.length} primeiros de ${porNumero.size} processos; peça os outros pelo número.`;
+  }
+  return res;
+}
+
+function montarRespostaAndamento(
+  itens: {
+    numero: string;
+    linhas: {
+      id: number;
+      nome: string | null;
+      ultimo_movimento: string | null;
+      ultimo_andamento_data: string | null;
+      ultima_consulta_datajud: string | null;
+      datajud_mov_data: string | null;
+      datajud_mov_texto: string | null;
+    }[];
+    consulta: ResultadoDataJud;
+    tentativas: number;
+    novidade: boolean;
+  }[]
+): AssistenteToolResult {
+  const processos = itens.map((it) => {
+    const p = it.linhas[0];
+    const c = it.consulta;
+    return {
+      processo_id: p?.id ?? null,
+      cliente: p?.nome ?? null,
+      numero_processo: formatNumeroProcesso(it.numero),
+      ja_estava_no_sistema: p
+        ? {
+            movimentacao_justica: p.datajud_mov_texto,
+            data_movimentacao: dataHoraBr(p.datajud_mov_data),
+            consultado_em: dataHoraBr(p.ultima_consulta_datajud, true),
+            andamento_escrito_pela_equipe: p.ultimo_movimento
+              ? clipPreview(p.ultimo_movimento, 200)
+              : null,
+            data_andamento_equipe: dataHoraBr(p.ultimo_andamento_data),
+          }
+        : null,
+      consulta_agora: c.encontrado
+        ? {
+            resultado: "ok",
+            tribunal: c.tribunal,
+            grau: c.grau,
+            orgao_julgador: c.orgaoJulgador,
+            classe: c.classe,
+            movimentacao_nova_desde_a_ultima_consulta: it.novidade,
+            ultimas_movimentacoes: c.movimentos
+              .slice(0, 5)
+              .map(
+                (m) =>
+                  `${dataHoraBr(m.data) ?? "?"} — ${m.nome}${m.complemento ? ` (${m.complemento})` : ""}`
+              ),
+          }
+        : {
+            resultado: c.temporario ? "cnj_lento_ou_fora_do_ar" : "nao_encontrado",
+            motivo: c.motivo,
+            tentativas: it.tentativas,
+          },
+    };
+  });
+  const falhou = processos.some(
+    (p) => p.consulta_agora.resultado === "cnj_lento_ou_fora_do_ar"
+  );
+  return {
+    ok: true,
+    summary:
+      "Responda nesta ordem: (1) a última atualização que JÁ estava no sistema (ja_estava_no_sistema: movimentação da Justiça + data, quando foi consultada, e o andamento escrito pela equipe se houver; se não houver nada, diga que o sistema ainda não tinha registro); (2) o resultado da consulta de agora (últimas movimentações e se há novidade). " +
+      (falhou
+        ? "Em pelo menos um processo o CNJ não respondeu mesmo após 3 tentativas: diga que o sistema da Justiça (CNJ) está lento e não foi possível consultar atualizado agora, que a informação mais recente é a do sistema e que dá para tentar de novo mais tarde. "
+        : "") +
+      "Lembre que a base do CNJ costuma atrasar alguns dias em relação ao site do tribunal." +
+      (falhou ? "" : " A consulta de agora já foi gravada no sistema."),
+    data: { processos },
+  };
+}
+
 async function toolGerarRelatorioProcessos(
   args: Record<string, unknown>
 ): Promise<AssistenteToolResult> {
@@ -1848,6 +2014,8 @@ export async function executeAssistenteTool(
         return await toolPreencherDocumento(args);
       case "gerar_relatorio_processos":
         return await toolGerarRelatorioProcessos(args);
+      case "consultar_andamento_justica":
+        return await toolConsultarAndamentoJustica(args);
       case "gerar_relatorio_prazos":
         return await toolGerarRelatorioPrazos(args);
       case "verificar_processos_lote":

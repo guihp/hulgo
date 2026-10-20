@@ -135,14 +135,15 @@ type HitDataJud = {
 };
 
 export async function consultarDataJud(
-  numeroProcesso: string
+  numeroProcesso: string,
+  opcoes?: { tentativas?: number; timeoutMs?: number; semCache?: boolean }
 ): Promise<ResultadoDataJud> {
   const digits = numeroProcesso.replace(/\D/g, "");
   if (digits.length !== 20) {
     return { encontrado: false, motivo: "Número de processo CNJ inválido" };
   }
 
-  const cached = cache.get(digits);
+  const cached = opcoes?.semCache ? undefined : cache.get(digits);
   if (cached && cached.result.encontrado && Date.now() - cached.at < CACHE_TTL_MS) {
     return cached.result;
   }
@@ -163,7 +164,11 @@ export async function consultarDataJud(
   });
 
   try {
-    const res = await fetchDataJud(urlDoIndice(alias), body);
+    const fetchOpcoes = {
+      tentativas: opcoes?.tentativas ?? FETCH_PADRAO.tentativas,
+      timeoutMs: opcoes?.timeoutMs ?? FETCH_PADRAO.timeoutMs,
+    };
+    const res = await fetchDataJud(urlDoIndice(alias), body, fetchOpcoes);
     const erro = erroDaResposta(res);
     if (erro) return erro;
 
@@ -172,8 +177,17 @@ export async function consultarDataJud(
     if (result.encontrado) cache.set(digits, { at: Date.now(), result });
     return result;
   } catch (err) {
-    return erroDeRede(err, "timeout em 4 tentativas de 25s");
+    return erroDeRede(
+      err,
+      `timeout em ${fetchOpcoesTexto(opcoes)}`
+    );
   }
+}
+
+function fetchOpcoesTexto(opcoes?: { tentativas?: number; timeoutMs?: number }) {
+  const t = opcoes?.tentativas ?? FETCH_PADRAO.tentativas;
+  const s = Math.round((opcoes?.timeoutMs ?? FETCH_PADRAO.timeoutMs) / 1000);
+  return `${t} tentativa${t === 1 ? "" : "s"} de ${s}s`;
 }
 
 const NAO_ENCONTRADO: ResultadoDataJud = {

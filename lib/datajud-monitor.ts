@@ -77,7 +77,7 @@ function dataValida(iso: string | null | undefined): string | null {
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
-type ProcessoMonitorado = {
+export type ProcessoMonitorado = {
   id: number;
   nome: string | null;
   cpf: string | null;
@@ -135,6 +135,33 @@ export async function registrarConsultaDataJud(
 
   await service.from("processos_clientes").update(update).eq("id", processo.id);
   return { novidade, topo };
+}
+
+/**
+ * Consulta na hora pedida pelo assistente ou pela IA do WhatsApp: até `tentativas`
+ * tentativas (40 s cada, 3 s entre elas) e grava o resultado no processo, para o
+ * sistema "ficar sabendo" da movimentação.
+ */
+export async function consultarAoVivoERegistrar(
+  numero: string,
+  processos: ProcessoMonitorado[],
+  tentativasMax = 3
+): Promise<{ consulta: ResultadoDataJud; tentativas: number; novidade: boolean }> {
+  let consulta: ResultadoDataJud = { encontrado: false, motivo: "Não consultado", temporario: true };
+  let tentativas = 0;
+  for (let i = 0; i < tentativasMax; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, 3000));
+    tentativas++;
+    consulta = await consultarDataJud(numero, { tentativas: 1, timeoutMs: 40_000 });
+    if (consulta.encontrado || !consulta.temporario) break;
+  }
+  let novidade = false;
+  const service = createServiceClient();
+  for (const p of processos) {
+    const r = await registrarConsultaDataJud(service, p, consulta);
+    novidade ||= r.novidade;
+  }
+  return { consulta, tentativas, novidade };
 }
 
 function resumoPendencia(numero: string, consulta: Extract<ResultadoDataJud, { encontrado: true }>) {

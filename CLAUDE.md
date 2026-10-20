@@ -109,3 +109,9 @@
   `ultimo_movimento`** da equipe. Card/ficha/PDF mostram "Na Justiça". `monitorar_dias`: null = todo dia,
   0 = não consultar. Configurações → Consulta na Justiça (`app_config` `datajud_auto`, `datajud_pendencias`
   — pendência em Aprovações desligada por padrão). Migration `20261020180000_datajud_automatico.sql`.
+- **IAs consultam a Justiça na hora** (2026-10-20): assistente tem a tool `consultar_andamento_justica`
+  (processo_id | numero_processo | cpf, até 3 processos) e a IA do WhatsApp usa `consultar_processo_datajud`;
+  ambas via `consultarAoVivoERegistrar` (`lib/datajud-monitor.ts`: 3 tentativas de 40 s, grava no processo) e
+  devolvem `ja_estava_no_sistema` + resultado de agora (falha → "CNJ lento"). WhatsApp avisa o cliente "estou
+  consultando…" 1x por atendimento (`efeitos.avisoConsultaJustica`). `listar_processos`/`buscar_processos_por_cpf`
+  trazem a movimentação do CNJ salva. Chat do assistente mostra "Consultando a Justiça…" enquanto espera.

@@ -7,7 +7,7 @@ import {
 import { CASO_STATUS } from "@/lib/constants";
 import { listKanbanColunas } from "@/lib/data/kanban-colunas";
 import { listTiposCaso, matchTipoCaso } from "@/lib/data/tipos-caso";
-import { consultarDataJud } from "@/lib/datajud";
+import { consultarAoVivoERegistrar } from "@/lib/datajud-monitor";
 import { urlPainel, type IaWhatsappConfig } from "@/lib/ia-whatsapp/config";
 import { enviarParaAdvogado, enviarTextoCliente } from "@/lib/ia-whatsapp/enviar";
 import { pausarIA } from "@/lib/ia-whatsapp/estado";
@@ -23,6 +23,8 @@ export type ContextoFerramenta = {
     clienteJaAvisado: boolean;
     /** Pediu atendimento humano: a IA pausa depois de mandar a resposta deste turno. */
     transferidoParaHumano: boolean;
+    /** Já mandou "estou consultando a Justiça, pode demorar" neste atendimento. */
+    avisoConsultaJustica?: boolean;
   };
 };
 
@@ -180,7 +182,7 @@ export const FERRAMENTAS = [
     type: "function",
     name: "buscar_processos_por_cpf",
     description:
-      "Busca na base interna do escritório os processos vinculados a um CPF. Use SEMPRE que o cliente quiser saber do andamento do processo. Retorna: nome, cpf, data_nascimento, numero_processo, tribunal, area, descricao_caso. Vazio = CPF sem processo na base do escritório.",
+      "Busca na base interna do escritório os processos vinculados a um CPF. Use SEMPRE que o cliente quiser saber do andamento do processo. Retorna: nome, cpf, data_nascimento, numero_processo, tribunal, area, descricao_caso e a última movimentação na Justiça que o sistema já tem (ultima_movimentacao_justica, data_ultima_movimentacao, consultado_na_justica_em — o sistema consulta sozinho todo dia). Vazio = CPF sem processo na base do escritório.",
     parameters: {
       type: "object",
       properties: { cpf: str("CPF informado pelo cliente, com ou sem pontuação.") },
@@ -192,7 +194,7 @@ export const FERRAMENTAS = [
     type: "function",
     name: "consultar_processo_datajud",
     description:
-      "Consulta as últimas movimentações de um processo na base oficial do Judiciário (DataJud/CNJ). Recebe o número CNJ obtido antes por buscar_processos_por_cpf. Retorna classe, órgão julgador, assuntos e as últimas movimentações. NUNCA invente o número do processo.",
+      "Consulta AGORA as últimas movimentações de um processo na base oficial do Judiciário (DataJud/CNJ) e grava no sistema. Recebe o número CNJ obtido antes por buscar_processos_por_cpf. Pode demorar: a ferramenta já avisa o cliente que está consultando e tenta 3 vezes sozinha. Retorna a última atualização que já estava no sistema e o resultado de agora (classe, órgão julgador, assuntos, últimas movimentações). Se vier CNJ_LENTO, o sistema da Justiça não respondeu: use a última atualização do sistema. NUNCA invente o número do processo.",
     parameters: {
       type: "object",
       properties: { numero_processo: str("Número CNJ exatamente como veio da base.") },
@@ -489,26 +491,83 @@ async function buscarProcessos(p: Params) {
   const supabase = createServiceClient();
   const { data, error } = await supabase
     .from("processos_clientes")
-    .select("nome, cpf, data_nascimento, numero_processo, tribunal, area, descricao_caso")
+    .select(
+      "nome, cpf, data_nascimento, numero_processo, tribunal, area, descricao_caso, datajud_mov_texto, datajud_mov_data, ultima_consulta_datajud"
+    )
     .eq("ativo", true)
     .in("cpf", [digitos, formatado]);
   if (error) throw new Error(error.message);
   return {
-    processos: (data ?? []).map((r) => ({
-      ...r,
-      data_nascimento: r.data_nascimento ? r.data_nascimento.split("-").reverse().join("/") : null,
-      numero_processo: r.numero_processo ?? "(ainda sem número)",
-    })),
+    processos: (data ?? []).map(
+      ({ datajud_mov_texto, datajud_mov_data, ultima_consulta_datajud, ...r }) => ({
+        ...r,
+        data_nascimento: r.data_nascimento ? r.data_nascimento.split("-").reverse().join("/") : null,
+        numero_processo: r.numero_processo ?? "(ainda sem número)",
+        ultima_movimentacao_justica: datajud_mov_texto,
+        data_ultima_movimentacao: dataBr(datajud_mov_data),
+        consultado_na_justica_em: dataBr(ultima_consulta_datajud),
+      })
+    ),
   };
 }
 
-async function consultarProcesso(p: Params) {
+function dataBr(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? null
+    : d.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
+}
+
+async function consultarProcesso(p: Params, ctx: ContextoFerramenta) {
   const numero = texto(p.numero_processo);
   if (!numero) return { resultado: "ERRO", texto: "numero_processo é obrigatório" };
-  const r = await consultarDataJud(numero);
-  if (!r.encontrado) return { resultado: "NAO_ENCONTRADO", texto: r.motivo };
+  const digitos = numero.replace(/\D/g, "");
+
+  const { data: linhas } = await createServiceClient()
+    .from("processos_clientes")
+    .select("id, nome, cpf, telefone, numero_processo, datajud_mov_chave, datajud_mov_data, datajud_mov_texto, ultima_consulta_datajud")
+    .ilike("numero_processo", `%${digitos.slice(0, 7)}%`);
+  const doNumero = (linhas ?? []).filter(
+    (l) => (l.numero_processo ?? "").replace(/\D/g, "") === digitos
+  );
+  const salvo = doNumero[0];
+  const jaNoSistema = salvo
+    ? {
+        ultima_movimentacao: salvo.datajud_mov_texto,
+        data_movimentacao: dataBr(salvo.datajud_mov_data),
+        consultado_em: dataBr(salvo.ultima_consulta_datajud),
+      }
+    : null;
+
+  // A consulta ao CNJ pode levar 1–2 minutos: avisa o cliente uma vez por atendimento.
+  if (!ctx.efeitos.avisoConsultaJustica) {
+    ctx.efeitos.avisoConsultaJustica = true;
+    await enviarTextoCliente({
+      telefone: ctx.telefone,
+      instancia: ctx.instancia,
+      texto: "Só um instante, estou consultando o seu processo no sistema da Justiça. Às vezes demora um pouquinho. ⏳",
+    }).catch(() => undefined);
+  }
+
+  const { consulta: r, tentativas } = await consultarAoVivoERegistrar(
+    numero,
+    doNumero.map((l) => ({ ...l, numero_processo: l.numero_processo! }))
+  );
+  if (!r.encontrado) {
+    return r.temporario
+      ? {
+          resultado: "CNJ_LENTO",
+          texto: `O sistema da Justiça (CNJ) está lento e não respondeu depois de ${tentativas} tentativas.`,
+          ja_estava_no_sistema: jaNoSistema,
+          instrucao:
+            "Diga ao cliente que o sistema da Justiça está lento e não foi possível consultar atualizado agora; se houver ja_estava_no_sistema, informe essa última atualização (com a data).",
+        }
+      : { resultado: "NAO_ENCONTRADO", texto: r.motivo, ja_estava_no_sistema: jaNoSistema };
+  }
   return {
     resultado: "OK",
+    ja_estava_no_sistema: jaNoSistema,
     processo: {
       tribunal: r.tribunal,
       grau: r.grau,
@@ -547,7 +606,7 @@ export async function executarFerramenta(
     case "buscar_processos_por_cpf":
       return buscarProcessos(params);
     case "consultar_processo_datajud":
-      return consultarProcesso(params);
+      return consultarProcesso(params, ctx);
     default:
       return { ok: false, erro: `Ferramenta desconhecida: ${nome}` };
   }
