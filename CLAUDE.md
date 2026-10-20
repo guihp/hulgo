@@ -115,3 +115,7 @@
   devolvem `ja_estava_no_sistema` + resultado de agora (falha → "CNJ lento"). WhatsApp avisa o cliente "estou
   consultando…" 1x por atendimento (`efeitos.avisoConsultaJustica`). `listar_processos`/`buscar_processos_por_cpf`
   trazem a movimentação do CNJ salva. Chat do assistente mostra "Consultando a Justiça…" enquanto espera.
+- **Card no funil na 1ª mensagem** (2026-10-21): o webhook chama a RPC `garantir_caso_contato` (trava por
+  telefone, sem duplicar) e todo contato novo vira card "Em atendimento" com o nome do WhatsApp — antes o card
+  só nascia quando a IA registrava o caso. Números de teste e da equipe (`numeros_advogado`) ficam de fora;
+  `registrar_caso` da IA atualiza esse mesmo card. Migration `20261021090000_caso_na_primeira_mensagem.sql`.

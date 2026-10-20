@@ -58,6 +58,16 @@ export async function POST(req: Request) {
     { onConflict: "telefone" }
   );
 
+  // Contato novo vira card "Em atendimento" no Funil de vendas já na 1ª mensagem
+  // (números de teste e da equipe ficam de fora; a IA cria o deles ao registrar o caso).
+  if (!ehNumeroDeTeste(config, msg.telefone) && !ehAdvogado(config, msg.telefone)) {
+    const { error } = await supabase.rpc("garantir_caso_contato", {
+      p_telefone: msg.telefone,
+      p_nome: msg.nome || undefined,
+    });
+    if (error) console.error("[webhook] garantir_caso_contato", error.message);
+  }
+
   if (msg.tipo === "text" && msg.texto.trim() === "/reset" && ehNumeroDeTeste(config, msg.telefone)) {
     await reiniciarMemoriaIA(msg.telefone);
     await enviarTextoCliente({ telefone: msg.telefone, texto: "Resetado, pronto para testes.", instancia: msg.instancia });

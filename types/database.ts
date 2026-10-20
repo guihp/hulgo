@@ -1446,6 +1446,10 @@ export type Database = {
           telefone: string;
         }[];
       };
+      garantir_caso_contato: {
+        Args: { p_nome?: string; p_telefone: string };
+        Returns: { caso_id: number; criado: boolean }[];
+      };
       consultar_cliente_kanban: {
         Args: {
           p_telefone: string;
