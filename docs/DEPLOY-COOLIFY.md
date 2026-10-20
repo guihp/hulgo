@@ -76,18 +76,22 @@ Configure em **Environment Variables** (runtime):
 3. Aguarde o build (npm ci + next build) e o container subir
 4. Verifique: `https://sistema.seudominio.com/api/health` → `{"status":"ok",...}`
 
-## 5. Cron — reconsulta DataJud
+## 5. Cron — consulta automática DataJud
 
-O endpoint `GET /api/cron/datajud` reconsulta processos com `monitorar_dias` vencido.
+O endpoint `GET /api/cron/datajud` consulta **todos os processos ativos com nº CNJ**, uma vez
+por dia cada (`monitorar_dias` muda o intervalo; `0` tira o processo da consulta). A consulta
+é em lotes de 20 processos por tribunal (uma requisição por lote, 2,5 s entre lotes). Se o CNJ
+estiver lento ou recusar (429), a execução para em até ~4,5 min e o resto fica para a próxima —
+por isso o agendamento é **de hora em hora**. Sem nada vencido, a execução volta na hora.
 
 No Coolify, crie um **Scheduled Task** (ou use crontab na VPS):
 
 ```bash
-curl -fsS -H "x-cron-secret: SEU_CRON_SECRET" \
-  https://sistema.seudominio.com/api/cron/datajud
+curl -fsS -m 320 -H "x-cron-secret: SEU_CRON_SECRET"   https://sistema.seudominio.com/api/cron/datajud
 ```
 
-Sugestão: diário às 08:00 (`0 8 * * *`).
+Frequência: `0 * * * *` (de hora em hora). Liga/desliga e pendências em Aprovações:
+Configurações → Consulta na Justiça.
 
 ## 5b. Cron — lembretes de prazos
 

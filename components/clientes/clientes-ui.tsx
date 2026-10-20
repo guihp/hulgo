@@ -1980,6 +1980,13 @@ function ProcessoFichaCard({
               {andamento}
             </ProcessoCampo>
           ) : null}
+          {p.datajud_mov_texto ? (
+            <ProcessoCampo label="Na Justiça (consulta automática)" className="sm:col-span-2">
+              {[p.datajud_mov_data ? formatDate(p.datajud_mov_data) : null, p.datajud_mov_texto]
+                .filter(Boolean)
+                .join(" — ")}
+            </ProcessoCampo>
+          ) : null}
           {p.valor_centavos !== null && p.valor_centavos !== undefined ? (
             <ProcessoCampo label="Valor">
               <span className="tabular-nums">

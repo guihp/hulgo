@@ -24,24 +24,38 @@ import { formatDate, formatDateTime } from "@/lib/utils/dates";
 import { toastErroAcao } from "@/lib/client/erros";
 
 const MONITOR_OPCOES = [
-  { value: "off", label: "Monitoramento: desligado" },
-  { value: "1", label: "Reconsultar todo dia" },
-  { value: "3", label: "Reconsultar a cada 3 dias" },
-  { value: "7", label: "Reconsultar a cada 7 dias" },
-  { value: "15", label: "Reconsultar a cada 15 dias" },
-  { value: "30", label: "Reconsultar a cada 30 dias" },
+  { value: "padrao", label: "Consulta automática: todo dia" },
+  { value: "3", label: "Consulta automática: a cada 3 dias" },
+  { value: "7", label: "Consulta automática: a cada 7 dias" },
+  { value: "15", label: "Consulta automática: a cada 15 dias" },
+  { value: "30", label: "Consulta automática: a cada 30 dias" },
+  { value: "0", label: "Não consultar este processo" },
 ];
+
+export type DataJudSalvo = {
+  data: string | null;
+  texto: string | null;
+  resultado: string | null;
+  novidadeEm: string | null;
+};
+
+/** Movimentação nova achada pela consulta automática nos últimos 7 dias. */
+function novidadeRecente(iso: string | null): boolean {
+  return Boolean(iso) && Date.now() - new Date(iso!).getTime() < 7 * 24 * 3600_000;
+}
 
 export function DataJudPanel({
   numeroProcesso,
   processoId,
   monitorarDias,
   ultimaConsulta,
+  salvo,
 }: {
   numeroProcesso: string;
   processoId?: number;
   monitorarDias?: number | null;
   ultimaConsulta?: string | null;
+  salvo?: DataJudSalvo;
 }) {
   const router = useRouter();
   const [resultado, setResultado] = useState<ResultadoDataJud | null>(null);
@@ -50,11 +64,13 @@ export function DataJudPanel({
   async function mudarMonitoramento(v: string | null) {
     if (!processoId) return;
     try {
-      await definirMonitoramento(processoId, v && v !== "off" ? Number(v) : null);
+      await definirMonitoramento(processoId, v && v !== "padrao" ? Number(v) : null);
       toast.success(
-        v && v !== "off"
-          ? `Monitoramento ligado: a cada ${v} dia(s), movimentação nova vira pendência de aprovação`
-          : "Monitoramento desligado"
+        v === "0"
+          ? "Este processo não será mais consultado automaticamente"
+          : v && v !== "padrao"
+            ? `Consulta automática a cada ${v} dias`
+            : "Consulta automática todo dia"
       );
       router.refresh();
     } catch (err) {
@@ -65,8 +81,9 @@ export function DataJudPanel({
   async function consultar() {
     setLoading(true);
     try {
-      const r = await consultarProcessoDataJud(numeroProcesso);
+      const r = await consultarProcessoDataJud(numeroProcesso, processoId);
       setResultado(r);
+      if (processoId) router.refresh();
       if (!r.encontrado) {
         toast.info(r.motivo, {
           duration: r.motivo.includes("Limite de consultas") ? 8000 : 5000,
@@ -89,11 +106,13 @@ export function DataJudPanel({
         <div className="flex flex-wrap items-center gap-2">
           {processoId !== undefined && (
             <Select
-              value={monitorarDias ? String(monitorarDias) : "off"}
+              value={monitorarDias == null || monitorarDias === 1 ? "padrao" : String(monitorarDias)}
               onValueChange={mudarMonitoramento}
             >
-              <SelectTrigger className="h-8 w-56 text-xs">
-                <SelectValue />
+              <SelectTrigger className="h-8 w-64 text-xs">
+                <SelectValue>
+                  {(v: string | null) => MONITOR_OPCOES.find((o) => o.value === v)?.label ?? ""}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {MONITOR_OPCOES.map((o) => (
@@ -122,18 +141,36 @@ export function DataJudPanel({
       </CardHeader>
       <CardContent>
         {!resultado && !loading && (
-          <p className="text-sm text-muted-foreground">
-            Consulta o processo{" "}
-            <span className="font-mono text-xs">{numeroProcesso}</span> direto na
-            API pública do CNJ.
-            {monitorarDias
-              ? ` Monitoramento automático a cada ${monitorarDias} dia(s)${
-                  ultimaConsulta
-                    ? ` — última consulta ${formatDateTime(ultimaConsulta)}`
-                    : " — primeira consulta na próxima execução do robô"
-                }.`
-              : ""}
-          </p>
+          <div className="space-y-2 text-sm">
+            {salvo?.texto ? (
+              <div className="rounded-lg border bg-muted/40 p-3">
+                <p className="flex flex-wrap items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Última movimentação na Justiça
+                  {novidadeRecente(salvo.novidadeEm) ? (
+                    <Badge className="bg-emerald-600 text-white hover:bg-emerald-600">nova</Badge>
+                  ) : null}
+                </p>
+                <p className="mt-1">
+                  {salvo.data ? (
+                    <span className="font-mono text-xs text-muted-foreground">
+                      {formatDate(salvo.data)}{" "}
+                    </span>
+                  ) : null}
+                  {salvo.texto}
+                </p>
+              </div>
+            ) : salvo?.resultado && ultimaConsulta ? (
+              <p className="text-muted-foreground">{salvo.resultado}</p>
+            ) : null}
+            <p className="text-muted-foreground">
+              {monitorarDias === 0
+                ? "Este processo está fora da consulta automática."
+                : ultimaConsulta
+                  ? `Consultado automaticamente na base do CNJ — última consulta ${formatDateTime(ultimaConsulta)}.`
+                  : "Será consultado automaticamente na base do CNJ na próxima rodada."}{" "}
+              Para ver a lista completa de movimentações, clique em Consultar agora.
+            </p>
+          </div>
         )}
 
         {resultado && !resultado.encontrado && (

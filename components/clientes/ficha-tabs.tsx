@@ -243,6 +243,12 @@ export function FichaTabs({
                 processoId={p.id}
                 monitorarDias={p.monitorar_dias}
                 ultimaConsulta={p.ultima_consulta_datajud}
+                salvo={{
+                  data: p.datajud_mov_data,
+                  texto: p.datajud_mov_texto,
+                  resultado: p.datajud_resultado,
+                  novidadeEm: p.datajud_novidade_em,
+                }}
               />
             ))
           )}

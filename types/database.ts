@@ -1250,6 +1250,11 @@ export type Database = {
           telefone: string | null;
           tipo_acao: string | null;
           tribunal: string | null;
+          datajud_mov_chave: string | null;
+          datajud_mov_data: string | null;
+          datajud_mov_texto: string | null;
+          datajud_novidade_em: string | null;
+          datajud_resultado: string | null;
           ultima_consulta_datajud: string | null;
           ultimo_andamento_data: string | null;
           ultimo_movimento: string | null;
@@ -1279,6 +1284,11 @@ export type Database = {
           telefone?: string | null;
           tipo_acao?: string | null;
           tribunal?: string | null;
+          datajud_mov_chave?: string | null;
+          datajud_mov_data?: string | null;
+          datajud_mov_texto?: string | null;
+          datajud_novidade_em?: string | null;
+          datajud_resultado?: string | null;
           ultima_consulta_datajud?: string | null;
           ultimo_andamento_data?: string | null;
           ultimo_movimento?: string | null;
@@ -1308,6 +1318,11 @@ export type Database = {
           telefone?: string | null;
           tipo_acao?: string | null;
           tribunal?: string | null;
+          datajud_mov_chave?: string | null;
+          datajud_mov_data?: string | null;
+          datajud_mov_texto?: string | null;
+          datajud_novidade_em?: string | null;
+          datajud_resultado?: string | null;
           ultima_consulta_datajud?: string | null;
           ultimo_andamento_data?: string | null;
           ultimo_movimento?: string | null;

@@ -101,3 +101,11 @@
   `components/processos/vincular-processo.tsx` (painel "Processo" no caso, botão "Processo" na conversa,
   "Veio do funil" no card do processo). Processo novo cadastrado à mão liga ao caso do mesmo CPF/telefone.
   Migration: `20261020150000_atendimento_ia_humano_processo_caso.sql`.
+- **Relatório PDF por parceiro + DataJud automático** (2026-10-20): `?parceiro=<id>|sem` em
+  `/api/processos/relatorio` (botão "Por parceiro…" e tool do assistente). Robô `/api/cron/datajud`
+  consulta TODOS os processos ativos com nº CNJ 1x/dia, em lotes de 20 por tribunal
+  (`consultarDataJudLote`, `lib/datajud-monitor.ts`); agendar de hora em hora. Movimentação do CNJ vai
+  para `datajud_mov_data/texto/chave` (+ `datajud_novidade_em`, `datajud_resultado`) — **não sobrescreve
+  `ultimo_movimento`** da equipe. Card/ficha/PDF mostram "Na Justiça". `monitorar_dias`: null = todo dia,
+  0 = não consultar. Configurações → Consulta na Justiça (`app_config` `datajud_auto`, `datajud_pendencias`
+  — pendência em Aprovações desligada por padrão). Migration `20261020180000_datajud_automatico.sql`.

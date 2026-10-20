@@ -94,6 +94,11 @@ const FILTER_ALL = "all";
 const FILTER_NONE = "none";
 const SITUACAO_LIMPAR = "__limpar__";
 
+/** Movimentação nova achada pela consulta automática nos últimos 7 dias. */
+function movimentacaoRecente(iso: string | null): boolean {
+  return Boolean(iso) && Date.now() - new Date(iso!).getTime() < 7 * 24 * 3600_000;
+}
+
 function stopDrag(e: React.PointerEvent) {
   e.stopPropagation();
 }
@@ -250,6 +255,21 @@ function ProcessoCard({
           {processo.ultimo_movimento?.trim() ? (
             <p className="mt-0.5 line-clamp-3">{processo.ultimo_movimento}</p>
           ) : null}
+        </div>
+      ) : null}
+
+      {processo.datajud_mov_texto ? (
+        <div className="mt-2 rounded-md border border-sky-100 bg-sky-50/60 px-2 py-1.5 text-xs dark:border-sky-900 dark:bg-sky-950/40">
+          <p className="flex items-center gap-1.5 font-medium text-sky-800 dark:text-sky-300">
+            Na Justiça
+            {processo.datajud_mov_data ? ` · ${formatDate(processo.datajud_mov_data)}` : ""}
+            {movimentacaoRecente(processo.datajud_novidade_em) ? (
+              <span className="rounded-full bg-emerald-600 px-1.5 text-[10px] font-semibold text-white">
+                nova
+              </span>
+            ) : null}
+          </p>
+          <p className="mt-0.5 line-clamp-2">{processo.datajud_mov_texto}</p>
         </div>
       ) : null}
 

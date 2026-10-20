@@ -250,6 +250,11 @@ export const ASSISTENTE_TOOL_DEFINITIONS = [
             description:
               "Chave da coluna (listar_colunas_funis) para relatório de uma coluna só. Exige funil. Omitir = todas as colunas.",
           },
+          parceiro: {
+            type: "string",
+            description:
+              "Relatório de um parceiro: id vindo de listar_parceiros (nunca invente), ou \"sem\" para os processos sem parceiro. Omitir = todos.",
+          },
         },
       },
     },
@@ -522,6 +527,10 @@ function resumoProcesso(
       ultimo_andamento_data: p.ultimo_andamento_data,
       ultimo_movimento: p.ultimo_movimento
         ? clipPreview(p.ultimo_movimento, 160)
+        : null,
+      andamento_justica_data: p.datajud_mov_data,
+      andamento_justica: p.datajud_mov_texto
+        ? clipPreview(p.datajud_mov_texto, 160)
         : null,
       observacao: p.observacao ? clipPreview(p.observacao, 160) : null,
       parceiro_id: p.parceiro_id,
@@ -1706,13 +1715,19 @@ async function toolGerarRelatorioProcessos(
 ): Promise<AssistenteToolResult> {
   const funilArg = typeof args.funil === "string" ? args.funil.trim() : "";
   const colunaArg = typeof args.coluna === "string" ? args.coluna.trim() : "";
+  const parceiroArg = typeof args.parceiro === "string" ? args.parceiro.trim() : "";
   const funil = funilArg && funilArg !== "todos" ? normalizeFunilArg(funilArg) : "todos";
   try {
     const dados = await carregarRelatorioProcessos({
       funil,
       coluna: colunaArg || null,
+      parceiro: parceiroArg || null,
     });
-    const href = relatorioProcessosHref({ funil, coluna: colunaArg || null });
+    const href = relatorioProcessosHref({
+      funil,
+      coluna: colunaArg || null,
+      parceiro: parceiroArg || null,
+    });
     const porColuna = dados.funis
       .map((f) => {
         const cols = f.colunas
@@ -1721,12 +1736,16 @@ async function toolGerarRelatorioProcessos(
         return `${f.label} — ${cols}`;
       })
       .join(" | ");
+    const { parceiro } = dados.escopo;
+    const escopoParceiro =
+      parceiro === "sem" ? "sem parceiro, " : parceiro ? `parceiro ${parceiro.nome}, ` : "";
     const escopo =
-      dados.escopo.funil === "todos"
+      escopoParceiro +
+      (dados.escopo.funil === "todos"
         ? "todos os funis"
         : colunaArg
           ? `${dados.funis[0].label} → ${dados.funis[0].colunas[0]?.label ?? colunaArg}`
-          : `${dados.funis[0].label} (todas as colunas)`;
+          : `${dados.funis[0].label} (todas as colunas)`);
     return {
       ok: true,
       summary: `Relatório PDF pronto (${escopo}): ${dados.total} processo(s). ${porColuna}. O botão "Abrir relatório PDF" já aparece abaixo da resposta — NÃO escreva a URL nem link em markdown.`,

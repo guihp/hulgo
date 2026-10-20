@@ -11,6 +11,7 @@ import { EscritorioPanel } from "@/components/configuracoes/escritorio-panel";
 import { ParceirosPanel } from "@/components/configuracoes/parceiros-panel";
 import { AppCelularPanel } from "@/components/configuracoes/app-celular-panel";
 import { IaOpenAIPanel } from "@/components/configuracoes/ia-openai-panel";
+import { ConsultaJusticaPanel } from "@/components/configuracoes/consulta-justica-panel";
 import type { AppConfigMap } from "@/lib/config/app-config";
 import type { TipoCasoMatch } from "@/lib/actions/tipos-caso";
 import type { KanbanColunaMatch } from "@/lib/data/kanban-colunas";
@@ -40,6 +41,11 @@ const TABS = [
     value: "funis-processos",
     label: "Funis de processos",
     subtitle: "Colunas dos funis Previdenciário e Cível da página Processos.",
+  },
+  {
+    value: "justica",
+    label: "Consulta na Justiça",
+    subtitle: "Atualização automática do andamento dos processos pela base do CNJ.",
   },
   {
     value: "agente",
@@ -196,6 +202,15 @@ export function ConfiguracoesUi({
             className={tab === "funis-processos" ? undefined : "hidden"}
           >
             <ProcessoColunasPanel initialColunas={processoColunas} />
+          </div>
+        ) : null}
+        {mounted.justica ? (
+          <div
+            role="tabpanel"
+            hidden={tab !== "justica"}
+            className={tab === "justica" ? undefined : "hidden"}
+          >
+            <ConsultaJusticaPanel />
           </div>
         ) : null}
         {mounted.agente ? (

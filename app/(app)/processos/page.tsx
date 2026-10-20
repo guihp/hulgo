@@ -53,7 +53,7 @@ export default async function ProcessosPage({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <RelatorioProcessosButton funil={funil} colunas={colunas} />
+          <RelatorioProcessosButton funil={funil} colunas={colunas} parceiros={parceiros} />
           <NovoProcessoButton funil={funil} />
         </div>
       </div>

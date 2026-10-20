@@ -14,7 +14,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/processos/relatorio?funil=previdenciario&coluna=sentenca[&download=1]
+ * GET /api/processos/relatorio?funil=previdenciario&coluna=sentenca[&parceiro=<id>|sem][&download=1]
  * funil omitido = todos os funis; coluna omitida = todas as colunas do funil.
  * Abre inline no navegador (download=1 força baixar).
  */
@@ -29,6 +29,7 @@ export async function GET(request: NextRequest) {
     const dados = await carregarRelatorioProcessos({
       funil: sp.get("funil"),
       coluna: sp.get("coluna"),
+      parceiro: sp.get("parceiro"),
     });
     const escritorio =
       (await getAppConfigValue("escritorio_nome").catch(() => "")).trim() ||

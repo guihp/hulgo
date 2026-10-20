@@ -95,7 +95,7 @@ export function pdfSafe(raw: string | null | undefined): string {
     else if (ch === "≥") out += ">=";
     else if (ch === "≤") out += "<=";
     else {
-      const base = ch.normalize("NFD").replace(/[̀-ͯ]/g, "");
+      const base = ch.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
       out += base && base !== ch && [...base].every((b) => b.charCodeAt(0) < 0x7f) ? base : "";
     }
   }
@@ -173,7 +173,7 @@ type ColunaTabela = {
   celula: (p: RelatorioProcessoItem, idx: number) => Linha[];
 };
 
-function colunasTabela(processos: RelatorioProcessoItem[]): ColunaTabela[] {
+function colunasTabela(processos: RelatorioProcessoItem[], filtradoPorParceiro = false): ColunaTabela[] {
   const algum = (f: (p: RelatorioProcessoItem) => unknown) => processos.some((p) => Boolean(f(p)));
 
   const cols: ColunaTabela[] = [
@@ -212,7 +212,8 @@ function colunasTabela(processos: RelatorioProcessoItem[]): ColunaTabela[] {
       },
     });
   }
-  if (algum((p) => p.parceiro_nome)) {
+  // Relatório de um parceiro só: a coluna repetiria o mesmo nome em todas as linhas.
+  if (!filtradoPorParceiro && algum((p) => p.parceiro_nome)) {
     cols.push({
       titulo: "Parceiro",
       peso: 0.9,
@@ -227,6 +228,13 @@ function colunasTabela(processos: RelatorioProcessoItem[]): ColunaTabela[] {
       const data = dataBr(p.ultimo_andamento_data);
       if (data) out.push({ text: data, bold: true });
       if (p.ultimo_movimento?.trim()) out.push({ text: p.ultimo_movimento.trim() });
+      if (p.datajud_mov_texto?.trim()) {
+        const dataCnj = dataBr(p.datajud_mov_data);
+        out.push({
+          text: `Na Justiça${dataCnj ? ` (${dataCnj})` : ""}: ${p.datajud_mov_texto.trim()}`,
+          muted: true,
+        });
+      }
       if (p.observacao?.trim()) out.push({ text: `Obs.: ${p.observacao.trim()}`, muted: true });
       return out.length ? out : [{ text: "Sem andamento registrado", muted: true }];
     },
@@ -275,13 +283,16 @@ export type RelatorioPdfMeta = {
 };
 
 export function tituloEscopo(dados: RelatorioProcessosDados): string {
-  if (dados.escopo.funil === "todos") return "Todos os funis";
+  const { parceiro } = dados.escopo;
+  const prefixo =
+    parceiro === "sem" ? "Sem parceiro — " : parceiro ? `Parceiro ${parceiro.nome} — ` : "";
+  if (dados.escopo.funil === "todos") return `${prefixo}Todos os funis`;
   const funil = dados.funis[0];
   if (dados.escopo.coluna) {
     const col = funil.colunas[0];
-    return `${funil.label} — ${col?.label ?? dados.escopo.coluna}`;
+    return `${prefixo}${funil.label} — ${col?.label ?? dados.escopo.coluna}`;
   }
-  return `${funil.label} — todas as colunas`;
+  return `${prefixo}${funil.label} — todas as colunas`;
 }
 
 export async function gerarPdfRelatorioProcessos(
@@ -402,14 +413,14 @@ export async function gerarPdfRelatorioProcessos(
   const colunasComProcesso = todasColunas.filter((c) => c.processos.length).length;
 
   const semAndamento = todosProcessos.filter(
-    (p) => !p.ultimo_movimento?.trim() && !p.ultimo_andamento_data
+    (p) => !p.ultimo_movimento?.trim() && !p.ultimo_andamento_data && !p.datajud_mov_texto
   ).length;
 
   const kpis: [string, string][] = [["Processos", dados.total.toLocaleString("pt-BR")]];
   if (!dados.escopo.coluna) {
     kpis.push(["Colunas com processos", `${colunasComProcesso} de ${todasColunas.length}`]);
   }
-  kpis.push(["Com parceiro", comParceiro.toLocaleString("pt-BR")]);
+  if (!dados.escopo.parceiro) kpis.push(["Com parceiro", comParceiro.toLocaleString("pt-BR")]);
   kpis.push(["Sem andamento registrado", semAndamento.toLocaleString("pt-BR")]);
   if (valorTotal > 0) kpis.push(["Valor total", formatValorCentavos(valorTotal)]);
 
@@ -434,7 +445,11 @@ export async function gerarPdfRelatorioProcessos(
   y -= kpiH + 24;
 
   // Distribuição por coluna (com uma coluna só seria uma barra de 100%)
-  for (const funil of dados.escopo.coluna ? [] : dados.funis) {
+  // Relatório de um parceiro: funis sem nenhum processo dele só ocupariam espaço.
+  const funisResumo = dados.escopo.parceiro
+    ? dados.funis.filter((f) => f.colunas.some((c) => c.processos.length))
+    : dados.funis;
+  for (const funil of dados.escopo.coluna ? [] : funisResumo) {
     const totalFunil = funil.colunas.reduce((s, c) => s + c.processos.length, 0);
     garantirEspaco(40 + funil.colunas.length * 18);
     txt(page, funil.label, MARGIN_X, y - 10, { size: 11, font: bold, color: C.navy });
@@ -533,7 +548,7 @@ export async function gerarPdfRelatorioProcessos(
 
   function desenharSecao(funil: string, coluna: RelatorioColuna, continuacao: boolean) {
     desenharTituloSecao(funil, coluna, continuacao);
-    const cols = colunasTabela(coluna.processos);
+    const cols = colunasTabela(coluna.processos, Boolean(dados.escopo.parceiro));
     const ws = larguras(cols);
 
     const cabecalhoTabela = () => {
@@ -631,7 +646,14 @@ export async function gerarPdfRelatorioProcessos(
 
 export function nomeArquivoRelatorio(dados: RelatorioProcessosDados, agora = new Date()): string {
   const dia = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(agora);
-  const partes = ["relatorio-processos", dados.escopo.funil, dados.escopo.coluna, dia]
+  const { parceiro } = dados.escopo;
+  const parceiroSlug =
+    parceiro === "sem"
+      ? "sem-parceiro"
+      : parceiro
+        ? `parceiro-${parceiro.nome.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()}`
+        : null;
+  const partes = ["relatorio-processos", parceiroSlug, dados.escopo.funil, dados.escopo.coluna, dia]
     .filter(Boolean)
     .map((s) => String(s).replace(/[^a-z0-9-]+/gi, "-"));
   return `${partes.join("_")}.pdf`;

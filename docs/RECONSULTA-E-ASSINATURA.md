@@ -42,34 +42,52 @@ do item faltante.
 </documento-para-assinar>
 ```
 
-## 3. Reconsulta automática do DataJud
+## 3. Consulta automática do DataJud (CNJ)
 
-Na ficha do cliente, cada processo tem o seletor **"Monitoramento"** (desligado / 1 / 3 /
-7 / 15 / 30 dias). Com o robô agendado:
+Desde 20/10/2026 **todos os processos ativos com nº CNJ** são consultados automaticamente,
+uma vez por dia (não precisa mais ligar processo por processo). Controle em
+**Configurações → Consulta na Justiça**:
 
-- A cada execução, consulta os processos vencidos no DataJud.
-- **Movimentação nova** → cria pendência na fila **/aprovacoes** com as últimas 5
-  movimentações em linguagem simples. O advogado edita/aprova → sistema envia ao cliente.
-- Sem novidade → só atualiza a data da última consulta.
+- **Consultar os processos automaticamente** (padrão: ligado).
+- **Criar pendência em Aprovações quando houver movimentação nova** (padrão: desligado,
+  para não encher a fila). Ligado: a pendência traz as últimas 5 movimentações e o advogado
+  edita/aprova → o sistema envia ao cliente.
+- Números: processos com nº CNJ, consultados nas últimas 24 h, ainda não consultados,
+  novidades nos últimos 7 dias, não achados na base. Botão **Consultar agora** dispara uma
+  rodada em segundo plano.
 
-### Agendar na VPS (quando subir o sistema)
+O que muda nas telas:
 
-`.env.local` (ou env do processo):
+- A última movimentação do CNJ fica em colunas próprias (`datajud_mov_data`,
+  `datajud_mov_texto`; `datajud_mov_chave` é a chave interna de comparação) e aparece no
+  card do processo ("Na Justiça · data", com a marca **nova** por 7 dias), na ficha e no
+  relatório PDF. **O "Último andamento" escrito pela equipe não é alterado.**
+- A primeira consulta de cada processo só grava o ponto de partida; "nova" só aparece
+  quando a movimentação muda depois disso.
+- Na ficha (aba DataJud), o seletor por processo virou intervalo: todo dia (padrão) /
+  3 / 7 / 15 / 30 dias / **Não consultar este processo** (`monitorar_dias = 0`).
+  "Consultar agora" na ficha também grava a movimentação no processo.
+- Falha passageira do CNJ (limite, fora do ar, demora) não marca o processo como
+  consultado: ele entra de novo na próxima execução.
+
+Limitações: a base pública do CNJ atrasa alguns dias em relação ao site do tribunal, não
+mostra processos em segredo de justiça e não inclui requerimentos administrativos do INSS.
+
+### Agendar (Coolify ou crontab)
+
+Env `CRON_SECRET` no container. Agendar **de hora em hora** — a consulta vai em lotes de
+20 processos por tribunal; se o CNJ estiver lento ou recusar, o que sobrar fica para a
+próxima execução:
 
 ```
-CRON_SECRET=um-segredo-forte-aqui
+0 * * * * curl -s -m 320 -H "x-cron-secret: SEU_SEGREDO" https://SEU-DOMINIO/api/cron/datajud > /dev/null
 ```
 
-Crontab (`crontab -e`), todo dia às 8h:
-
-```
-0 8 * * * curl -s -H "x-cron-secret: SEU_SEGREDO" https://SEU-DOMINIO/api/cron/datajud > /dev/null
-```
-
-Enquanto o sistema roda só local, dá pra disparar manualmente:
+Disparo manual local:
 
 ```
 curl -H "x-cron-secret: SEU_SEGREDO" http://localhost:3000/api/cron/datajud
 ```
 
-A resposta é um relatório JSON: quantos processos monitorados e o que aconteceu com cada um.
+A resposta é um relatório JSON: consultados, novidades, não encontrados, falhas, restantes e
+o resultado de cada processo.

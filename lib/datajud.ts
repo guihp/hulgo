@@ -14,10 +14,15 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-const ATTEMPT_TIMEOUT_MS = 25_000;
+type OpcoesFetch = { tentativas: number; timeoutMs: number };
+const FETCH_PADRAO: OpcoesFetch = { tentativas: 4, timeoutMs: 25_000 };
 
-async function fetchDataJud(url: string, body: string): Promise<Response> {
-  const maxRetries = 3;
+async function fetchDataJud(
+  url: string,
+  body: string,
+  opcoes: OpcoesFetch = FETCH_PADRAO
+): Promise<Response> {
+  const maxRetries = opcoes.tentativas - 1;
   const retryable = new Set([429, 502, 503, 504]);
   let lastError: unknown;
 
@@ -25,7 +30,7 @@ async function fetchDataJud(url: string, body: string): Promise<Response> {
     // Timeout por tentativa — a API do CNJ trava com frequência; um timeout
     // global engoliria as tentativas seguintes.
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), ATTEMPT_TIMEOUT_MS);
+    const timeout = setTimeout(() => controller.abort(), opcoes.timeoutMs);
 
     try {
       const res = await fetch(url, {
@@ -102,7 +107,12 @@ export type ResultadoDataJud =
       assuntos: string[];
       movimentos: MovimentoDataJud[];
     }
-  | { encontrado: false; motivo: string };
+  | {
+      encontrado: false;
+      motivo: string;
+      /** Falha passageira (limite, CNJ fora do ar, timeout): vale tentar de novo depois. */
+      temporario?: boolean;
+    };
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const cache = new Map<string, { at: number; result: ResultadoDataJud }>();
@@ -153,94 +163,155 @@ export async function consultarDataJud(
   });
 
   try {
-    const res = await fetchDataJud(
-      `https://api-publica.datajud.cnj.jus.br/api_publica_${alias}/_search`,
-      body
-    );
-
-    if (res.status === 401) {
-      return {
-        encontrado: false as const,
-        motivo:
-          "Chave da API DataJud expirada — obtenha uma nova em datajud-wiki.cnj.jus.br/api-publica/acesso e configure DATAJUD_API_KEY",
-      };
-    }
-    if (res.status === 429) {
-      return {
-        encontrado: false as const,
-        motivo:
-          "Limite de consultas do CNJ atingido (muitas requisições na API pública). Aguarde 1–2 minutos e clique em Atualizar novamente.",
-      };
-    }
-    if (res.status === 504 || res.status === 502 || res.status === 503) {
-      return {
-        encontrado: false as const,
-        motivo:
-          "API do CNJ temporariamente indisponível (servidor demorou a responder). Tente novamente em alguns minutos.",
-      };
-    }
-    if (!res.ok) {
-      return {
-        encontrado: false as const,
-        motivo: `DataJud respondeu ${res.status}`,
-      };
-    }
+    const res = await fetchDataJud(urlDoIndice(alias), body);
+    const erro = erroDaResposta(res);
+    if (erro) return erro;
 
     const payload = (await res.json()) as { hits?: { hits?: HitDataJud[] } };
-    const hits = payload.hits?.hits ?? [];
-    if (hits.length === 0) {
-      return {
-        encontrado: false as const,
-        motivo:
-          "Processo não encontrado no DataJud (pode estar em segredo de justiça ou o tribunal ainda não publicou os dados)",
-      };
-    }
-
-    // Pega o hit com atualização mais recente (processos aparecem 1x por grau)
-    const source = hits
-      .map((h) => h._source)
-      .filter(Boolean)
-      .sort((a, b) =>
-        String(b?.dataHoraUltimaAtualizacao ?? "").localeCompare(
-          String(a?.dataHoraUltimaAtualizacao ?? "")
-        )
-      )[0]!;
-
-    const movimentos = (source.movimentos ?? [])
-      .map((m) => ({
-        data: m.dataHora ?? "",
-        nome: m.nome ?? "",
-        complemento: m.complementosTabelados
-          ?.map((c) => c.nome ?? c.descricao ?? "")
-          .filter(Boolean)
-          .join(", "),
-      }))
-      .filter((m) => m.nome)
-      .sort((a, b) => b.data.localeCompare(a.data))
-      .slice(0, 20);
-
-    const result = {
-      encontrado: true as const,
-      tribunal: source.tribunal ?? alias.toUpperCase(),
-      classe: source.classe?.nome ?? null,
-      orgaoJulgador: source.orgaoJulgador?.nome ?? null,
-      grau: source.grau ?? null,
-      dataAjuizamento: source.dataAjuizamento ?? null,
-      ultimaAtualizacao: source.dataHoraUltimaAtualizacao ?? null,
-      assuntos: (source.assuntos ?? [])
-        .map((a) => a.nome ?? "")
-        .filter(Boolean),
-      movimentos,
-    };
-    cache.set(digits, { at: Date.now(), result });
+    const result = montarResultado(payload.hits?.hits ?? [], alias);
+    if (result.encontrado) cache.set(digits, { at: Date.now(), result });
     return result;
   } catch (err) {
+    return erroDeRede(err, "timeout em 4 tentativas de 25s");
+  }
+}
+
+const NAO_ENCONTRADO: ResultadoDataJud = {
+  encontrado: false,
+  motivo:
+    "Processo não encontrado no DataJud (pode estar em segredo de justiça ou o tribunal ainda não publicou os dados)",
+};
+
+function urlDoIndice(alias: string) {
+  return `https://api-publica.datajud.cnj.jus.br/api_publica_${alias}/_search`;
+}
+
+function erroDaResposta(res: Response): ResultadoDataJud | null {
+  if (res.status === 401) {
     return {
-      encontrado: false as const,
+      encontrado: false,
       motivo:
-        err instanceof Error && err.name === "AbortError"
-          ? "DataJud demorou a responder (timeout em 4 tentativas de 25s) — a API do CNJ está lenta. Tente novamente em alguns minutos."
-          : "Falha de rede ao consultar o DataJud",
+        "Chave da API DataJud expirada — obtenha uma nova em datajud-wiki.cnj.jus.br/api-publica/acesso e configure DATAJUD_API_KEY",
     };
   }
+  if (res.status === 429) {
+    return {
+      encontrado: false,
+      motivo:
+        "Limite de consultas do CNJ atingido (muitas requisições na API pública). Aguarde 1–2 minutos e clique em Atualizar novamente.",
+      temporario: true,
+    };
+  }
+  if (res.status === 504 || res.status === 502 || res.status === 503) {
+    return {
+      encontrado: false,
+      motivo:
+        "API do CNJ temporariamente indisponível (servidor demorou a responder). Tente novamente em alguns minutos.",
+      temporario: true,
+    };
+  }
+  if (!res.ok) {
+    return { encontrado: false, motivo: `DataJud respondeu ${res.status}` };
+  }
+  return null;
+}
+
+function erroDeRede(err: unknown, detalheTimeout: string): ResultadoDataJud {
+  return {
+    encontrado: false,
+    motivo:
+      err instanceof Error && err.name === "AbortError"
+        ? `DataJud demorou a responder (${detalheTimeout}) — a API do CNJ está lenta. Tente novamente em alguns minutos.`
+        : "Falha de rede ao consultar o DataJud",
+    temporario: true,
+  };
+}
+
+/** Hits de UM processo (aparece 1x por grau) → resultado com o grau atualizado por último. */
+function montarResultado(hits: HitDataJud[], alias: string): ResultadoDataJud {
+  const source = hits
+    .map((h) => h._source)
+    .filter(Boolean)
+    .sort((a, b) =>
+      String(b?.dataHoraUltimaAtualizacao ?? "").localeCompare(
+        String(a?.dataHoraUltimaAtualizacao ?? "")
+      )
+    )[0];
+  if (!source) return NAO_ENCONTRADO;
+
+  const movimentos = (source.movimentos ?? [])
+    .map((m) => ({
+      data: m.dataHora ?? "",
+      nome: m.nome ?? "",
+      complemento: m.complementosTabelados
+        ?.map((c) => c.nome ?? c.descricao ?? "")
+        .filter(Boolean)
+        .join(", "),
+    }))
+    .filter((m) => m.nome)
+    .sort((a, b) => b.data.localeCompare(a.data))
+    .slice(0, 20);
+
+  return {
+    encontrado: true,
+    tribunal: source.tribunal ?? alias.toUpperCase(),
+    classe: source.classe?.nome ?? null,
+    orgaoJulgador: source.orgaoJulgador?.nome ?? null,
+    grau: source.grau ?? null,
+    dataAjuizamento: source.dataAjuizamento ?? null,
+    ultimaAtualizacao: source.dataHoraUltimaAtualizacao ?? null,
+    assuntos: (source.assuntos ?? []).map((a) => a.nome ?? "").filter(Boolean),
+    movimentos,
+  };
+}
+
+/**
+ * Consulta vários processos do MESMO tribunal numa requisição só (consulta
+ * automática). Devolve um resultado por número (só dígitos); falha da
+ * requisição vale para todos do lote.
+ */
+export async function consultarDataJudLote(
+  numeros: string[]
+): Promise<Map<string, ResultadoDataJud>> {
+  const digitos = [...new Set(numeros.map((n) => n.replace(/\D/g, "")))];
+  const saida = new Map<string, ResultadoDataJud>();
+  if (!digitos.length) return saida;
+
+  const alias = resolverAliasDataJud(digitos[0]);
+  if (!alias || digitos.some((d) => resolverAliasDataJud(d) !== alias)) {
+    throw new Error("consultarDataJudLote: todos os números precisam ser do mesmo tribunal");
+  }
+
+  const body = JSON.stringify({
+    // Até ~3 graus por processo.
+    size: digitos.length * 3,
+    query: { terms: { "numeroProcesso.keyword": digitos } },
+  });
+
+  let falha: ResultadoDataJud | null = null;
+  try {
+    const res = await fetchDataJud(urlDoIndice(alias), body, { tentativas: 2, timeoutMs: 60_000 });
+    falha = erroDaResposta(res);
+    if (!falha) {
+      const payload = (await res.json()) as {
+        hits?: { hits?: (HitDataJud & { _source?: { numeroProcesso?: string } })[] };
+      };
+      const porNumero = new Map<string, HitDataJud[]>();
+      for (const h of payload.hits?.hits ?? []) {
+        const n = String(h._source?.numeroProcesso ?? "").replace(/\D/g, "");
+        if (!n) continue;
+        porNumero.set(n, [...(porNumero.get(n) ?? []), h]);
+      }
+      for (const d of digitos) {
+        const result = montarResultado(porNumero.get(d) ?? [], alias);
+        if (result.encontrado) cache.set(d, { at: Date.now(), result });
+        saida.set(d, result);
+      }
+      return saida;
+    }
+  } catch (err) {
+    falha = erroDeRede(err, "timeout em 2 tentativas de 60s");
+  }
+  for (const d of digitos) saida.set(d, falha!);
+  return saida;
 }
