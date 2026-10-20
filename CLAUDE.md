@@ -89,3 +89,15 @@
   `@s.whatsapp.net` — com número puro trava), copiada para `mensagens-media/avatars/`, 7 dias de validade.
   Migration: `20261020120000_atendimentos_etiquetas_fotos.sql`. Base UI: `DropdownMenuLabel` precisa de
   `DropdownMenuGroup` em volta (senão a página quebra). Dev com CSS velho: apagar `.next/dev/cache`.
+- **IA × atendimento humano** (2026-10-20): etiquetas automáticas `app_etiquetas.chave` = `ia_atendendo` /
+  `atendimento_humano` (`lib/ia-whatsapp/etiquetas-atendimento.ts`, não editáveis). `pausarIA` → "Atendimento humano";
+  `despausarIA` tira a etiqueta e avança `ultima_mensagem_id` (a IA espera o cliente escrever); a IA responder →
+  "IA atendendo". Tool `mover_cliente_kanban` com `atendimento_humano` avisa o grupo e pausa DEPOIS de mandar a
+  resposta do turno (`efeitos.transferidoParaHumano`). Memória = tabela `mensagens`: mensagens da equipe entram no
+  histórico com prefixo "[Mensagem da equipe…]" (IA = `session_id='ia'`); mídias do cliente sem leitura (IA pausada)
+  são lidas ao voltar. Modo teste continua só para os números de teste.
+- **Funil → processo**: `processos_clientes.caso_id`. A equipe mover o card para `abertura_processo`
+  (`updateCasoStatusCliente`) cria o processo sem número ligado ao caso (a IA mover NÃO cria). Botões em
+  `components/processos/vincular-processo.tsx` (painel "Processo" no caso, botão "Processo" na conversa,
+  "Veio do funil" no card do processo). Processo novo cadastrado à mão liga ao caso do mesmo CPF/telefone.
+  Migration: `20261020150000_atendimento_ia_humano_processo_caso.sql`.

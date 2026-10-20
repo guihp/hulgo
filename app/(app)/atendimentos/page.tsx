@@ -34,7 +34,7 @@ export default async function AtendimentosPage({
     getWhatsAppInstancia(contact ?? undefined),
     supabase
       .from("casos_novos")
-      .select("telefone, status, beneficio_identificado, cpf")
+      .select("id, telefone, status, beneficio_identificado, cpf")
       .order("updated_at", { ascending: false }),
     getIaConfig().catch(() => null),
   ]);
@@ -46,6 +46,7 @@ export default async function AtendimentosPage({
     const key = phoneToContactNorm(row.telefone);
     if (!key || casoMeta[key]) continue;
     casoMeta[key] = {
+      id: row.id,
       status: row.status,
       beneficio: row.beneficio_identificado,
       cpf: row.cpf,

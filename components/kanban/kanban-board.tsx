@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { updateCasoStatusCliente } from "@/lib/actions/casos";
+import { toastProcessoDoCaso } from "@/components/processos/vincular-processo";
 import { criarKanbanColuna } from "@/lib/actions/kanban-colunas";
 import type { KanbanColunaMatch } from "@/lib/data/kanban-colunas";
 import type { Tables } from "@/types/database";
@@ -467,9 +468,10 @@ export function KanbanBoard({
       const result = await updateCasoStatusCliente(ids, newStatus);
       if (result.aprovacaoCriada) {
         toast.success("Pendência criada em Aprovações");
-      } else {
+      } else if (!result.processo?.ok || !result.processo.criado) {
         toast.success("Status atualizado");
       }
+      toastProcessoDoCaso(result.processo);
     } catch (err) {
       setCasos(prev);
       toast.error("Erro ao mover caso", {

@@ -783,6 +783,7 @@ export type Database = {
           nome: string;
           cor: string;
           ordem: number;
+          chave: string | null;
           created_at: string;
         };
         Insert: {
@@ -790,6 +791,7 @@ export type Database = {
           nome: string;
           cor?: string;
           ordem?: number;
+          chave?: string | null;
           created_at?: string;
         };
         Update: {
@@ -797,6 +799,7 @@ export type Database = {
           nome?: string;
           cor?: string;
           ordem?: number;
+          chave?: string | null;
           created_at?: string;
         };
         Relationships: [];
@@ -1228,6 +1231,7 @@ export type Database = {
           beneficio_identificado: string | null;
           cpf: string;
           created_at: string | null;
+          caso_id: number | null;
           data_nascimento: string | null;
           descricao_caso: string | null;
           /** Chave de app_processo_colunas (funil = area) */
@@ -1258,6 +1262,7 @@ export type Database = {
           beneficio_identificado?: string | null;
           cpf: string;
           created_at?: string | null;
+          caso_id?: number | null;
           data_nascimento?: string | null;
           descricao_caso?: string | null;
           funil_coluna?: string | null;
@@ -1286,6 +1291,7 @@ export type Database = {
           beneficio_identificado?: string | null;
           cpf?: string;
           created_at?: string | null;
+          caso_id?: number | null;
           data_nascimento?: string | null;
           descricao_caso?: string | null;
           funil_coluna?: string | null;

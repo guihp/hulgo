@@ -62,6 +62,10 @@ import { NovoPrazoDialog } from "@/components/prazos/prazos-ui";
 import { EditarCasoDialog } from "@/components/kanban/editar-caso";
 import { DocsAdvogado } from "@/components/kanban/docs-advogado";
 import { fichaPessoaHref } from "@/lib/utils/ficha";
+import {
+  ProcessosDoCaso,
+  toastProcessoDoCaso,
+} from "@/components/processos/vincular-processo";
 import { normalizeCpf } from "@/lib/utils/cpf";
 import { phoneToContactNorm } from "@/lib/utils/phone";
 import Link from "next/link";
@@ -203,8 +207,9 @@ export function CasoDetail({
 
   async function handleStatusChange(status: CasoStatus) {
     try {
-      await updateCasoStatus(caso.id, status);
+      const result = await updateCasoStatus(caso.id, status);
       toast.success("Status atualizado");
+      toastProcessoDoCaso(result.processo);
       router.refresh();
     } catch (err) {
       toastErroAcao(err, "Erro ao atualizar");
@@ -364,6 +369,13 @@ export function CasoDetail({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      <ProcessosDoCaso
+        key={caso.status ?? ""}
+        casoId={caso.id}
+        cpf={caso.cpf}
+        onAlterado={() => router.refresh()}
+      />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>

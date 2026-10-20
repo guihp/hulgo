@@ -104,11 +104,19 @@ export async function updateCasoStatusCliente(ids: number[], status: string) {
     encaminhamento = await enviarEncaminhamentoAnaliseSePendente(ids);
   }
 
+  // A equipe levou o card para "Abertura de processo": nasce o processo ligado
+  // ao caso. (Quando a IA move, não — ela usa essa coluna ainda na triagem.)
+  let processo: ResultadoProcessoDoCaso | undefined;
+  if (statusKey === "abertura_processo") {
+    processo = await garantirProcessoDoCaso(supabase, ids[0]);
+    revalidatePath("/processos");
+  }
+
   revalidatePath("/kanban");
   revalidatePath("/aprovacoes");
   revalidatePath("/clientes");
   revalidatePath("/");
-  return { success: true, aprovacaoCriada, encaminhamento };
+  return { success: true, aprovacaoCriada, encaminhamento, processo };
 }
 
 /** Garante pendência em aprovacoes_pendentes para o cliente do caso. */
@@ -241,6 +249,7 @@ export async function marcarProcessoCriado(
       area: caso.area,
       beneficio_identificado: caso.beneficio_identificado,
       ativo: true,
+      caso_id: casoId,
     });
 
   if (processoError) throw new Error(processoError.message);
@@ -511,11 +520,35 @@ export async function upsertProcesso(data: UpsertProcessoInput) {
       .eq("id", data.id);
     if (error) throw new Error(error.message);
   } else {
-    const { error } = await supabase.from("processos_clientes").insert(payload);
+    const { data: novo, error } = await supabase
+      .from("processos_clientes")
+      .insert(payload)
+      .select("id, caso_id")
+      .single();
     if (error) throw new Error(error.message);
 
     // Cliente ganhou processo — move o caso dele no Kanban para finalizado
     const telefone = payload.telefone?.replace(/\D/g, "") ?? "";
+
+    // ...e liga o processo ao caso mais recente desse cliente no funil.
+    if (!novo.caso_id) {
+      let casoQuery = supabase
+        .from("casos_novos")
+        .select("id")
+        .neq("status", "processo_finalizado")
+        .order("updated_at", { ascending: false })
+        .limit(1);
+      casoQuery = telefone
+        ? casoQuery.or(`cpf.eq.${payload.cpf},telefone.eq.${telefone}`)
+        : casoQuery.eq("cpf", payload.cpf);
+      const { data: casoDoCliente } = await casoQuery.maybeSingle();
+      if (casoDoCliente) {
+        await supabase
+          .from("processos_clientes")
+          .update({ caso_id: casoDoCliente.id })
+          .eq("id", novo.id);
+      }
+    }
     let casosQuery = supabase
       .from("casos_novos")
       .update({ status: "processo_finalizado" })
@@ -1131,4 +1164,159 @@ export async function criarCasoNaFicha(input: {
   revalidatePath(`/kanban/${created.id}`);
 
   return { success: true, casoId: created.id, href };
+}
+
+export type ResultadoProcessoDoCaso =
+  | { ok: true; criado: boolean; processoId: number; href: string }
+  | { ok: false; aviso: string };
+
+/**
+ * Processo do caso do funil: devolve o já ligado (caso_id) ou cria um novo,
+ * sem número, com os dados do caso. O caso continua onde está no funil.
+ */
+async function garantirProcessoDoCaso(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  casoId: number
+): Promise<ResultadoProcessoDoCaso> {
+  const { data: caso } = await supabase
+    .from("casos_novos")
+    .select("*")
+    .eq("id", casoId)
+    .maybeSingle();
+  if (!caso) return { ok: false, aviso: "Caso não encontrado" };
+
+  const { data: ligado } = await supabase
+    .from("processos_clientes")
+    .select("id, cpf, telefone")
+    .eq("caso_id", casoId)
+    .order("id", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (ligado) {
+    return {
+      ok: true,
+      criado: false,
+      processoId: ligado.id,
+      href: fichaPessoaHref({ cpf: ligado.cpf, contactNorm: ligado.telefone, aba: "datajud" }),
+    };
+  }
+
+  const cpf = caso.cpf ? normalizeCpf(caso.cpf) : "";
+  if (!caso.nome?.trim() || !isValidCpf(cpf)) {
+    return {
+      ok: false,
+      aviso:
+        "O processo não foi criado porque o caso está sem nome ou CPF. Preencha no card e use \"Criar processo\".",
+    };
+  }
+
+  const area = normalizeAreaProcesso(caso.area);
+  const funilColuna = await resolverFunilColuna(supabase, area, null);
+  const { data: novo, error } = await supabase
+    .from("processos_clientes")
+    .insert({
+      nome: caso.nome.trim(),
+      cpf,
+      data_nascimento: caso.data_nascimento,
+      telefone: caso.telefone ? normalizePhoneBrStorage(caso.telefone) : null,
+      numero_processo: null,
+      area,
+      funil_coluna: funilColuna,
+      beneficio_identificado: caso.beneficio_identificado?.trim() || null,
+      descricao_caso: caso.relatorio?.trim() || null,
+      ativo: true,
+      caso_id: casoId,
+    })
+    .select("id")
+    .single();
+  if (error) return { ok: false, aviso: `Não foi possível criar o processo: ${error.message}` };
+
+  await logEvent("casos_novos", casoId, "processo_criado_do_funil", { processo_id: novo.id });
+  return {
+    ok: true,
+    criado: true,
+    processoId: novo.id,
+    href: fichaPessoaHref({ cpf, aba: "datajud" }),
+  };
+}
+
+/** Botão "Criar processo" no caso (também serve quando a IA moveu o card). */
+export async function criarProcessoDoCaso(casoId: number) {
+  const user = await getAppUser();
+  if (!user) throw new Error("Não autenticado");
+  const supabase = await createClient();
+  const r = await garantirProcessoDoCaso(supabase, casoId);
+  if (!r.ok) throw new Error(r.aviso);
+  revalidatePath("/processos");
+  revalidatePath("/kanban");
+  revalidatePath("/clientes");
+  return r;
+}
+
+/**
+ * Liga um processo que já existe ao caso do funil e/ou ao contato do WhatsApp.
+ * Ao contato: grava o telefone no processo (é por ele que a conversa acha o processo).
+ */
+export async function vincularProcesso(input: {
+  processoId: number;
+  casoId?: number | null;
+  contactNorm?: string | null;
+}) {
+  const user = await getAppUser();
+  if (!user) throw new Error("Não autenticado");
+  const supabase = await createClient();
+
+  const patch: { caso_id?: number; telefone?: string } = {};
+  let casoId = input.casoId ?? null;
+  if (!casoId && input.contactNorm) {
+    // Conversa com caso no funil: liga ao caso também.
+    const tel = phoneToContactNorm(input.contactNorm);
+    const { data: casos } = await supabase
+      .from("casos_novos")
+      .select("id, telefone")
+      .order("updated_at", { ascending: false });
+    casoId = casos?.find((c) => phoneToContactNorm(c.telefone) === tel)?.id ?? null;
+  }
+  if (casoId) {
+    const { data: atual } = await supabase
+      .from("processos_clientes")
+      .select("caso_id")
+      .eq("id", input.processoId)
+      .maybeSingle();
+    if (!atual?.caso_id || input.casoId) patch.caso_id = casoId;
+  }
+  if (input.contactNorm) patch.telefone = normalizePhoneBrStorage(input.contactNorm);
+  if (!Object.keys(patch).length) throw new Error("Nada para vincular");
+
+  const { error } = await supabase
+    .from("processos_clientes")
+    .update(patch)
+    .eq("id", input.processoId);
+  if (error) throw new Error(error.message);
+
+  if (patch.caso_id) {
+    await logEvent("casos_novos", patch.caso_id, "processo_vinculado", {
+      processo_id: input.processoId,
+    });
+  }
+  revalidatePath("/processos");
+  revalidatePath("/kanban");
+  revalidatePath("/clientes");
+  return { success: true as const };
+}
+
+/** Desfaz a ligação processo ↔ caso do funil (o processo continua existindo). */
+export async function desvincularProcessoDoCaso(processoId: number) {
+  const user = await getAppUser();
+  if (!user) throw new Error("Não autenticado");
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("processos_clientes")
+    .update({ caso_id: null })
+    .eq("id", processoId);
+  if (error) throw new Error(error.message);
+  revalidatePath("/processos");
+  revalidatePath("/kanban");
+  revalidatePath("/clientes");
+  return { success: true as const };
 }

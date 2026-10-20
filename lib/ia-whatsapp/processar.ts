@@ -5,13 +5,17 @@ import { rodarAgente, type ChamadaRegistrada } from "@/lib/ia-whatsapp/agente";
 import { ehNumeroDeTeste, getIaConfig, iaAtendeTelefone } from "@/lib/ia-whatsapp/config";
 import { atrasoDigitacaoMs, dividirResposta } from "@/lib/ia-whatsapp/dividir";
 import { enviarTextoCliente, pausa } from "@/lib/ia-whatsapp/enviar";
-import { getIaEstado, iaEstaPausada } from "@/lib/ia-whatsapp/estado";
+import { getIaEstado, iaEstaPausada, pausarIA } from "@/lib/ia-whatsapp/estado";
+import { marcarAtendimento } from "@/lib/ia-whatsapp/etiquetas-atendimento";
 import { conteudoParaIA } from "@/lib/ia-whatsapp/midia";
 import { carregarPersona, montarSystemPrompt } from "@/lib/ia-whatsapp/prompt";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 
 const HISTORICO_MAX = 40;
+/** Mídias antigas (ex.: áudio mandado durante o atendimento humano) lidas por vez. */
+const MIDIAS_HISTORICO_MAX = 8;
+const PREFIXO_EQUIPE = "[Mensagem da equipe do escritório, enviada por uma pessoa] ";
 /** Mensagens mais antigas que isso não são respondidas (ex.: fila parada por horas). */
 const JANELA_PENDENTES_MS = 2 * 60 * 60 * 1000;
 
@@ -106,24 +110,48 @@ async function processarTelefone(item: ItemFila): Promise<void> {
     }
     entrada = pendentes.map((m) => m.ia_conteudo).filter(Boolean).join("\n");
 
-    // 2) Histórico (memória) — desde o último /reset
+    // 2) Histórico (memória) — desde o último /reset. Inclui o que a equipe
+    // conversou com o cliente enquanto a IA estava pausada.
     let histQuery = supabase
       .from("mensagens")
-      .select("type, text, ia_conteudo, mensage_type")
+      .select("*")
       .eq("contact_norm", tel)
       .lt("id", pendentes[0].id)
       .order("id", { ascending: false })
       .limit(HISTORICO_MAX);
     if (estado?.memoria_desde) histQuery = histQuery.gte("created_at", estado.memoria_desde);
     const { data: anteriores } = await histQuery;
-    const historico = (anteriores ?? [])
-      .reverse()
+    const antigas = (anteriores ?? []).reverse();
+
+    // Áudio/foto/documento do cliente que ninguém leu (IA estava pausada): lê agora.
+    const semLeitura = antigas
+      .filter((m) => m.type === "lead" && m.conteudo_media && m.ia_conteudo == null)
+      .slice(-MIDIAS_HISTORICO_MAX);
+    for (const m of semLeitura) {
+      try {
+        m.ia_conteudo = await conteudoParaIA(m);
+        await supabase.from("mensagens").update({ ia_conteudo: m.ia_conteudo }).eq("id", m.id);
+      } catch {
+        // segue com o rótulo genérico
+      }
+    }
+
+    const historico = antigas
       .map((m) => {
-        const content =
-          m.type === "lead"
-            ? m.ia_conteudo || m.text || `[${m.mensage_type ?? "mensagem"}]`
-            : m.text || (m.mensage_type && m.mensage_type !== "text" ? `[enviado ${m.mensage_type}]` : "");
-        return { role: m.type === "lead" ? ("user" as const) : ("assistant" as const), content: content ?? "" };
+        if (m.type === "lead") {
+          return {
+            role: "user" as const,
+            content: m.ia_conteudo || m.text || `[${m.mensage_type ?? "mensagem"}]`,
+          };
+        }
+        const corpo =
+          m.text || (m.mensage_type && m.mensage_type !== "text" ? `[enviado ${m.mensage_type}]` : "");
+        // session_id = "ia": a própria IA. O resto saiu do painel ou do celular do escritório.
+        const daEquipe = m.session_id !== "ia";
+        return {
+          role: "assistant" as const,
+          content: corpo && daEquipe ? `${PREFIXO_EQUIPE}${corpo}` : corpo,
+        };
       })
       .filter((m) => m.content.trim());
 
@@ -141,7 +169,11 @@ async function processarTelefone(item: ItemFila): Promise<void> {
     });
 
     // 4) Agente
-    const efeitos = { encaminhamentoEnviado: false, clienteJaAvisado: false };
+    const efeitos = {
+      encaminhamentoEnviado: false,
+      clienteJaAvisado: false,
+      transferidoParaHumano: false,
+    };
     const { resposta, chamadas, modelo } = await rodarAgente({
       systemPrompt,
       historico,
@@ -167,6 +199,13 @@ async function processarTelefone(item: ItemFila): Promise<void> {
       await pausa(atrasoDigitacaoMs(parte));
       await enviarTextoCliente({ telefone: tel, texto: parte, instancia: item.instancia });
       enviadas.push(parte);
+    }
+
+    if (efeitos.transferidoParaHumano) {
+      // Pediu atendimento humano: a resposta deste turno já saiu; daqui pra frente, a equipe.
+      await pausarIA(tel, "transferencia");
+    } else if (enviadas.length || efeitos.clienteJaAvisado) {
+      if (!(await iaEstaPausada(tel))) await marcarAtendimento(tel, "ia");
     }
 
     await registrarExecucao({

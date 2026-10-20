@@ -160,7 +160,14 @@ function LinhaEtiqueta({
       <span className="shrink-0 text-xs text-[#94a3b8]">
         {usos === 1 ? "1 conversa" : `${usos} conversas`}
       </span>
-      {confirmarExclusao ? (
+      {etiqueta.chave ? (
+        <span
+          className="shrink-0 rounded-full bg-[#F1F5F9] px-2 py-0.5 text-[11px] text-[#64748B]"
+          title="Entra e sai sozinha conforme a IA ou a equipe assume a conversa."
+        >
+          automática
+        </span>
+      ) : confirmarExclusao ? (
         <>
           <Button
             type="button"
@@ -243,6 +250,7 @@ export function GerenciarEtiquetasDialog({
         <DialogTitle>Etiquetas</DialogTitle>
         <DialogDescription>
           Use etiquetas para organizar as conversas. Elas valem para toda a equipe.
+          &ldquo;IA atendendo&rdquo; e &ldquo;Atendimento humano&rdquo; entram e saem sozinhas.
         </DialogDescription>
 
         <ul className="max-h-72 space-y-1 overflow-y-auto">

@@ -51,6 +51,7 @@ import {
 } from "@/lib/utils/dates";
 import { formatPhone, phoneToContactNorm } from "@/lib/utils/phone";
 import { ChatComposer } from "@/components/atendimentos/chat-composer";
+import { ProcessoDaConversa } from "@/components/processos/vincular-processo";
 import {
   EtiquetaChip,
   EtiquetaDot,
@@ -87,6 +88,7 @@ export type ConversaRow =
   Database["public"]["Functions"]["listar_conversas"]["Returns"][number];
 
 export type CasoMeta = {
+  id: number;
   status: string | null;
   beneficio: string | null;
   cpf: string | null;
@@ -115,6 +117,7 @@ type Conversation = {
   lidaEm: string | null;
   iaPausada: boolean;
   etiquetas: number[];
+  casoId: number | null;
   casoStatus: string | null;
   beneficio: string | null;
   cpf: string | null;
@@ -148,8 +151,8 @@ function estadoIA(conv: Conversation, ia: IaInfo): EstadoIA {
   if (conv.iaPausada) {
     return {
       chave: "pausada",
-      rotulo: "IA pausada",
-      dica: "A equipe assumiu esta conversa. Clique para a IA voltar a responder.",
+      rotulo: "Humano atendendo · devolver para a IA",
+      dica: "A equipe está atendendo e a IA não responde. Clique para a IA voltar a atender: ela responde quando o cliente mandar a próxima mensagem, já sabendo tudo o que foi conversado.",
     };
   }
   return {
@@ -259,6 +262,7 @@ function toConversation(
     lidaEm: row.lida_em,
     iaPausada: row.ia_pausada,
     etiquetas: row.etiquetas ?? [],
+    casoId: caso?.id ?? null,
     casoStatus: caso?.status ?? null,
     beneficio: caso?.beneficio ?? null,
     cpf: caso?.cpf ?? null,
@@ -561,7 +565,7 @@ function ConversaMenuItens({
           Etiquetar conversa
         </DropdownMenuSubTrigger>
         <DropdownMenuSubContent className="min-w-52">
-          {etiquetas.map((e) => (
+          {etiquetas.filter((e) => !e.chave).map((e) => (
             <DropdownMenuCheckboxItem
               key={e.id}
               checked={conv.etiquetas.includes(e.id)}
@@ -571,7 +575,7 @@ function ConversaMenuItens({
               {e.nome}
             </DropdownMenuCheckboxItem>
           ))}
-          {etiquetas.length > 0 ? <DropdownMenuSeparator /> : null}
+          {etiquetas.some((e) => !e.chave) ? <DropdownMenuSeparator /> : null}
           <DropdownMenuItem onClick={onGerenciarEtiquetas}>
             Gerenciar etiquetas…
           </DropdownMenuItem>
@@ -1013,7 +1017,7 @@ function ConversationThread({
       toast.success(
         pausar
           ? "IA pausada nesta conversa. A equipe assume daqui."
-          : "A IA voltou a responder esta conversa."
+          : "Devolvido para a IA. Ela responde quando o cliente mandar a próxima mensagem."
       );
     } catch (err) {
       toastErroAcao(err, "Falha ao controlar a IA");
@@ -1038,7 +1042,7 @@ function ConversationThread({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#F1F5F9]">
-      <header className="flex shrink-0 items-center gap-3 border-b border-[#e2e8f0] bg-white px-4 py-2.5">
+      <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-[#e2e8f0] bg-white px-4 py-2.5">
         <button
           type="button"
           onClick={onBack}
@@ -1047,7 +1051,7 @@ function ConversationThread({
         >
           <ArrowLeft className="h-5 w-5" />
         </button>
-        <div className="flex min-w-0 flex-1 items-center gap-3">
+        <div className="flex min-w-[220px] flex-1 items-center gap-3">
           <ContactAvatar
             phone={conv.phone}
             name={conv.displayName}
@@ -1072,7 +1076,7 @@ function ConversationThread({
             ) : null}
           </div>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           {statusText ? (
             <span
               className={cn(
@@ -1110,6 +1114,11 @@ function ConversationThread({
               {estado.rotulo}
             </Link>
           )}
+          <ProcessoDaConversa
+            contactNorm={conv.contact_norm}
+            cpf={conv.cpf}
+            casoId={conv.casoId}
+          />
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
@@ -1128,7 +1137,7 @@ function ConversationThread({
             <DropdownMenuContent align="end" className="min-w-56">
               <DropdownMenuGroup>
                 <DropdownMenuLabel>Etiquetas</DropdownMenuLabel>
-                {etiquetas.map((e) => (
+                {etiquetas.filter((e) => !e.chave).map((e) => (
                   <DropdownMenuCheckboxItem
                     key={e.id}
                     checked={conv.etiquetas.includes(e.id)}

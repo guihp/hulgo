@@ -258,6 +258,15 @@ function ProcessoCard({
           Parceiro: {parceiroNome}
         </p>
       ) : null}
+      {processo.caso_id ? (
+        <a
+          href={fichaPessoaHref({ cpf, contactNorm, aba: "caso", casoId: processo.caso_id })}
+          onPointerDown={stopDrag}
+          className="mt-1.5 inline-block text-[11px] font-medium text-primary underline-offset-2 hover:underline"
+        >
+          Veio do funil de vendas (caso #{processo.caso_id})
+        </a>
+      ) : null}
       <div className="mt-2 flex items-center justify-end gap-2">
         {cpf || contactNorm || onDeleted || podeMover || onTransferir ? (
           <div onPointerDown={stopDrag} className="flex shrink-0 items-center gap-1">

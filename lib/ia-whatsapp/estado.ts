@@ -1,6 +1,7 @@
 import "server-only";
 
 import { normalizarTelefone } from "@/lib/ia-whatsapp/config";
+import { marcarAtendimento } from "@/lib/ia-whatsapp/etiquetas-atendimento";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Tables } from "@/types/database";
 
@@ -11,6 +12,7 @@ export type MotivoPausa =
   | "painel"
   | "aprovacao"
   | "aprovacao_recusada"
+  | "transferencia"
   | "manual";
 
 export async function getIaEstado(telefone: string): Promise<IaEstado | null> {
@@ -43,23 +45,38 @@ export async function pausarIA(telefone: string, motivo: MotivoPausa): Promise<v
     { onConflict: "telefone" }
   );
   if (error) throw new Error(`Falha ao pausar a IA: ${error.message}`);
+  await marcarAtendimento(tel, "humano");
 }
 
+/**
+ * Devolve a conversa para a IA. Ela não responde o que já foi conversado:
+ * espera a próxima mensagem do cliente, com toda a conversa (inclusive a da
+ * equipe) na memória. A etiqueta "IA atendendo" entra quando ela responder.
+ */
 export async function despausarIA(telefone: string): Promise<void> {
   const tel = normalizarTelefone(telefone);
   if (!tel) return;
   const supabase = createServiceClient();
+  const { data: ultima } = await supabase
+    .from("mensagens")
+    .select("id")
+    .eq("contact_norm", tel)
+    .order("id", { ascending: false })
+    .limit(1)
+    .maybeSingle();
   const { error } = await supabase.from("app_ia_estado").upsert(
     {
       telefone: tel,
       pausada: false,
       pausada_em: null,
       pausada_motivo: null,
+      ...(ultima ? { ultima_mensagem_id: ultima.id } : {}),
       updated_at: new Date().toISOString(),
     },
     { onConflict: "telefone" }
   );
   if (error) throw new Error(`Falha ao liberar a IA: ${error.message}`);
+  await marcarAtendimento(tel, null);
 }
 
 /** /reset: a IA esquece a conversa até agora e volta a responder. */

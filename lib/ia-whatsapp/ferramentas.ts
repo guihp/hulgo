@@ -18,7 +18,12 @@ export type ContextoFerramenta = {
   instancia: string | null;
   config: IaWhatsappConfig;
   /** Marca efeitos que mudam o que fazer com a resposta final. */
-  efeitos: { encaminhamentoEnviado: boolean; clienteJaAvisado: boolean };
+  efeitos: {
+    encaminhamentoEnviado: boolean;
+    clienteJaAvisado: boolean;
+    /** Pediu atendimento humano: a IA pausa depois de mandar a resposta deste turno. */
+    transferidoParaHumano: boolean;
+  };
 };
 
 type Params = Record<string, unknown>;
@@ -86,7 +91,7 @@ export const FERRAMENTAS = [
     type: "function",
     name: "mover_cliente_kanban",
     description:
-      "Move o cliente no funil Kanban. Chame APENAS quando a intenção mudar ou ficar clara — não a cada mensagem. Antes de mover, prefira consultar_cliente_kanban.\n\nColunas (campo coluna):\n- em_atendimento = cliente novo ou intenção indefinida\n- consultar_processo = quer andamento (ainda organizando)\n- abertura_processo = benefício novo ainda coletando docs\n- aguardando_analise = organização concluída / caixa de pendências da equipe (destino padrão — o sistema envia a mensagem fixa de encaminhamento)\n- aguardando_aprovacao = após enviar_para_aprovacao_advogado (consulta de processo)\n- atendimento_humano = pediu falar com advogado\n- processo_finalizado = caso encerrado\n\nSempre informe motivo curto.",
+      "Move o cliente no funil Kanban. Chame APENAS quando a intenção mudar ou ficar clara — não a cada mensagem. Antes de mover, prefira consultar_cliente_kanban.\n\nColunas (campo coluna):\n- em_atendimento = cliente novo ou intenção indefinida\n- consultar_processo = quer andamento (ainda organizando)\n- abertura_processo = benefício novo ainda coletando docs\n- aguardando_analise = organização concluída / caixa de pendências da equipe (destino padrão — o sistema envia a mensagem fixa de encaminhamento)\n- aguardando_aprovacao = após enviar_para_aprovacao_advogado (consulta de processo)\n- atendimento_humano = pediu falar com advogado/atendente ou o caso precisa de uma pessoa (o sistema avisa a equipe no grupo e você para de responder este cliente; avise o cliente que uma pessoa da equipe vai continuar o atendimento)\n- processo_finalizado = caso encerrado\n\nSempre informe motivo curto.",
     parameters: {
       type: "object",
       properties: {
@@ -261,6 +266,30 @@ async function moverKanban(p: Params, ctx: ContextoFerramenta) {
     const r = await enviarEncaminhamentoAnaliseSePendente([Number(row.caso_id)]);
     mensagemFixaEnviada = r.enviada;
     if (r.enviada) ctx.efeitos.encaminhamentoEnviado = true;
+  }
+
+  if (coluna === "atendimento_humano" && !ctx.efeitos.transferidoParaHumano) {
+    ctx.efeitos.transferidoParaHumano = true;
+    const nome = texto(p.nome_cliente);
+    const aviso = [
+      "🙋 *ATENDIMENTO HUMANO SOLICITADO*",
+      "_A IA parou de responder este cliente. Assuma a conversa pelo painel ou pelo celular._",
+      "",
+      `👤 Cliente: ${nome ?? "—"}`,
+      `📱 WhatsApp: ${ctx.telefone}`,
+      `📝 Motivo: ${texto(p.motivo) ?? "—"}`,
+      "",
+      `Abrir a conversa: ${urlPainel()}/atendimentos?contact=${ctx.telefone}`,
+    ].join("\n");
+    const avisado = await enviarParaAdvogado(ctx.config.grupo_advogado, aviso);
+    return {
+      ok: true,
+      caso_id: row?.caso_id,
+      status: row?.status,
+      equipe_avisada: avisado,
+      instrucao:
+        "A equipe foi avisada e vai assumir. Diga ao cliente, em uma mensagem curta, que uma pessoa da equipe vai continuar o atendimento por aqui. Depois disso você não responde mais este cliente.",
+    };
   }
 
   return {

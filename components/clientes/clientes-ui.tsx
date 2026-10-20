@@ -1,5 +1,6 @@
 "use client";
 
+import { toastProcessoDoCaso } from "@/components/processos/vincular-processo";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -1767,8 +1768,9 @@ function CasoResumoCard({
     if ((caso.status ?? "") === chave) return;
     setMoving(true);
     try {
-      await updateCasoStatus(caso.id, chave);
+      const result = await updateCasoStatus(caso.id, chave);
       toast.success("Caso movido no funil");
+      toastProcessoDoCaso(result.processo);
       router.refresh();
     } catch (err) {
       toastErroAcao(err, "Erro ao mover");

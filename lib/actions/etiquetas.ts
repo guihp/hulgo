@@ -19,6 +19,17 @@ function validar(nome: string, cor: string) {
   return limpo;
 }
 
+/** "IA atendendo" / "Atendimento humano" são trocadas pelo sistema, não à mão. */
+async function exigirEtiquetaManual(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  id: number
+) {
+  const { data } = await supabase.from("app_etiquetas").select("chave").eq("id", id).maybeSingle();
+  if (data?.chave) {
+    throw new Error("Essa etiqueta é automática: ela muda sozinha conforme quem está atendendo");
+  }
+}
+
 function erroAmigavel(message: string): Error {
   if (/app_etiquetas_nome_key|duplicate key/i.test(message)) {
     return new Error("Já existe uma etiqueta com esse nome");
@@ -49,6 +60,7 @@ export async function editarEtiqueta(input: { id: number; nome: string; cor: str
   await exigirUsuario();
   const nome = validar(input.nome, input.cor);
   const supabase = await createClient();
+  await exigirEtiquetaManual(supabase, input.id);
   const { error } = await supabase
     .from("app_etiquetas")
     .update({ nome, cor: input.cor })
@@ -61,6 +73,7 @@ export async function editarEtiqueta(input: { id: number; nome: string; cor: str
 export async function excluirEtiqueta(id: number) {
   await exigirUsuario();
   const supabase = await createClient();
+  await exigirEtiquetaManual(supabase, id);
   const { error } = await supabase.from("app_etiquetas").delete().eq("id", id);
   if (error) throw new Error(error.message);
   return { success: true as const };
@@ -73,6 +86,7 @@ export async function definirEtiquetaConversa(input: {
 }) {
   await exigirUsuario();
   const supabase = await createClient();
+  await exigirEtiquetaManual(supabase, input.etiquetaId);
   const { error } = input.marcada
     ? await supabase
         .from("app_conversa_etiquetas")
