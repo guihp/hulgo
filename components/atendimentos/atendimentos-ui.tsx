@@ -234,7 +234,11 @@ function previewKind(
 ): Conversation["lastKind"] {
   if (mensageType === "location") return "location";
   if (mensageType === "contact") return "contact";
-  if (!media) return "text";
+  if (!media) {
+    // Arquivo da equipe não fica guardado: a prévia usa só o tipo.
+    if (mensageType === "audio" || mensageType === "video" || mensageType === "document") return mensageType;
+    return mensageType === "image" ? "image" : "text";
+  }
   const kind = resolveMediaDisplayKind(mensageType, media);
   if (kind === "audio" || kind === "video" || kind === "document") return kind;
   return "image";
@@ -418,7 +422,25 @@ function MediaPreview({
     );
   }
 
-  if (!url) return null;
+  if (!url) {
+    if (!["image", "audio", "video", "document"].includes(type)) return null;
+    const rotulo =
+      type === "image"
+        ? "Foto enviada"
+        : type === "audio"
+          ? "Áudio enviado"
+          : type === "video"
+            ? "Vídeo enviado"
+            : "Documento enviado";
+    return (
+      <div className={cn("mb-1 flex items-center gap-2 rounded-lg border px-2.5 py-2 text-xs text-[#64748B]", shell)}>
+        <FileText className="h-4 w-4 shrink-0" />
+        {isClient
+          ? "Arquivo indisponível"
+          : `${rotulo} pela equipe (não fica guardado no sistema)`}
+      </div>
+    );
+  }
 
   const mediaKind = resolveMediaDisplayKind(type, url);
 
@@ -1233,7 +1255,11 @@ function ConversationThread({
                         ? ""
                         : cleanMessageText(msg.text);
                     const hasContent = Boolean(
-                      text || msg.conteudo_media || location || contact
+                      text ||
+                        msg.conteudo_media ||
+                        location ||
+                        contact ||
+                        ["image", "audio", "video", "document"].includes(messageType)
                     );
                     return (
                       <div key={msg.id}>

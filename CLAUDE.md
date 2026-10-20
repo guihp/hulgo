@@ -122,3 +122,7 @@
 - **Etiqueta do parceiro no chat** (2026-10-21): `/atendimentos` monta `parceiroMeta` (processo com `parceiro_id`
   ligado ao contato pelo telefone, pelo `caso_id` ou pelo CPF do card) e mostra o chip âmbar com o nome do
   parceiro na lista e no topo da conversa. `contactInitials` ignora emoji (cortava surrogate → erro de hidratação).
+- **Arquivo da equipe não fica guardado** (2026-10-21): mídia com `IsFromMe` (celular ou eco do painel) não é
+  baixada em `ingest.ts`; envio pelo painel (`enviarMensagem` kind media) sobe ao storage só para a EvoGo buscar
+  e apaga logo depois (`conteudo_media` null). O chat mostra "Foto enviada pela equipe (não fica guardado)".
+  Arquivos do cliente e "Documentos do escritório" (ficha) continuam guardados; nada é apagado automaticamente.

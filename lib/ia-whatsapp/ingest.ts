@@ -76,7 +76,13 @@ export async function salvarMensagemRecebida(msg: MensagemRecebida): Promise<Men
   const contactNorm = row.result_contact_norm;
   let conteudoMedia: string | null = null;
 
-  if (msg.base64 && ["image", "audio", "video", "document", "sticker"].includes(msg.tipo)) {
+  // Arquivo mandado pela equipe (celular ou eco do painel) não fica guardado:
+  // o cliente já recebeu e a cópia só ocuparia espaço. Fica só o registro no chat.
+  if (
+    !msg.doEscritorio &&
+    msg.base64 &&
+    ["image", "audio", "video", "document", "sticker"].includes(msg.tipo)
+  ) {
     const mime = (msg.mime ?? "application/octet-stream").split(";")[0].trim();
     const ext = extensaoDaMidia(msg.mime, msg.nomeArquivo);
     const path = `${contactNorm}/${msg.id || rowId}.${ext}`;

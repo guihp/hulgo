@@ -145,6 +145,16 @@ async function uploadToMensagensMedia(
   return data.publicUrl;
 }
 
+async function removerDoMensagensMedia(publicUrl: string) {
+  const marcador = "/mensagens-media/";
+  const i = publicUrl.indexOf(marcador);
+  if (i < 0) return;
+  const path = decodeURIComponent(publicUrl.slice(i + marcador.length).split("?")[0]);
+  const supabase = await getStorageClient();
+  const { error } = await supabase.storage.from("mensagens-media").remove([path]);
+  if (error) console.error("[mensagens] remover mídia enviada", error.message);
+}
+
 async function logEvent(
   entidadeId: number | null,
   acao: string,
@@ -259,22 +269,27 @@ export async function enviarMensagem(
       break;
     }
     case "media": {
+      // O WhatsApp busca o arquivo por URL; depois de enviado, a cópia é apagada
+      // (arquivo mandado pela equipe não fica guardado no sistema).
       const publicUrl = await uploadToMensagensMedia(
         input.contactNorm,
         input.fileName,
         input.mimeType,
         input.fileBase64
       );
-      messageId = await sendMedia({
-        number: phoneDigits,
-        url: publicUrl,
-        type: input.mediaType,
-        caption: input.caption,
-        filename: input.fileName,
-      });
+      try {
+        messageId = await sendMedia({
+          number: phoneDigits,
+          url: publicUrl,
+          type: input.mediaType,
+          caption: input.caption,
+          filename: input.fileName,
+        });
+      } finally {
+        await removerDoMensagensMedia(publicUrl);
+      }
       mensageType = input.mediaType;
       text = input.caption?.trim() || null;
-      conteudoMedia = publicUrl;
       break;
     }
     case "location": {
