@@ -42,6 +42,7 @@ import {
   assistenteKanbanHref,
 } from "@/lib/assistente/links";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 import { consultarAoVivoERegistrar } from "@/lib/datajud-monitor";
 import type { ResultadoDataJud } from "@/lib/datajud";
 import { brazilCalendarDayBounds } from "@/lib/utils/dates";
@@ -430,7 +431,7 @@ export const ASSISTENTE_TOOL_DEFINITIONS = [
     function: {
       name: "ler_prompt_agente",
       description:
-        "Lê o rascunho do agente WhatsApp: persona/regras E mensagem_abertura. Só advogado. Retorna metadados + índice de seções da persona + textos (salvo zoom). Sempre varra os dois documentos antes de propor alterações. Opcional: secao ou trecho para zoom. Não despeje tudo no chat — cite âncoras. Link: /configuracoes (aba Agente).",
+        "Lê o rascunho do agente WhatsApp: persona/regras E mensagem_abertura. Só advogado. Retorna metadados + índice de seções da persona + textos (salvo zoom) + qual_versao_a_ia_usa (publicada x rascunho) + diferencas_rascunho_publicado + alertas (marcadores de teste no rascunho). Sempre varra os dois documentos antes de propor alterações. Opcional: secao ou trecho para zoom. Não despeje tudo no chat — cite âncoras. Link: /configuracoes (aba Agente).",
       parameters: {
         type: "object",
         properties: {
@@ -1512,6 +1513,7 @@ async function toolLerPromptAgente(
     mensagem_abertura.trim() !==
       (config.mensagem_abertura_publicada ?? "").trim();
   const secoes = indexPromptSections(persona);
+  const contexto = await contextoPromptAgente(config, rascunhoDiferente);
   const secaoNome = str(args.secao);
   const trecho = str(args.trecho);
   const incluirCompleto = bool(args.incluir_texto_completo, false);
@@ -1588,7 +1590,9 @@ async function toolLerPromptAgente(
       ? `publicado ${config.published_at.slice(0, 10)}`
       : "nunca publicado",
     `${secoes.length} seção(ões)`,
+    contexto.qual_versao_a_ia_usa,
   ];
+  if (contexto.alertas.length) summaryParts.push(`ALERTAS: ${contexto.alertas.join(" / ")}`);
   if (zoom?.tipo === "secao") {
     summaryParts.push(`zoom seção ${zoom.name} @L${zoom.line}`);
   } else if (zoom?.tipo === "trecho") {
@@ -1610,12 +1614,75 @@ async function toolLerPromptAgente(
       abertura_chars: mensagem_abertura.length,
       secoes,
       zoom,
+      ...contexto,
       // Full drafts when no zoom (or explicitly requested); zoom alone when focused.
       ...(incluirCompleto || !zoom
         ? { persona, mensagem_abertura }
         : {}),
       href: "/configuracoes",
     },
+  };
+}
+
+/** Linhas não vazias que existem num texto e não no outro (comparação simples, para orientar a IA). */
+function linhasSoEm(a: string, b: string, max = 40): string[] {
+  const outras = new Set(b.split("\n").map((l) => l.trim()));
+  return a
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l && !outras.has(l))
+    .slice(0, max);
+}
+
+/**
+ * O que a IA do WhatsApp realmente usa hoje (publicado x rascunho), o que muda entre os dois
+ * e sujeiras no rascunho — sem isso o assistente propunha remendos redundantes.
+ */
+async function contextoPromptAgente(
+  config: NonNullable<Awaited<ReturnType<typeof getAgenteConfig>>>,
+  rascunhoDiferente: boolean
+) {
+  const persona = config.persona ?? "";
+  const publicada = config.persona_publicada ?? "";
+  const alertas: string[] = [];
+  const comentarios = persona.match(/<!--[\s\S]*?-->/g) ?? [];
+  if (comentarios.length) {
+    alertas.push(
+      `rascunho tem ${comentarios.length} comentário(s)/marcador(es) de teste (${comentarios
+        .map((c) => c.slice(0, 60))
+        .join(", ")}) — sugerir remover antes de publicar`
+    );
+  }
+
+  let qual = "IA do WhatsApp usa a versão PUBLICADA";
+  try {
+    const { data: cfg } = await createServiceClient()
+      .from("app_ia_whatsapp_config")
+      .select("modo, numeros_teste, usar_rascunho_no_teste")
+      .maybeSingle();
+    if (cfg) {
+      qual =
+        cfg.modo === "desligado"
+          ? "IA do WhatsApp DESLIGADA (não responde ninguém)"
+          : `IA do WhatsApp em modo ${cfg.modo}: clientes usam a PUBLICADA; números de teste usam ${
+              cfg.usar_rascunho_no_teste ? "o RASCUNHO" : "a PUBLICADA"
+            }`;
+    }
+  } catch {
+    // sem a config, fica o padrão (publicada)
+  }
+
+  return {
+    qual_versao_a_ia_usa: qual,
+    alertas,
+    ...(rascunhoDiferente
+      ? {
+          diferencas_rascunho_publicado: {
+            so_no_rascunho: linhasSoEm(persona, publicada),
+            so_no_publicado: linhasSoEm(publicada, persona),
+          },
+        }
+      : {}),
   };
 }
 

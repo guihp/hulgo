@@ -146,3 +146,7 @@
   Migration `20261028190000_tipos_caso_orientacoes_ia.sql`.
 - **Devolver para a IA em 2 modos** (2026-10-28): "IA continua agora" (`setControleIA({responderAgora})` →
   `retomarAtendimentoIA` em `processar.ts`, entrada = aviso interno, sem mexer na fila) ou "IA espera o cliente".
+- **Assistente em janela flutuante** (2026-10-28): estilo Messenger (canto inferior direito, minimizar/fechar, sem
+  escurecer a tela). `ler_prompt_agente` devolve `qual_versao_a_ia_usa`, `diferencas_rascunho_publicado` e `alertas`
+  (marcadores no rascunho); o prompt do assistente manda checar a versão que gerou a resposta e trocar a regra causadora
+  em vez de empilhar regra nova.

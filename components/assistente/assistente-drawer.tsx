@@ -9,13 +9,13 @@ import {
 } from "react";
 import Link from "next/link";
 import {
-  Bot,
   Check,
   FileDown,
   FileText,
   Loader2,
   Maximize2,
   MessageSquare,
+  Minus,
   Paperclip,
   Plus,
   RotateCcw,
@@ -34,14 +34,6 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet";
 import {
   abrirSessaoAssistente,
   cancelarAcaoAssistente,
@@ -874,7 +866,7 @@ function ConfirmCard({
             Ver em tela cheia
           </button>
           <Dialog open={telaCheia} onOpenChange={setTelaCheia}>
-            <DialogContent className="flex max-h-[92vh] w-[min(96vw,1000px)] max-w-none flex-col gap-3 sm:max-w-none">
+            <DialogContent className="flex max-h-[85vh] flex-col gap-3 sm:max-w-2xl">
               <DialogTitle className="text-[#0b2148]">{label}</DialogTitle>
               <DialogDescription>
                 O que muda no prompt da IA do WhatsApp. Confirmar grava no rascunho; publicar é em
@@ -1006,6 +998,8 @@ function nextOptimisticId() {
 
 export function AssistenteDrawer() {
   const [open, setOpen] = useState(false);
+  // Janela estilo Messenger: minimizada fica só a barra do topo, sem fechar a conversa.
+  const [minimizado, setMinimizado] = useState(false);
   const [draft, setDraft] = useState("");
   const [sessaoId, setSessaoId] = useState<string | null>(null);
   const [messages, setMessages] = useState<AssistenteMessage[]>([]);
@@ -1072,6 +1066,7 @@ export function AssistenteDrawer() {
 
   function onOpenChange(next: boolean) {
     setOpen(next);
+    setMinimizado(false);
     if (next) void bootIfNeeded();
   }
 
@@ -1079,7 +1074,7 @@ export function AssistenteDrawer() {
     const el = listRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [messages, awaitingReply, open]);
+  }, [messages, awaitingReply, open, minimizado]);
 
   function clearPendingAnexo(opts?: { revoke?: boolean }) {
     if (opts?.revoke !== false && pendingAnexo?.previewUrl) {
@@ -1370,80 +1365,105 @@ export function AssistenteDrawer() {
     !queued &&
     !confirmingId;
 
+  const iconeTopo =
+    "flex size-7 items-center justify-center rounded-full text-[#0866FF] transition-colors hover:bg-[#F0F2F5] disabled:opacity-40";
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        className="fixed bottom-20 right-4 z-40 flex size-14 items-center justify-center rounded-full bg-[#0b2148] text-white shadow-lg transition-colors hover:bg-[#0b2148]/90 lg:bottom-6 lg:right-6"
+        aria-label="Abrir assistente"
+        title="Assistente"
+        onClick={() => onOpenChange(true)}
+      >
+        <Sparkles className="size-6" />
+      </button>
+    );
+  }
+
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      {!open ? (
-        <SheetTrigger
-          render={
+    <section
+      role="dialog"
+      aria-label="Assistente interno"
+      className={cn(
+        "fixed right-2 bottom-16 z-40 flex w-[min(calc(100vw-1rem),380px)] flex-col overflow-hidden rounded-xl border border-[#e2e8f0] bg-white shadow-[0_12px_28px_rgba(0,0,0,0.2),0_2px_4px_rgba(0,0,0,0.1)] lg:right-6 lg:bottom-0 lg:rounded-b-none",
+        minimizado ? "h-auto" : "h-[min(560px,calc(100dvh-5rem))]"
+      )}
+    >
+      <header className="flex shrink-0 items-center gap-2 border-b border-[#e2e8f0] px-2.5 py-2">
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1 py-0.5 text-left hover:bg-[#F0F2F5]"
+          onClick={() => setMinimizado((m) => !m)}
+          title={minimizado ? "Abrir" : "Minimizar"}
+        >
+          <AssistenteAvatar />
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-semibold text-[#050505]">
+              Assistente interno
+            </span>
+            <span className="block truncate text-[11px] text-[#65676B]">
+              {awaitingReply ? "Digitando…" : "Ações pedem confirmação"}
+            </span>
+          </span>
+        </button>
+        {!minimizado ? (
+          <>
             <button
               type="button"
-              className="fixed bottom-20 right-4 z-40 flex size-14 items-center justify-center rounded-full bg-[#0b2148] text-white shadow-lg transition-colors hover:bg-[#0b2148]/90 lg:bottom-6 lg:right-6"
-              aria-label="Abrir assistente"
-              title="Assistente"
-            />
-          }
+              className={iconeTopo}
+              disabled={busy || !sessaoId}
+              onClick={toggleSessoes}
+              aria-label="Conversas"
+              title="Conversas"
+            >
+              <MessageSquare className="size-4" />
+            </button>
+            <button
+              type="button"
+              className={iconeTopo}
+              disabled={busy}
+              onClick={novaConversa}
+              aria-label="Nova conversa"
+              title="Nova conversa"
+            >
+              <Plus className="size-4" />
+            </button>
+            <button
+              type="button"
+              className={iconeTopo}
+              disabled={busy || !sessaoId}
+              onClick={restart}
+              aria-label="Reiniciar conversa"
+              title="Reiniciar"
+            >
+              <RotateCcw className="size-3.5" />
+            </button>
+          </>
+        ) : null}
+        <button
+          type="button"
+          className={iconeTopo}
+          onClick={() => setMinimizado((m) => !m)}
+          aria-label={minimizado ? "Abrir" : "Minimizar"}
+          title={minimizado ? "Abrir" : "Minimizar"}
         >
-          <Sparkles className="size-6" />
-        </SheetTrigger>
-      ) : null}
-      <SheetContent
-        side="right"
-        className="flex w-full flex-col gap-0 border-[#e2e8f0] bg-[#F8FAFC] p-0 sm:max-w-md"
-        showCloseButton
-      >
-        <SheetHeader className="shrink-0 border-b border-[#e2e8f0] bg-white px-4 py-3 pr-12">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <SheetTitle className="flex items-center gap-2 text-[#0b2148]">
-                <Bot className="size-4 shrink-0" />
-                Assistente interno
-              </SheetTitle>
-              <SheetDescription className="text-[#64748B]">
-                Consulte e execute ações do escritório — escritas pedem
-                confirmação.
-              </SheetDescription>
-            </div>
-            <div className="flex shrink-0 items-center gap-1">
-              <Button
-                type="button"
-                variant="outline"
-                size="icon-sm"
-                className="border-[#e2e8f0] text-[#0b2148]"
-                disabled={busy || !sessaoId}
-                onClick={toggleSessoes}
-                aria-label="Conversas"
-                title="Conversas"
-              >
-                <MessageSquare className="size-3.5" />
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon-sm"
-                className="border-[#e2e8f0] text-[#0b2148]"
-                disabled={busy}
-                onClick={novaConversa}
-                aria-label="Nova conversa"
-                title="Nova conversa"
-              >
-                <Plus className="size-3.5" />
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon-sm"
-                className="border-[#e2e8f0] text-[#0b2148]"
-                disabled={busy || !sessaoId}
-                onClick={restart}
-                aria-label="Reiniciar conversa"
-                title="Reiniciar"
-              >
-                <RotateCcw className="size-3.5" />
-              </Button>
-            </div>
-          </div>
-        </SheetHeader>
+          <Minus className="size-4" />
+        </button>
+        <button
+          type="button"
+          className={iconeTopo}
+          onClick={() => onOpenChange(false)}
+          aria-label="Fechar"
+          title="Fechar"
+        >
+          <X className="size-4" />
+        </button>
+      </header>
 
+      {minimizado ? null : (
+      <>
         {showSessoes ? (
           <div className="shrink-0 border-b border-[#e2e8f0] bg-white px-3 py-2">
             <div className="mb-1.5 flex items-center justify-between gap-2">
@@ -1808,7 +1828,8 @@ export function AssistenteDrawer() {
             </p>
           ) : null}
         </div>
-      </SheetContent>
-    </Sheet>
+      </>
+      )}
+    </section>
   );
 }
