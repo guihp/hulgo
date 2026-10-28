@@ -122,10 +122,13 @@
 - **Etiqueta do parceiro no chat** (2026-10-21): `/atendimentos` monta `parceiroMeta` (processo com `parceiro_id`
   ligado ao contato pelo telefone, pelo `caso_id` ou pelo CPF do card) e mostra o chip âmbar com o nome do
   parceiro na lista e no topo da conversa. `contactInitials` ignora emoji (cortava surrogate → erro de hidratação).
-- **Arquivo da equipe não fica guardado** (2026-10-21): mídia com `IsFromMe` (celular ou eco do painel) não é
-  baixada em `ingest.ts`; envio pelo painel (`enviarMensagem` kind media) sobe ao storage só para a EvoGo buscar
-  e apaga logo depois (`conteudo_media` null). O chat mostra "Foto enviada pela equipe (não fica guardado)".
-  Arquivos do cliente e "Documentos do escritório" (ficha) continuam guardados; nada é apagado automaticamente.
+- **Arquivo da equipe fica no chat, não na ficha** (2026-10-28, substitui a regra de 21/10): mídia enviada pelo painel
+  ou pelo celular da equipe fica guardada (`mensagens.conteudo_media`) e aparece na conversa; a ficha
+  (`fetchMidiasChatByContact`) só lista mídia do cliente (`type` lead/human) + o que sobe em Arquivos. O painel sobe o
+  arquivo direto do navegador (`prepararUploadMidia` → `uploadToSignedUrl`, até 50 MB) — base64 na Server Action
+  estourava o limite do corpo com vídeo. Envio de vários arquivos, colar print (Ctrl+V), arrastar, gravar áudio,
+  emojis (sticker saiu), localização por endereço/CEP (Nominatim + ViaCEP, `lib/actions/envio-extras.ts`) e contato
+  da plataforma (clientes + parceiros). Mensagem aparece na hora ("Enviando…").
 - **"Não é cliente" no funil** (2026-10-21): botão no caso (`removerDoFunilNaoCliente`, só advogado, bloqueia se tiver
   processo ou arquivo) apaga o card e grava o número em `funil_contatos_ignorados`; `garantir_caso_contato` não recria
   card para esses números. Migration `20261021120000_funil_contatos_ignorados.sql`.

@@ -35,7 +35,9 @@ export type EnviarMensagemInput = {
   | { kind: "text"; text: string }
   | {
       kind: "media";
-      fileBase64: string;
+      /** Arquivo já enviado pelo navegador (prepararUploadMidia). Preferível: não passa pelo servidor. */
+      storagePath?: string;
+      fileBase64?: string;
       fileName: string;
       mimeType: string;
       mediaType: EvoGoMediaType;
@@ -143,6 +145,36 @@ async function uploadToMensagensMedia(
 
   const { data } = supabase.storage.from("mensagens-media").getPublicUrl(storagePath);
   return data.publicUrl;
+}
+
+const MAX_MIDIA_BYTES = 50 * 1024 * 1024; // limite do bucket mensagens-media
+
+/**
+ * Libera o navegador para subir o arquivo direto no storage (sem passar pelo
+ * servidor em base64 — vídeo grande estourava o limite do corpo da requisição).
+ */
+export async function prepararUploadMidia(input: {
+  contactNorm: string;
+  fileName: string;
+  tamanho: number;
+}): Promise<{ path: string; token: string }> {
+  const user = await getAppUser();
+  if (!user) throw new Error("Não autenticado");
+  const contato = input.contactNorm.trim();
+  if (!contato || contato.includes("/") || contato.includes("..")) {
+    throw new Error("Conversa inválida");
+  }
+  if (input.tamanho > MAX_MIDIA_BYTES) {
+    throw new Error("Arquivo maior que 50 MB — o WhatsApp não aceita arquivos tão grandes por aqui.");
+  }
+  const ext = extensionFromName(input.fileName, "bin").replace(/[^a-z0-9]/g, "") || "bin";
+  const path = `${contato}/out-${randomUUID()}.${ext}`;
+  const supabase = createServiceClient();
+  const { data, error } = await supabase.storage
+    .from("mensagens-media")
+    .createSignedUploadUrl(path);
+  if (error || !data) throw new Error(`Falha ao preparar o envio: ${error?.message ?? "sem resposta"}`);
+  return { path: data.path, token: data.token };
 }
 
 async function removerDoMensagensMedia(publicUrl: string) {
@@ -270,14 +302,27 @@ export async function enviarMensagem(
       break;
     }
     case "media": {
-      // O WhatsApp busca o arquivo por URL; depois de enviado, a cópia é apagada
-      // (arquivo mandado pela equipe não fica guardado no sistema).
-      const publicUrl = await uploadToMensagensMedia(
-        input.contactNorm,
-        input.fileName,
-        input.mimeType,
-        input.fileBase64
-      );
+      // O WhatsApp busca o arquivo por URL. O arquivo fica no chat (conteudo_media),
+      // mas não entra na ficha do cliente: lá só vai o que o cliente mandou ou o que
+      // a equipe sobe em Arquivos.
+      let publicUrl: string;
+      if (input.storagePath) {
+        if (!input.storagePath.startsWith(`${input.contactNorm}/`)) {
+          throw new Error("Arquivo não pertence a esta conversa");
+        }
+        const supabase = await getStorageClient();
+        publicUrl = supabase.storage.from("mensagens-media").getPublicUrl(input.storagePath)
+          .data.publicUrl;
+      } else if (input.fileBase64) {
+        publicUrl = await uploadToMensagensMedia(
+          input.contactNorm,
+          input.fileName,
+          input.mimeType,
+          input.fileBase64
+        );
+      } else {
+        throw new Error("Arquivo não informado");
+      }
       try {
         messageId = await sendMedia({
           number: phoneDigits,
@@ -286,20 +331,27 @@ export async function enviarMensagem(
           caption: input.caption,
           filename: input.fileName,
         });
-      } finally {
+      } catch (err) {
         await removerDoMensagensMedia(publicUrl);
+        throw err;
       }
       mensageType = input.mediaType;
       text = input.caption?.trim() || null;
+      conteudoMedia = publicUrl;
       break;
     }
     case "location": {
+      // A EvoGo exige endereço; sem ele, usa o nome ou as coordenadas.
+      const address =
+        input.address?.trim() ||
+        input.name?.trim() ||
+        `${input.latitude.toFixed(6)}, ${input.longitude.toFixed(6)}`;
       messageId = await sendLocation({
         number: phoneDigits,
         latitude: input.latitude,
         longitude: input.longitude,
-        name: input.name,
-        address: input.address,
+        name: input.name?.trim() || address,
+        address,
       });
       mensageType = "location";
       text = JSON.stringify({

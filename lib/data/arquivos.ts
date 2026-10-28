@@ -72,6 +72,8 @@ export async function fetchMidiasChatByContact(
     .from("mensagens")
     .select("id, conteudo_media, created_at, mensage_type, text")
     .eq("contact_norm", contactNorm)
+    // Só o que o cliente mandou; arquivo da equipe/IA fica no chat, não na ficha.
+    .in("type", ["lead", "human"])
     .not("conteudo_media", "is", null)
     .order("created_at", { ascending: false });
 

@@ -76,10 +76,17 @@ export async function salvarMensagemRecebida(msg: MensagemRecebida): Promise<Men
   const contactNorm = row.result_contact_norm;
   let conteudoMedia: string | null = null;
 
-  // Arquivo mandado pela equipe (celular ou eco do painel) não fica guardado:
-  // o cliente já recebeu e a cópia só ocuparia espaço. Fica só o registro no chat.
+  // Arquivo da equipe (celular) também aparece no chat. Não entra na ficha do
+  // cliente (lib/data/arquivos.ts só lista o que o cliente mandou). Eco do painel
+  // já chega com conteudo_media gravado: não sobe de novo.
+  const jaTemMidia =
+    msg.doEscritorio &&
+    Boolean(
+      (await supabase.from("mensagens").select("conteudo_media").eq("id", rowId).maybeSingle())
+        .data?.conteudo_media
+    );
   if (
-    !msg.doEscritorio &&
+    !jaTemMidia &&
     msg.base64 &&
     ["image", "audio", "video", "document", "sticker"].includes(msg.tipo)
   ) {
