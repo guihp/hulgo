@@ -14,6 +14,7 @@ import {
   FileDown,
   FileText,
   Loader2,
+  Maximize2,
   MessageSquare,
   Paperclip,
   Plus,
@@ -27,6 +28,12 @@ import { compressImageFile } from "@/lib/client/image-compress";
 import { toastErroAcao } from "@/lib/client/erros";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Sheet,
   SheetContent,
@@ -223,14 +230,24 @@ function WaitingDots({ pedido }: { pedido: string }) {
       ? "Ainda trabalhando no seu pedido…"
       : null;
   return (
-    <div className="flex items-center gap-2" role="status" aria-label="Assistente respondendo">
-      <div className="flex max-w-[4.5rem] items-center justify-center gap-1 rounded-2xl border border-[#e2e8f0] bg-white px-3.5 py-3">
-        <span className="size-1.5 animate-bounce rounded-full bg-[#0b2148]/35 [animation-delay:-0.3s]" />
-        <span className="size-1.5 animate-bounce rounded-full bg-[#0b2148]/45 [animation-delay:-0.15s]" />
-        <span className="size-1.5 animate-bounce rounded-full bg-[#0b2148]/55" />
+    <div className="flex items-end gap-2" role="status" aria-label="Assistente respondendo">
+      <AssistenteAvatar />
+      <div className="flex max-w-[4.5rem] items-center justify-center gap-1 rounded-[18px] bg-[#F0F2F5] px-3.5 py-3">
+        <span className="size-1.5 animate-bounce rounded-full bg-[#65676B]/50 [animation-delay:-0.3s]" />
+        <span className="size-1.5 animate-bounce rounded-full bg-[#65676B]/60 [animation-delay:-0.15s]" />
+        <span className="size-1.5 animate-bounce rounded-full bg-[#65676B]/70" />
       </div>
       {dica ? <span className="text-xs text-[#64748b]">{dica}</span> : null}
     </div>
+  );
+}
+
+/** Bolinha do assistente ao lado das mensagens (como a foto no Messenger). */
+function AssistenteAvatar() {
+  return (
+    <span className="mb-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#0b2148] to-[#2d5bb8] text-white shadow-sm">
+      <Sparkles className="size-3.5" />
+    </span>
   );
 }
 
@@ -580,6 +597,31 @@ function PromptDiffBlock({
   );
 }
 
+function PromptDiffList({ preview }: { preview: PromptEditPreviewUi }) {
+  return preview.alteracoes.length > 0 ? (
+    <>
+      {preview.alteracoes.map((alt, i) => (
+        <PromptDiffBlock
+          key={`${alt.documento}-${i}`}
+          item={alt}
+          index={i}
+          total={preview.alteracoes.length}
+        />
+      ))}
+    </>
+  ) : (
+    <PromptDiffBlock
+      item={{
+        before: preview.before,
+        after: preview.after,
+        modo: preview.modo,
+        secao: preview.secao,
+        linha: preview.linha,
+      }}
+    />
+  );
+}
+
 function ConfirmCard({
   messageId,
   item,
@@ -593,6 +635,7 @@ function ConfirmCard({
   onConfirm: (messageId: string, confirmationId: string) => void;
   onCancel: (messageId: string, confirmationId: string) => void;
 }) {
+  const [telaCheia, setTelaCheia] = useState(false);
   const status = item.confirmationStatus;
   const id = item.confirmationId;
   if (!id) return null;
@@ -818,28 +861,57 @@ function ConfirmCard({
         </ul>
       ) : null}
       {promptPreview ? (
-        <div className="mt-2 max-h-64 space-y-2 overflow-y-auto pr-0.5">
-          {promptPreview.alteracoes.length > 0
-            ? promptPreview.alteracoes.map((alt, i) => (
-                <PromptDiffBlock
-                  key={`${alt.documento}-${i}`}
-                  item={alt}
-                  index={i}
-                  total={promptPreview.alteracoes.length}
-                />
-              ))
-            : (
-                <PromptDiffBlock
-                  item={{
-                    before: promptPreview.before,
-                    after: promptPreview.after,
-                    modo: promptPreview.modo,
-                    secao: promptPreview.secao,
-                    linha: promptPreview.linha,
+        <>
+          <div className="mt-2 max-h-64 space-y-2 overflow-y-auto pr-0.5">
+            <PromptDiffList preview={promptPreview} />
+          </div>
+          <button
+            type="button"
+            onClick={() => setTelaCheia(true)}
+            className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-[#0b2148] underline-offset-2 hover:underline"
+          >
+            <Maximize2 className="size-3" />
+            Ver em tela cheia
+          </button>
+          <Dialog open={telaCheia} onOpenChange={setTelaCheia}>
+            <DialogContent className="flex max-h-[92vh] w-[min(96vw,1000px)] max-w-none flex-col gap-3 sm:max-w-none">
+              <DialogTitle className="text-[#0b2148]">{label}</DialogTitle>
+              <DialogDescription>
+                O que muda no prompt da IA do WhatsApp. Confirmar grava no rascunho; publicar é em
+                Configurações → Agente.
+              </DialogDescription>
+              <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 [&_pre]:max-h-none [&_pre]:text-[13px] [&_pre]:leading-relaxed">
+                <PromptDiffList preview={promptPreview} />
+              </div>
+              <div className="flex justify-end gap-2 border-t border-[#e2e8f0] pt-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={disabled}
+                  onClick={() => {
+                    setTelaCheia(false);
+                    onCancel(messageId, id);
                   }}
-                />
-              )}
-        </div>
+                >
+                  <X className="size-3.5" />
+                  Cancelar
+                </Button>
+                <Button
+                  type="button"
+                  className="bg-[#0b2148] text-white hover:bg-[#0b2148]/90"
+                  disabled={disabled}
+                  onClick={() => {
+                    setTelaCheia(false);
+                    onConfirm(messageId, id);
+                  }}
+                >
+                  <Check className="size-3.5" />
+                  Confirmar
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </>
       ) : null}
       <div className="mt-2.5 flex gap-2">
         <Button
@@ -1431,7 +1503,7 @@ export function AssistenteDrawer() {
 
         <div
           ref={listRef}
-          className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4"
+          className="min-h-0 flex-1 space-y-2.5 overflow-y-auto bg-white px-3 py-4"
         >
           {booting ? (
             <div className="flex items-center justify-center gap-2 py-10 text-sm text-[#64748B]">
@@ -1472,10 +1544,23 @@ export function AssistenteDrawer() {
             <div
               key={m.id}
               className={cn(
-                "max-w-[92%] rounded-2xl px-3.5 py-2.5 text-sm",
+                "group flex items-end gap-2",
+                m.role === "assistant" ? "justify-start" : "justify-end"
+              )}
+            >
+              {m.role === "assistant" ? <AssistenteAvatar /> : null}
+              <div
+                className={cn(
+                  "flex min-w-0 max-w-[85%] flex-col",
+                  m.role === "assistant" ? "items-start" : "items-end"
+                )}
+              >
+            <div
+              className={cn(
+                "max-w-full rounded-[18px] px-3.5 py-2 text-sm",
                 m.role === "assistant"
-                  ? "border border-[#e2e8f0] bg-white text-[#0b2148]"
-                  : "ml-auto bg-[#0b2148] text-white"
+                  ? "bg-[#F0F2F5] text-[#050505]"
+                  : "bg-gradient-to-br from-[#0866FF] to-[#0a58e0] text-white"
               )}
             >
               {m.anexos?.length ? (
@@ -1503,11 +1588,14 @@ export function AssistenteDrawer() {
               <ChatMarkdown
                 text={m.content}
                 className={
-                  m.role === "user" ? "[&_strong]:text-white" : undefined
+                  m.role === "user"
+                    ? "[&_a]:text-white [&_strong]:text-white"
+                    : undefined
                 }
               />
+            </div>
               {m.role === "assistant" && m.tool_trace?.length ? (
-                <div className="mt-2 space-y-1 border-t border-[#e2e8f0] pt-2">
+                <div className="mt-1 w-full space-y-1">
                   {m.tool_trace.map((t) =>
                     t.confirmationId ? (
                       <ConfirmCard
@@ -1546,19 +1634,15 @@ export function AssistenteDrawer() {
                   )}
                 </div>
               ) : null}
-              <p
-                className={cn(
-                  "mt-1 text-right text-[10px]",
-                  m.role === "assistant" ? "text-[#94a3b8]" : "text-white/70"
-                )}
-              >
+              <p className="mt-0.5 px-2 text-[10px] text-[#8A8D91] opacity-0 transition group-hover:opacity-100">
                 {formatTime(m.created_at)}
               </p>
+              </div>
             </div>
           ))}
 
           {queued ? (
-            <div className="ml-auto max-w-[92%] rounded-2xl bg-[#0b2148]/80 px-3.5 py-2.5 text-sm text-white">
+            <div className="ml-auto max-w-[85%] rounded-[18px] bg-[#0866FF]/75 px-3.5 py-2 text-sm text-white">
               <ChatMarkdown
                 text={
                   queued.content ||

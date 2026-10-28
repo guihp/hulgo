@@ -118,7 +118,7 @@ export function clipPreview(text: string, max = 280): string {
 }
 
 /** Clip while keeping newlines (for confirmation cards). */
-export function clipPreviewBlock(text: string, max = 420): string {
+export function clipPreviewBlock(text: string, max = 4000): string {
   const t = text.replace(/\r\n/g, "\n").trimEnd();
   if (t.length <= max) return t;
   return `${t.slice(0, max - 1)}…`;
@@ -384,12 +384,15 @@ export function applyPromptEdit(
     if (!texto) {
       return { ok: false, summary: "inserir_apos exige texto_inserir (ou trecho_novo)." };
     }
+    // Sem espaço entre a âncora e o texto novo, as frases grudavam ("mensagem.Se a…").
+    const sep = /\s$/.test(ancora) || /^\s/.test(texto) ? "" : "\n";
     persona =
       personaAtual.slice(0, idx + ancora.length) +
+      sep +
       texto +
       personaAtual.slice(idx + ancora.length);
     antes = clipPreviewBlock(ancora);
-    depois = clipPreviewBlock(ancora + texto);
+    depois = clipPreviewBlock(ancora + sep + texto);
   } else if (modo === "inserir_antes") {
     const texto = input.texto_inserir ?? input.trecho_novo ?? "";
     if (!texto) {
@@ -398,10 +401,11 @@ export function applyPromptEdit(
         summary: "inserir_antes exige texto_inserir (ou trecho_novo).",
       };
     }
+    const sep = /\s$/.test(texto) || /^\s/.test(ancora) ? "" : "\n";
     persona =
-      personaAtual.slice(0, idx) + texto + personaAtual.slice(idx);
+      personaAtual.slice(0, idx) + texto + sep + personaAtual.slice(idx);
     antes = clipPreviewBlock(ancora);
-    depois = clipPreviewBlock(texto + ancora);
+    depois = clipPreviewBlock(texto + sep + ancora);
   } else {
     return { ok: false, summary: `Modo inválido: ${modo}` };
   }
