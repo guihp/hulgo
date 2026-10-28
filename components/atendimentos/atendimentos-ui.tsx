@@ -20,6 +20,7 @@ import {
   FileText,
   Handshake,
   ImageIcon,
+  Loader2,
   MapPin,
   MessageSquare,
   Mic,
@@ -933,6 +934,8 @@ function ConversationThread({
 }) {
   const contactNorm = conv.contact_norm;
   const [messages, setMessages] = useState<Mensagem[]>([]);
+  /** Enviadas pelo painel que ainda estão saindo (id negativo). */
+  const [pendentes, setPendentes] = useState<Mensagem[]>([]);
   const [loading, setLoading] = useState(true);
   const [agentBusy, setAgentBusy] = useState(false);
   const [novas, setNovas] = useState(0);
@@ -1024,7 +1027,24 @@ function ConversationThread({
     if (el && grudadoNoFim.current) el.scrollTop = el.scrollHeight;
   }, []);
 
-  const groups = useMemo(() => groupMessagesByDate(messages), [messages]);
+  // Se a mensagem de verdade chegou (tempo real) antes do envio terminar, some a provisória.
+  const exibidas = useMemo(() => {
+    if (!pendentes.length) return messages;
+    const visiveis = pendentes.filter(
+      (p) =>
+        !messages.some(
+          (m) =>
+            !isClientMessage(m.type) &&
+            m.session_id !== "ia" &&
+            m.mensage_type === p.mensage_type &&
+            (m.text ?? "") === (p.text ?? "") &&
+            new Date(m.created_at).getTime() >= new Date(p.created_at).getTime() - 5000
+        )
+    );
+    return visiveis.length ? [...messages, ...visiveis] : messages;
+  }, [messages, pendentes]);
+
+  const groups = useMemo(() => groupMessagesByDate(exibidas), [exibidas]);
 
   const primeiraNaoLidaId = useMemo(() => {
     if (lidaAoAbrir === undefined) return null;
@@ -1051,6 +1071,19 @@ function ConversationThread({
     const idx = messages.findIndex((m) => m.id === primeiraNaoLidaId);
     return messages.slice(idx).filter((m) => isClientMessage(m.type)).length;
   }, [messages, primeiraNaoLidaId]);
+
+  const handleComposerPending = useCallback(
+    (msg: Mensagem) => {
+      setPendentes((prev) => [...prev, msg]);
+      grudadoNoFim.current = true;
+      requestAnimationFrame(() => irParaOFim(true));
+    },
+    [irParaOFim]
+  );
+
+  const handleComposerSettled = useCallback((pendingId: number) => {
+    setPendentes((prev) => prev.filter((m) => m.id !== pendingId));
+  }, []);
 
   const handleComposerSent = useCallback(
     (msg: Mensagem, iaPausada?: boolean) => {
@@ -1329,7 +1362,14 @@ function ConversationThread({
                                 isClient ? "text-[#94a3b8]" : "text-[#0b2148]/50"
                               )}
                             >
-                              {formatChatTime(msg.created_at)}
+                              {msg.id < 0 ? (
+                                <span className="inline-flex items-center gap-1">
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                  Enviando…
+                                </span>
+                              ) : (
+                                formatChatTime(msg.created_at)
+                              )}
                             </p>
                           </div>
                         </div>
@@ -1364,6 +1404,8 @@ function ConversationThread({
           contactNorm={contactNorm}
           instancia={whatsappInstancia ?? ""}
           onSent={handleComposerSent}
+          onPending={handleComposerPending}
+          onSettled={handleComposerSettled}
         />
       </div>
     </div>

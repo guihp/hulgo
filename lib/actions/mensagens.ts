@@ -1,7 +1,7 @@
 "use server";
 
 import { randomUUID } from "crypto";
-import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { getAppUser } from "@/lib/actions/auth";
 import {
   sendContact,
@@ -234,20 +234,21 @@ async function persistMensagem(params: {
 export async function enviarMensagem(
   input: EnviarMensagemInput
 ): Promise<EnviarMensagemResult> {
-  const user = await getAppUser();
-  if (!user) {
-    throw new Error("Não autenticado");
-  }
-
   const phoneDigits = normalizePhoneDigits(input.phone);
   if (!phoneDigits) {
     throw new Error("Telefone inválido");
   }
 
-  const instancia =
-    input.instancia?.trim() ||
-    (await getWhatsAppInstancia(input.contactNorm)) ||
-    EVOGO_INSTANCE_FALLBACK;
+  const instanciaInformada = input.instancia?.trim();
+  const [user, instanciaBanco] = await Promise.all([
+    getAppUser(),
+    instanciaInformada ? null : getWhatsAppInstancia(input.contactNorm),
+  ]);
+  if (!user) {
+    throw new Error("Não autenticado");
+  }
+
+  const instancia = instanciaInformada || instanciaBanco || EVOGO_INSTANCE_FALLBACK;
 
   if (!instancia) {
     throw new Error(
@@ -353,54 +354,60 @@ export async function enviarMensagem(
       throw new Error("Tipo de mensagem não suportado");
   }
 
-  let rowId: number | null = null;
-  let mensagem: Mensagem | null = null;
-  let warning: string | undefined;
-
-  try {
-    const persisted = await persistMensagem({
+  // Gravar a mensagem e pausar a IA rodam juntos; o painel já mostra a mensagem
+  // (sem revalidatePath: re-renderizar /atendimentos atrasava a resposta do envio).
+  const [persisted, controle] = await Promise.all([
+    persistMensagem({
       phone: phoneDigits,
       messageId,
       instancia,
       mensageType,
       text,
       conteudoMedia,
-    });
-    rowId = persisted.rowId;
-    mensagem = persisted.mensagem;
-    revalidatePath("/atendimentos");
-  } catch (err) {
+    }).then(
+      (ok) => ({ ok, erro: null }),
+      (erro: unknown) => ({ ok: null, erro })
+    ),
+    input.pausarIA !== false ? controlarIA("pausar", phoneDigits, instancia) : null,
+  ]);
+
+  let rowId: number | null = null;
+  let mensagem: Mensagem | null = null;
+  let warning: string | undefined;
+
+  if (persisted.ok) {
+    rowId = persisted.ok.rowId;
+    mensagem = persisted.ok.mensagem;
+  } else {
     warning =
-      err instanceof Error
-        ? `Mensagem enviada, mas falhou ao salvar no banco: ${err.message}`
+      persisted.erro instanceof Error
+        ? `Mensagem enviada, mas falhou ao salvar no banco: ${persisted.erro.message}`
         : "Mensagem enviada, mas falhou ao salvar no banco";
   }
 
-  // Advogado assumiu a conversa → pausa a IA para este cliente (block no Redis via n8n)
-  let iaPausada = false;
-  if (input.pausarIA !== false) {
-    const controle = await controlarIA("pausar", phoneDigits, instancia);
-    iaPausada = controle.ok;
-    if (controle.configured && !controle.ok && !warning) {
-      warning =
-        "Mensagem enviada, mas o n8n não confirmou a pausa da IA — ela pode responder o cliente junto com você.";
-    }
+  // Advogado assumiu a conversa → IA pausada para este cliente
+  const iaPausada = controle?.ok ?? false;
+  if (controle?.configured && !controle.ok && !warning) {
+    warning =
+      "Mensagem enviada, mas a pausa da IA não foi confirmada — ela pode responder o cliente junto com você.";
   }
 
-  await logEvent(
-    rowId,
-    "enviar",
-    {
-      kind: input.kind,
-      messageId,
-      phone: phoneDigits,
-      contact_norm: input.contactNorm,
-      instancia,
-      mensage_type: mensageType,
-      ia_pausada: iaPausada,
-      warning: warning ?? null,
-    },
-    user.id
+  after(() =>
+    logEvent(
+      rowId,
+      "enviar",
+      {
+        kind: input.kind,
+        messageId,
+        phone: phoneDigits,
+        contact_norm: input.contactNorm,
+        instancia,
+        mensage_type: mensageType,
+        ia_pausada: iaPausada,
+        warning: warning ?? null,
+      },
+      user.id
+    )
   );
 
   if (warning) {
