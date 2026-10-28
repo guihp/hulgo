@@ -2,7 +2,7 @@ import { after, NextResponse } from "next/server";
 import { tratarComandoAdvogado, ehComandoAdvogado } from "@/lib/ia-whatsapp/advogado";
 import { ehAdvogado, getIaConfig, iaAtendeTelefone, ehNumeroDeTeste } from "@/lib/ia-whatsapp/config";
 import { foiEnviadoPeloSistema, enviarTextoCliente } from "@/lib/ia-whatsapp/enviar";
-import { pausarIA, reiniciarMemoriaIA } from "@/lib/ia-whatsapp/estado";
+import { pausarIA, resetarNumeroTeste } from "@/lib/ia-whatsapp/estado";
 import { atualizarFotoPerfil } from "@/lib/ia-whatsapp/foto-perfil";
 import { parseEvogoWebhook } from "@/lib/ia-whatsapp/evogo-payload";
 import { salvarMensagemRecebida } from "@/lib/ia-whatsapp/ingest";
@@ -69,8 +69,12 @@ export async function POST(req: Request) {
   }
 
   if (msg.tipo === "text" && msg.texto.trim() === "/reset" && ehNumeroDeTeste(config, msg.telefone)) {
-    await reiniciarMemoriaIA(msg.telefone);
-    await enviarTextoCliente({ telefone: msg.telefone, texto: "Resetado, pronto para testes.", instancia: msg.instancia });
+    await resetarNumeroTeste(msg.telefone);
+    await enviarTextoCliente({
+      telefone: msg.telefone,
+      texto: "Resetado, pronto para testes. (Memória zerada, card sem CPF/dados, processos e parceiro desvinculados, IA ligada.)",
+      instancia: msg.instancia,
+    });
     return NextResponse.json({ ok: true, reset: true });
   }
 

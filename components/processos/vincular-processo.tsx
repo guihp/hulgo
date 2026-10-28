@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Link2, Plus, Scale, Search } from "lucide-react";
+import { Link2, Plus, Scale, Search, Unlink } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import {
   criarProcessoDoCaso,
+  desvincularProcessoDaConversa,
   desvincularProcessoDoCaso,
   vincularProcesso,
   type ResultadoProcessoDoCaso,
@@ -329,10 +330,12 @@ export function ProcessoDaConversa({
   const [processos, setProcessos] = useState<ProcessoResumo[]>([]);
   const [vincularAberto, setVincularAberto] = useState(false);
   const [versao, setVersao] = useState(0);
+  // CPF tirado do card agora: a lista da conversa ainda pode chegar com o antigo.
+  const [cpfTirado, setCpfTirado] = useState<string | null>(null);
 
   useEffect(() => {
     const filtros = [`telefone.eq.${contactNorm}`];
-    if (cpf) filtros.push(`cpf.eq.${cpf.replace(/\D/g, "")}`);
+    if (cpf && cpf !== cpfTirado) filtros.push(`cpf.eq.${cpf.replace(/\D/g, "")}`);
     if (casoId) filtros.push(`caso_id.eq.${casoId}`);
     createClient()
       .from("processos_clientes")
@@ -341,7 +344,22 @@ export function ProcessoDaConversa({
       .order("id", { ascending: false })
       .limit(10)
       .then(({ data }) => setProcessos((data as ProcessoResumo[] | null) ?? []));
-  }, [contactNorm, cpf, casoId, versao]);
+  }, [contactNorm, cpf, casoId, versao, cpfTirado]);
+
+  const desvincular = async (p: ProcessoResumo) => {
+    try {
+      const r = await desvincularProcessoDaConversa({ processoId: p.id, contactNorm, casoId });
+      toast.success(
+        r.cpfDoCardLimpo
+          ? "Processo desvinculado (o CPF do card foi tirado, era ele que ligava)"
+          : "Processo desvinculado"
+      );
+      if (r.cpfDoCardLimpo && cpf) setCpfTirado(cpf);
+      setVersao((v) => v + 1);
+    } catch (err) {
+      toastErroAcao(err, "Não foi possível desvincular");
+    }
+  };
 
   const criar = async () => {
     if (!casoId) return;
@@ -381,6 +399,23 @@ export function ProcessoDaConversa({
               </DropdownMenuItem>
             ))}
           </DropdownMenuGroup>
+          {processos.length ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
+                {processos.map((p) => (
+                  <DropdownMenuItem
+                    key={`d-${p.id}`}
+                    className="text-rose-700"
+                    onClick={() => void desvincular(p)}
+                  >
+                    <Unlink className="h-4 w-4" />
+                    <span className="min-w-0 truncate">Desvincular {rotuloProcesso(p)}</span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuGroup>
+            </>
+          ) : null}
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => setVincularAberto(true)}>
             <Link2 className="h-4 w-4" />

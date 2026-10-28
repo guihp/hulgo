@@ -1322,6 +1322,59 @@ export async function desvincularProcessoDoCaso(processoId: number) {
 }
 
 /**
+ * Solta o processo da conversa: tira o caso e o telefone dele e, se o que ligava
+ * era o CPF do card (mesmo CPF do processo), limpa o CPF do card — senão o
+ * processo (e o parceiro dele) voltaria a aparecer na conversa.
+ */
+export async function desvincularProcessoDaConversa(input: {
+  processoId: number;
+  contactNorm: string;
+  casoId?: number | null;
+}) {
+  const user = await getAppUser();
+  if (!user) throw new Error("Não autenticado");
+  const supabase = await createClient();
+  const { data: proc, error } = await supabase
+    .from("processos_clientes")
+    .select("id, cpf, telefone, caso_id")
+    .eq("id", input.processoId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!proc) throw new Error("Processo não encontrado");
+
+  const contato = phoneToContactNorm(input.contactNorm);
+  const patch: { caso_id?: null; telefone?: null } = {};
+  if (proc.caso_id != null && proc.caso_id === input.casoId) patch.caso_id = null;
+  if (proc.telefone && phoneToContactNorm(proc.telefone) === contato) patch.telefone = null;
+  if (Object.keys(patch).length) {
+    const { error: e } = await supabase.from("processos_clientes").update(patch).eq("id", proc.id);
+    if (e) throw new Error(e.message);
+  }
+
+  let cpfDoCardLimpo = false;
+  const cpfProc = (proc.cpf ?? "").replace(/\D/g, "");
+  if (input.casoId && cpfProc) {
+    const { data: caso } = await supabase
+      .from("casos_novos")
+      .select("cpf")
+      .eq("id", input.casoId)
+      .maybeSingle();
+    if ((caso?.cpf ?? "").replace(/\D/g, "") === cpfProc) {
+      const { error: e } = await supabase
+        .from("casos_novos")
+        .update({ cpf: null, updated_at: new Date().toISOString() })
+        .eq("id", input.casoId);
+      if (e) throw new Error(e.message);
+      cpfDoCardLimpo = true;
+    }
+  }
+  revalidatePath("/processos");
+  revalidatePath("/kanban");
+  revalidatePath("/atendimentos");
+  return { success: true as const, cpfDoCardLimpo };
+}
+
+/**
  * "Não é cliente": tira o card do Funil de vendas e anota o número para a próxima
  * mensagem não criar o card de novo. A conversa continua em Atendimentos.
  * Card com processo ou arquivos não sai por aqui (os arquivos iriam junto).

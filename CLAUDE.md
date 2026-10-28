@@ -155,3 +155,7 @@
   linha só da equipe ("IA acionou: … aguardando resposta"). Etiqueta automática da etapa do funil: chave `funil:<coluna>`,
   trigger em `casos_novos` (status/telefone) → `sincronizar_etiqueta_funil`; renomear coluna renomeia a etiqueta.
   Aprovações mostram `app_ia_estado.foto_url` (senão boneco). Migration `20261028210000_ferramentas_ia_etiqueta_funil.sql`.
+- **/reset completo + desvincular na conversa** (2026-10-28): `/reset` (só número de teste) chama `resetarNumeroTeste`
+  (`lib/ia-whatsapp/estado.ts`): memória zerada, IA despausada, card volta a "Em atendimento" sem CPF/dados, processos
+  soltam `caso_id`/`telefone`, aprovações pendentes do número viram recusadas. Botão "Processo" da conversa tem
+  "Desvincular" (`desvincularProcessoDaConversa`: tira caso/telefone e, se o elo era o CPF do card, limpa o CPF do card).

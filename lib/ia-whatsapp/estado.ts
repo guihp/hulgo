@@ -106,3 +106,59 @@ export async function reiniciarMemoriaIA(telefone: string): Promise<void> {
   if (error) throw new Error(`Falha ao reiniciar a memória: ${error.message}`);
   await supabase.from("app_ia_fila").delete().eq("telefone", tel);
 }
+
+/**
+ * /reset do número de teste: além de zerar a memória, desfaz o que o teste
+ * deixou ligado ao número — o card volta a "Em atendimento" sem CPF/dados (o CPF
+ * é o que liga processo e parceiro à conversa), processos soltam o card e o
+ * telefone, e aprovações pendentes são encerradas. Só chame para número de teste.
+ */
+export async function resetarNumeroTeste(telefone: string): Promise<void> {
+  const tel = normalizarTelefone(telefone);
+  const supabase = createServiceClient();
+  await reiniciarMemoriaIA(tel);
+
+  const { data: casos } = await supabase.from("casos_novos").select("id").eq("telefone", tel);
+  const casoIds = (casos ?? []).map((c) => c.id);
+  if (casoIds.length) {
+    await supabase.from("processos_clientes").update({ caso_id: null }).in("caso_id", casoIds);
+    await supabase
+      .from("casos_novos")
+      .update({
+        cpf: null,
+        data_nascimento: null,
+        beneficio_identificado: null,
+        area: null,
+        tipo_segurado: null,
+        ja_negou_inss: null,
+        motivo_negativa: null,
+        ja_tem_processo: null,
+        ja_recebe_beneficio: null,
+        requisitos_preenchidos: null,
+        requisitos_pendentes: null,
+        documentos_recebidos: null,
+        documentos_faltantes: null,
+        pontos_analise_juridica: null,
+        beneficios_alternativos: null,
+        relatorio: null,
+        consulta_tse: null,
+        consulta_dap_caf: null,
+        consulta_jf: null,
+        status: "em_atendimento",
+        mensagem_encaminhamento_enviada_em: null,
+        updated_at: new Date().toISOString(),
+      })
+      .in("id", casoIds);
+  }
+  await supabase.from("processos_clientes").update({ telefone: null }).eq("telefone", tel);
+  await supabase
+    .from("aprovacoes_pendentes")
+    .update({
+      status: "recusado",
+      motivo_recusa: "Encerrada pelo /reset do número de teste",
+      decidido_em: new Date().toISOString(),
+    })
+    .eq("status", "pendente")
+    .in("telefone_cliente", [tel, telefone]);
+  await marcarAtendimento(tel, null);
+}
