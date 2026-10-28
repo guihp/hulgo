@@ -604,6 +604,7 @@ export type Database = {
           label: string;
           aliases: string[];
           documentos: string[];
+          orientacoes_ia: string;
           ativo: boolean;
           ordem: number;
           created_at: string;
@@ -615,6 +616,7 @@ export type Database = {
           label: string;
           aliases?: string[];
           documentos?: string[];
+          orientacoes_ia?: string;
           ativo?: boolean;
           ordem?: number;
           created_at?: string;
@@ -626,6 +628,7 @@ export type Database = {
           label?: string;
           aliases?: string[];
           documentos?: string[];
+          orientacoes_ia?: string;
           ativo?: boolean;
           ordem?: number;
           created_at?: string;

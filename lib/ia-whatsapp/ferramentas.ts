@@ -6,7 +6,7 @@ import {
 } from "@/lib/casos/encaminhamento-analise";
 import { CASO_STATUS } from "@/lib/constants";
 import { listKanbanColunas } from "@/lib/data/kanban-colunas";
-import { listTiposCaso, matchTipoCaso } from "@/lib/data/tipos-caso";
+import { listTiposCaso, matchTipoCaso, type TipoCasoMatch } from "@/lib/data/tipos-caso";
 import { consultarAoVivoERegistrar } from "@/lib/datajud-monitor";
 import { urlPainel, type IaWhatsappConfig } from "@/lib/ia-whatsapp/config";
 import { enviarParaAdvogado, enviarTextoCliente } from "@/lib/ia-whatsapp/enviar";
@@ -129,7 +129,7 @@ export const FERRAMENTAS = [
     type: "function",
     name: "checklist_beneficios",
     description:
-      "Consulta no painel do escritório quais documentos cobrar do cliente conforme o tipo de benefício/caso. Chame SEMPRE ao identificar a demanda ou o benefício desejado, e ANTES de listar documentos ao cliente — não invente lista. Com beneficio preenchido retorna o melhor match (match.documentos). Sem beneficio (vazio) retorna todos os tipos ativos.",
+      "Consulta no painel do escritório quais documentos cobrar do cliente conforme o tipo de benefício/caso. Chame SEMPRE ao identificar a demanda ou o benefício desejado, e ANTES de listar documentos ao cliente — não invente lista. Com beneficio preenchido retorna o melhor match (match.documentos e, se houver, match.orientacoes: requisitos, perguntas e cuidados do escritório para esse tipo — siga-as). Sem beneficio (vazio) retorna todos os tipos ativos.",
     parameters: {
       type: "object",
       properties: {
@@ -343,11 +343,13 @@ async function registrarDocumento(p: Params, ctx: ContextoFerramenta) {
 
 async function checklist(p: Params) {
   const tipos = await listTiposCaso({ service: true });
-  const publico = (t: { chave: string; label: string; aliases: string[]; documentos: string[] }) => ({
+  const publico = (t: TipoCasoMatch) => ({
     chave: t.chave,
     label: t.label,
     aliases: t.aliases,
     documentos: t.documentos,
+    // Requisitos, perguntas e cuidados que o escritório escreveu para este tipo.
+    ...(t.orientacoes_ia.trim() ? { orientacoes: t.orientacoes_ia.trim() } : {}),
   });
   const beneficio = texto(p.beneficio);
   if (beneficio) return { match: publico(matchTipoCaso(tipos, beneficio)), beneficio };

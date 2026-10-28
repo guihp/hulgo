@@ -33,6 +33,11 @@ import {
 } from "@/lib/prazos/lembretes";
 import { getAppUser } from "@/lib/actions/auth";
 import {
+  PROPOR_TIPO_CASO_DEFINITION,
+  execAlteracaoTipoCaso,
+  proposeAlteracaoTipoCaso,
+} from "@/lib/assistente/ia-diagnostico";
+import {
   applyPromptEditsBatch,
   clipPreview,
   parsePromptDocumento,
@@ -104,6 +109,7 @@ export const WRITE_TOOL_NAMES = [
   "excluir_processo",
   "propor_alteracao_prompt_agente",
   "reverter_prompt_agente",
+  "propor_alteracao_tipo_caso",
 ] as const;
 
 export type AssistenteWriteToolName = (typeof WRITE_TOOL_NAMES)[number];
@@ -703,6 +709,7 @@ export const ASSISTENTE_WRITE_TOOL_DEFINITIONS = [
       },
     },
   },
+  PROPOR_TIPO_CASO_DEFINITION,
 ] as const;
 
 function asRecord(raw: unknown): Record<string, unknown> {
@@ -2404,6 +2411,8 @@ async function proposeWrite(
       return proposeDefinirSituacaoProcesso(args);
     case "excluir_processo":
       return proposeExcluirProcesso(args);
+    case "propor_alteracao_tipo_caso":
+      return proposeAlteracaoTipoCaso(args);
   }
 }
 
@@ -3302,6 +3311,8 @@ export async function executeAssistenteWriteTool(
         return await execProporAlteracaoPromptAgente(args);
       case "reverter_prompt_agente":
         return await execReverterPromptAgente(args);
+      case "propor_alteracao_tipo_caso":
+        return await execAlteracaoTipoCaso(args);
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro ao executar ação";

@@ -137,3 +137,12 @@
 - **Documentos do escritório enviados não ficam guardados** (2026-10-21): `enviarDocumentoCliente` apaga o arquivo do
   storage depois do envio e grava `url_media = ''` (fica o registro: nome, envio, assinatura). Listas de arquivos
   (`lib/data/arquivos.ts`) ignoram `url_media = ''`; para reenviar é preciso subir de novo.
+- **Tipos de caso × IAs** (2026-10-28): `app_tipos_caso.orientacoes_ia` ("O que a IA precisa saber": requisitos, perguntas,
+  cuidados) — editável em Configurações → Tipos de caso; a IA do WhatsApp recebe em `checklist_beneficios`
+  (`match.orientacoes`). Assistente (`lib/assistente/ia-diagnostico.ts`): `ler_tipos_caso`, `diagnosticar_atendimento_ia`
+  (conversa marcando cliente/IA/equipe + `app_ia_execucoes`: entrada, ferramentas e resultados, prompt usado) e
+  `propor_alteracao_tipo_caso` (card Confirmar, vale na hora). Fluxo "não gostei da resposta da IA" no prompt do
+  assistente: diagnosticar → achar a causa (tipo de caso ou prompt) → opinar → propor no lugar certo.
+  Migration `20261028190000_tipos_caso_orientacoes_ia.sql`.
+- **Devolver para a IA em 2 modos** (2026-10-28): "IA continua agora" (`setControleIA({responderAgora})` →
+  `retomarAtendimentoIA` em `processar.ts`, entrada = aviso interno, sem mexer na fila) ou "IA espera o cliente".

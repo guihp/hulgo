@@ -79,6 +79,7 @@ export type CriarTipoCasoInput = {
   label: string;
   aliases?: string[];
   documentos?: string[];
+  orientacoes_ia?: string;
   ordem?: number;
 };
 
@@ -108,6 +109,7 @@ export async function criarTipoCaso(input: CriarTipoCasoInput) {
       label,
       aliases: normalizeAliases(input.aliases ?? []),
       documentos: normalizeDocs(input.documentos ?? []),
+      orientacoes_ia: input.orientacoes_ia?.trim() ?? "",
       ativo: true,
       ordem,
     })
@@ -130,6 +132,7 @@ export type AtualizarTipoCasoInput = {
   label?: string;
   aliases?: string[];
   documentos?: string[];
+  orientacoes_ia?: string;
   ordem?: number;
   ativo?: boolean;
 };
@@ -143,6 +146,7 @@ export async function atualizarTipoCaso(input: AtualizarTipoCasoInput) {
     label?: string;
     aliases?: string[];
     documentos?: string[];
+    orientacoes_ia?: string;
     ordem?: number;
     ativo?: boolean;
   } = {
@@ -160,6 +164,7 @@ export async function atualizarTipoCaso(input: AtualizarTipoCasoInput) {
   if (input.documentos !== undefined) {
     patch.documentos = normalizeDocs(input.documentos);
   }
+  if (input.orientacoes_ia !== undefined) patch.orientacoes_ia = input.orientacoes_ia.trim();
   if (input.ordem !== undefined) patch.ordem = input.ordem;
   if (input.ativo !== undefined) patch.ativo = input.ativo;
 

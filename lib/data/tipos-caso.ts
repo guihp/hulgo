@@ -15,6 +15,8 @@ export type TipoCasoMatch = {
   label: string;
   aliases: string[];
   documentos: string[];
+  /** O que a IA precisa saber deste tipo (requisitos, perguntas, cuidados). */
+  orientacoes_ia: string;
   ativo: boolean;
   ordem: number;
 };
@@ -26,6 +28,7 @@ function fallbackTipos(): TipoCasoMatch[] {
     label: t.label,
     aliases: t.aliases,
     documentos: t.documentos,
+    orientacoes_ia: "",
     ativo: true,
     ordem: t.ordem,
   }));
@@ -38,6 +41,7 @@ function rowToMatch(row: TipoCaso): TipoCasoMatch {
     label: row.label,
     aliases: row.aliases ?? [],
     documentos: row.documentos ?? [],
+    orientacoes_ia: row.orientacoes_ia ?? "",
     ativo: row.ativo,
     ordem: row.ordem,
   };

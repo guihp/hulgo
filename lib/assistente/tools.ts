@@ -4,6 +4,11 @@ import {
   listAgenteConfigVersoes,
 } from "@/lib/actions/configuracoes";
 import { getAppUser } from "@/lib/actions/auth";
+import {
+  IA_DIAGNOSTICO_READ_TOOLS,
+  toolDiagnosticarAtendimentoIA,
+  toolLerTiposCaso,
+} from "@/lib/assistente/ia-diagnostico";
 import { loadFichaPessoa } from "@/lib/data/ficha";
 import { listKanbanColunas } from "@/lib/data/kanban-colunas";
 import {
@@ -465,6 +470,7 @@ export const ASSISTENTE_TOOL_DEFINITIONS = [
       },
     },
   },
+  ...IA_DIAGNOSTICO_READ_TOOLS,
   ...ASSISTENTE_WRITE_TOOL_DEFINITIONS,
 ] as const;
 
@@ -2030,6 +2036,10 @@ export async function executeAssistenteTool(
         return await toolLerPromptAgente(args);
       case "ler_versoes_prompt_agente":
         return await toolLerVersoesPromptAgente(args);
+      case "ler_tipos_caso":
+        return await toolLerTiposCaso(args);
+      case "diagnosticar_atendimento_ia":
+        return await toolDiagnosticarAtendimentoIA(args);
       default:
         return { ok: false, summary: `Ferramenta desconhecida: ${name}` };
     }

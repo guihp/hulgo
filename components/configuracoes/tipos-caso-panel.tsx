@@ -18,6 +18,7 @@ import {
 } from "@/lib/actions/tipos-caso";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { toastErroAcao } from "@/lib/client/erros";
 
@@ -36,6 +37,7 @@ type Draft = {
   label: string;
   aliases: string[];
   documentos: string[];
+  orientacoes_ia: string;
   ativo: boolean;
   ordem: number;
 };
@@ -47,6 +49,7 @@ function toDraft(t: TipoCasoMatch): Draft {
     label: t.label,
     aliases: [...t.aliases],
     documentos: [...t.documentos],
+    orientacoes_ia: t.orientacoes_ia,
     ativo: t.ativo,
     ordem: t.ordem,
   };
@@ -59,6 +62,7 @@ function emptyDraft(): Draft {
     label: "",
     aliases: [],
     documentos: [],
+    orientacoes_ia: "",
     ativo: true,
     ordem: 100,
   };
@@ -161,6 +165,7 @@ export function TiposCasoPanel({ initialTipos }: { initialTipos: TipoCasoMatch[]
             label: draft.label,
             aliases: draft.aliases,
             documentos: draft.documentos,
+            orientacoes_ia: draft.orientacoes_ia,
           });
           const match: TipoCasoMatch = {
             id: row.id,
@@ -170,6 +175,7 @@ export function TiposCasoPanel({ initialTipos }: { initialTipos: TipoCasoMatch[]
             documentos: row.documentos ?? [],
             ativo: row.ativo,
             ordem: row.ordem,
+            orientacoes_ia: row.orientacoes_ia ?? "",
           };
           upsertLocal(match);
           setCreating(false);
@@ -182,6 +188,7 @@ export function TiposCasoPanel({ initialTipos }: { initialTipos: TipoCasoMatch[]
             label: draft.label,
             aliases: draft.aliases,
             documentos: draft.documentos,
+            orientacoes_ia: draft.orientacoes_ia,
           });
           const match: TipoCasoMatch = {
             id: row.id,
@@ -191,6 +198,7 @@ export function TiposCasoPanel({ initialTipos }: { initialTipos: TipoCasoMatch[]
             documentos: row.documentos ?? [],
             ativo: row.ativo,
             ordem: row.ordem,
+            orientacoes_ia: row.orientacoes_ia ?? "",
           };
           upsertLocal(match);
           setDraft(toDraft(match));
@@ -215,6 +223,7 @@ export function TiposCasoPanel({ initialTipos }: { initialTipos: TipoCasoMatch[]
           documentos: row.documentos ?? [],
           ativo: row.ativo,
           ordem: row.ordem,
+          orientacoes_ia: row.orientacoes_ia ?? "",
         };
         upsertLocal(match);
         setDraft(toDraft(match));
@@ -238,6 +247,7 @@ export function TiposCasoPanel({ initialTipos }: { initialTipos: TipoCasoMatch[]
           documentos: row.documentos ?? [],
           ativo: row.ativo,
           ordem: row.ordem,
+          orientacoes_ia: row.orientacoes_ia ?? "",
         };
         upsertLocal(match);
         setDraft(toDraft(match));
@@ -492,6 +502,30 @@ export function TiposCasoPanel({ initialTipos }: { initialTipos: TipoCasoMatch[]
                 Adicionar
               </Button>
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <label
+              htmlFor="tipo-orientacoes-ia"
+              className="text-[10px] font-semibold uppercase tracking-wide text-[#94a3b8]"
+            >
+              O que a IA precisa saber
+            </label>
+            <Textarea
+              id="tipo-orientacoes-ia"
+              className={cn(inputShell, "min-h-32")}
+              value={draft.orientacoes_ia}
+              onChange={(e) => setDraft((d) => ({ ...d, orientacoes_ia: e.target.value }))}
+              placeholder={
+                "Ex.: Requisitos: renda por pessoa da família até 1/4 do salário mínimo.\n" +
+                "Perguntar: quem mora na casa e quanto cada um ganha.\n" +
+                "Cuidado: não prometer aprovação."
+              }
+            />
+            <p className="text-[11px] text-[#94a3b8]">
+              Requisitos, perguntas que a IA deve fazer e cuidados deste tipo de caso. A IA do
+              WhatsApp e o assistente leem este texto junto com a lista de documentos.
+            </p>
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#e2e8f0] pt-4">
