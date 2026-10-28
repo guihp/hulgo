@@ -888,6 +888,36 @@ export type Database = {
         };
         Relationships: [];
       };
+      app_ia_ferramenta_eventos: {
+        Row: {
+          id: number;
+          telefone: string;
+          ferramenta: string;
+          status: string;
+          resumo: string | null;
+          iniciado_em: string;
+          concluido_em: string | null;
+        };
+        Insert: {
+          id?: never;
+          telefone: string;
+          ferramenta: string;
+          status?: string;
+          resumo?: string | null;
+          iniciado_em?: string;
+          concluido_em?: string | null;
+        };
+        Update: {
+          id?: never;
+          telefone?: string;
+          ferramenta?: string;
+          status?: string;
+          resumo?: string | null;
+          iniciado_em?: string;
+          concluido_em?: string | null;
+        };
+        Relationships: [];
+      };
       app_ia_fila: {
         Row: {
           telefone: string;

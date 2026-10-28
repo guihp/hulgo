@@ -5,6 +5,10 @@ import {
   FERRAMENTAS,
   type ContextoFerramenta,
 } from "@/lib/ia-whatsapp/ferramentas";
+import {
+  concluirEventoFerramenta,
+  iniciarEventoFerramenta,
+} from "@/lib/ia-whatsapp/eventos-ferramenta";
 import { exigirChaveOpenAI, getOpenAIConfig } from "@/lib/openai/credenciais";
 
 const OPENAI_BASE = "https://api.openai.com/v1";
@@ -114,12 +118,14 @@ export async function rodarAgente(input: {
       }
       let resultado: unknown;
       let erro: string | undefined;
+      const evento = await iniciarEventoFerramenta(input.contexto.telefone, f.name);
       try {
         resultado = await executarFerramenta(f.name, args, input.contexto);
       } catch (e) {
         erro = e instanceof Error ? e.message : "erro na ferramenta";
         resultado = { ok: false, erro };
       }
+      await concluirEventoFerramenta(evento, resultado, erro);
       chamadas.push({ nome: f.name, argumentos: args, resultado, ...(erro ? { erro } : {}) });
       saidas.push({ type: "function_call_output", call_id: f.call_id, output: JSON.stringify(resultado) });
     }

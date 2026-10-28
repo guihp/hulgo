@@ -150,3 +150,8 @@
   escurecer a tela). `ler_prompt_agente` devolve `qual_versao_a_ia_usa`, `diferencas_rascunho_publicado` e `alertas`
   (marcadores no rascunho); o prompt do assistente manda checar a versão que gerou a resposta e trocar a regra causadora
   em vez de empilhar regra nova.
+- **Ferramentas da IA no chat + etiqueta do funil + foto em Aprovações** (2026-10-28): `rodarAgente` grava cada tool em
+  `app_ia_ferramenta_eventos` (aguardando → ok/erro + resumo, `lib/ia-whatsapp/eventos-ferramenta.ts`); o chat mostra
+  linha só da equipe ("IA acionou: … aguardando resposta"). Etiqueta automática da etapa do funil: chave `funil:<coluna>`,
+  trigger em `casos_novos` (status/telefone) → `sincronizar_etiqueta_funil`; renomear coluna renomeia a etiqueta.
+  Aprovações mostram `app_ia_estado.foto_url` (senão boneco). Migration `20261028210000_ferramentas_ia_etiqueta_funil.sql`.

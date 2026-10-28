@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Check, Columns3, Pencil, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   criarEtiqueta,
@@ -39,13 +39,18 @@ export function EtiquetaChip({
   const cor = corEtiqueta(etiqueta.cor);
   return (
     <span
+      title={etiqueta.chave?.startsWith("funil:") ? `Etapa do funil: ${etiqueta.nome}` : etiqueta.nome}
       className={cn(
         "inline-flex max-w-[140px] items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium",
         cor.pill,
         className
       )}
     >
-      <span className={cn("size-1.5 shrink-0 rounded-full", cor.dot)} />
+      {etiqueta.chave?.startsWith("funil:") ? (
+        <Columns3 className="size-3 shrink-0" aria-label="Etapa do funil" />
+      ) : (
+        <span className={cn("size-1.5 shrink-0 rounded-full", cor.dot)} />
+      )}
       <span className="truncate">{etiqueta.nome}</span>
     </span>
   );

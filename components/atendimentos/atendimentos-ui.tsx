@@ -33,6 +33,7 @@ import {
   Send,
   Tag,
   Video,
+  Wrench,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -309,6 +310,68 @@ function toConversation(
 
 function temNaoLida(c: Conversation) {
   return c.unread > 0 || c.marcadaNaoLida;
+}
+
+type EventoFerramenta = Tables<"app_ia_ferramenta_eventos">;
+
+const ROTULO_FERRAMENTA: Record<string, string> = {
+  atualizar_dados_caso: "salvar dados do caso",
+  consultar_cliente_kanban: "consultar o cliente no funil",
+  mover_cliente_kanban: "mover o card no funil",
+  registrar_documento_cliente: "registrar documento",
+  checklist_beneficios: "buscar documentos do benefício",
+  registrar_caso_para_advogado: "registrar o caso para o advogado",
+  enviar_para_aprovacao_advogado: "enviar para aprovação do advogado",
+  buscar_processos_por_cpf: "buscar processos pelo CPF",
+  consultar_processo_datajud: "consultar a Justiça (DataJud)",
+};
+
+/** Linha só da equipe: a IA acionou uma ferramenta (aguardando / resultado). */
+function EventoFerramentaIA({ evento }: { evento: EventoFerramenta }) {
+  const rotulo = ROTULO_FERRAMENTA[evento.ferramenta] ?? evento.ferramenta;
+  const aguardando = evento.status === "aguardando";
+  const erro = evento.status === "erro";
+  const segundos = evento.concluido_em
+    ? Math.max(
+        0,
+        Math.round(
+          (new Date(evento.concluido_em).getTime() - new Date(evento.iniciado_em).getTime()) / 1000
+        )
+      )
+    : null;
+  return (
+    <div className="my-2 flex justify-center">
+      <span
+        className={cn(
+          "inline-flex max-w-[90%] items-start gap-1.5 rounded-lg border px-2.5 py-1 text-[11px]",
+          aguardando
+            ? "border-sky-200 bg-sky-50 text-sky-800"
+            : erro
+              ? "border-rose-200 bg-rose-50 text-rose-800"
+              : "border-[#e2e8f0] bg-white text-[#64748B]"
+        )}
+        title={evento.resumo ?? undefined}
+      >
+        {aguardando ? (
+          <Loader2 className="mt-0.5 size-3 shrink-0 animate-spin" />
+        ) : (
+          <Wrench className="mt-0.5 size-3 shrink-0" />
+        )}
+        <span className="min-w-0">
+          <span className="font-medium">
+            {aguardando ? `IA acionou: ${rotulo} — aguardando resposta…` : `IA: ${rotulo}`}
+          </span>
+          {!aguardando && evento.resumo ? (
+            <span className="line-clamp-2"> · {evento.resumo}</span>
+          ) : null}
+          <span className="ml-1 opacity-70">
+            {formatChatTime(evento.iniciado_em)}
+            {segundos != null ? ` · ${segundos} s` : ""}
+          </span>
+        </span>
+      </span>
+    </div>
+  );
 }
 
 function groupMessagesByDate(messages: Mensagem[]) {
@@ -1280,6 +1343,44 @@ function ConversationThread({
     };
   }, [contactNorm, refresh]);
 
+  const [eventos, setEventos] = useState<EventoFerramenta[]>([]);
+  useEffect(() => {
+    const supabase = createClient();
+    const carregar = () =>
+      supabase
+        .from("app_ia_ferramenta_eventos")
+        .select("*")
+        .eq("telefone", contactNorm)
+        .order("iniciado_em", { ascending: false })
+        .limit(200)
+        .then(({ data }) => {
+          if (data) setEventos(data.reverse());
+        });
+    void carregar();
+    const channel = supabase
+      .channel(`ia-ferramentas-${contactNorm}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "app_ia_ferramenta_eventos",
+          filter: `telefone=eq.${contactNorm}`,
+        },
+        () => void carregar()
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [contactNorm]);
+
+  // Aviso novo de ferramenta no fim da conversa: acompanha se você está no fim.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el && grudadoNoFim.current) el.scrollTop = el.scrollHeight;
+  }, [eventos]);
+
   const irParaOFim = useCallback((suave = false) => {
     const el = scrollRef.current;
     if (!el) return;
@@ -1345,6 +1446,21 @@ function ConversationThread({
   }, [messages, pendentes]);
 
   const groups = useMemo(() => groupMessagesByDate(exibidas), [exibidas]);
+
+  // Ferramentas que a IA acionou: entram no chat antes da 1ª mensagem posterior a elas.
+  const { eventosAntesDe, eventosNoFim } = useMemo(() => {
+    const antes = new Map<number, EventoFerramenta[]>();
+    let i = 0;
+    for (const m of exibidas) {
+      const t = new Date(m.created_at).getTime();
+      const lote: EventoFerramenta[] = [];
+      while (i < eventos.length && new Date(eventos[i].iniciado_em).getTime() <= t) {
+        lote.push(eventos[i++]);
+      }
+      if (lote.length) antes.set(m.id, lote);
+    }
+    return { eventosAntesDe: antes, eventosNoFim: eventos.slice(i) };
+  }, [exibidas, eventos]);
 
   const primeiraNaoLidaId = useMemo(() => {
     if (lidaAoAbrir === undefined) return null;
@@ -1621,6 +1737,9 @@ function ConversationThread({
                     );
                     return (
                       <div key={msg.id}>
+                        {eventosAntesDe.get(msg.id)?.map((ev) => (
+                          <EventoFerramentaIA key={`ev-${ev.id}`} evento={ev} />
+                        ))}
                         {msg.id === primeiraNaoLidaId ? (
                           <div ref={naoLidasRef} className="my-3 flex justify-center">
                             <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 ring-1 ring-emerald-200">
@@ -1685,6 +1804,9 @@ function ConversationThread({
                   })}
                 </div>
               </div>
+            ))}
+            {eventosNoFim.map((ev) => (
+              <EventoFerramentaIA key={`ev-${ev.id}`} evento={ev} />
             ))}
           </div>
         </div>

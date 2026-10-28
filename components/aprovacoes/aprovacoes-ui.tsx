@@ -14,6 +14,7 @@ import {
   MessageSquare,
   Search,
   Send,
+  User,
   XCircle,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
@@ -45,7 +46,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDateTime, formatRelative, formatChatTime } from "@/lib/utils/dates";
-import { formatPhone } from "@/lib/utils/phone";
+import { formatPhone, phoneToContactNorm } from "@/lib/utils/phone";
 import { fichaPessoaHref } from "@/lib/utils/ficha";
 import { cn } from "@/lib/utils";
 import { toastErroAcao } from "@/lib/client/erros";
@@ -57,11 +58,71 @@ const MENSAGEM_RECUSA_PADRAO =
 
 type FiltroPill = "pendentes" | "aprovadas" | "recusadas" | "todas";
 
-function initialsFromName(name: string | null | undefined): string {
-  const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+// Foto do WhatsApp (app_ia_estado.foto_url), uma busca por telefone.
+const fotosCache = new Map<string, Promise<string | null>>();
+
+function buscarFoto(telefone: string): Promise<string | null> {
+  let p = fotosCache.get(telefone);
+  if (!p) {
+    p = Promise.resolve(
+      createClient()
+        .from("app_ia_estado")
+        .select("foto_url")
+        .eq("telefone", telefone)
+        .maybeSingle()
+    ).then(
+      ({ data }) => data?.foto_url ?? null,
+      () => null
+    );
+    fotosCache.set(telefone, p);
+  }
+  return p;
+}
+
+/** Foto do cliente se existir; senão o boneco. */
+function AvatarCliente({
+  telefone,
+  className,
+  iconClassName,
+}: {
+  telefone: string | null | undefined;
+  className: string;
+  iconClassName: string;
+}) {
+  const contato = phoneToContactNorm(telefone);
+  const [foto, setFoto] = useState<{ contato: string; url: string | null } | null>(null);
+  const [falhou, setFalhou] = useState(false);
+  useEffect(() => {
+    if (!contato) return;
+    let vivo = true;
+    void buscarFoto(contato).then((url) => {
+      if (vivo) setFoto({ contato, url });
+    });
+    return () => {
+      vivo = false;
+    };
+  }, [contato]);
+  const url = foto?.contato === contato && !falhou ? foto.url : null;
+  return (
+    <span
+      className={cn(
+        "flex shrink-0 items-center justify-center overflow-hidden rounded-full",
+        className
+      )}
+    >
+      {url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={url}
+          alt=""
+          className="size-full object-cover"
+          onError={() => setFalhou(true)}
+        />
+      ) : (
+        <User className={iconClassName} />
+      )}
+    </span>
+  );
 }
 
 function diasAguardando(createdAt: string | null): number {
@@ -484,9 +545,11 @@ function ListCard({
       )}
     >
       <div className="flex gap-3">
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[#0b2148]/10 text-sm font-semibold text-[#0b2148]">
-          {initialsFromName(aprovacao.nome_cliente)}
-        </span>
+        <AvatarCliente
+          telefone={aprovacao.telefone_cliente}
+          className="size-10 bg-[#0b2148]/10 text-[#0b2148]"
+          iconClassName="size-5"
+        />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <p className="truncate font-semibold text-[#0b2148]">
@@ -654,9 +717,11 @@ function AprovacaoDetailPanel({
     >
       <CardContent className="space-y-6 p-5 sm:p-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-          <span className="flex size-16 shrink-0 items-center justify-center rounded-full bg-[#0b2148] text-xl font-semibold text-white">
-            {initialsFromName(aprovacao.nome_cliente)}
-          </span>
+          <AvatarCliente
+            telefone={aprovacao.telefone_cliente}
+            className="size-16 bg-[#0b2148] text-white"
+            iconClassName="size-8"
+          />
           <div className="min-w-0 flex-1 space-y-2">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-xl font-bold text-[#0b2148]">
