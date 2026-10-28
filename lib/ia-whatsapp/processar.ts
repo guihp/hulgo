@@ -10,7 +10,9 @@ import { marcarAtendimento } from "@/lib/ia-whatsapp/etiquetas-atendimento";
 import { conteudoParaIA } from "@/lib/ia-whatsapp/midia";
 import { carregarPersona, montarSystemPrompt } from "@/lib/ia-whatsapp/prompt";
 import { createServiceClient } from "@/lib/supabase/service";
-import type { Json } from "@/types/database";
+import type { Json, Tables } from "@/types/database";
+
+type Mensagem = Tables<"mensagens">;
 
 const HISTORICO_MAX = 40;
 /** Mídias antigas (ex.: áudio mandado durante o atendimento humano) lidas por vez. */
@@ -20,6 +22,13 @@ const PREFIXO_EQUIPE = "[Mensagem da equipe do escritório, enviada por uma pess
 const JANELA_PENDENTES_MS = 2 * 60 * 60 * 1000;
 
 type ItemFila = { telefone: string; instancia: string | null; processar_apos: string };
+
+/** Entrada da IA quando a equipe devolve a conversa pedindo que ela continue na hora. */
+const INSTRUCAO_RETOMADA =
+  "[Aviso interno do sistema, não é mensagem do cliente] A equipe do escritório terminou o atendimento " +
+  "humano e devolveu a conversa para você. Leia o histórico e mande agora ao cliente uma mensagem curta " +
+  "continuando o atendimento de onde parou: não se apresente de novo e não repita o que a equipe já disse. " +
+  "Se a equipe já resolveu tudo, pergunte se ele precisa de mais alguma coisa.";
 
 function normalizarComparacao(s: string) {
   return s.toLowerCase().replace(/[^a-z0-9à-ú]/gi, "");
@@ -50,7 +59,7 @@ async function registrarExecucao(dados: {
   });
 }
 
-async function concluir(item: ItemFila, erro: string | null) {
+async function concluirFila(item: ItemFila, erro: string | null) {
   const supabase = createServiceClient();
   await supabase.rpc("ia_fila_concluir", {
     p_telefone: item.telefone,
@@ -59,12 +68,19 @@ async function concluir(item: ItemFila, erro: string | null) {
   });
 }
 
-/** Processa as mensagens pendentes de um telefone e responde. */
-async function processarTelefone(item: ItemFila): Promise<void> {
+/**
+ * Processa as mensagens pendentes de um telefone e responde.
+ * retomada: a equipe devolveu a conversa pedindo que a IA continue já — não
+ * espera mensagem do cliente (entrada = INSTRUCAO_RETOMADA) e não mexe na fila.
+ */
+async function processarTelefone(item: ItemFila, retomada = false): Promise<void> {
   const inicio = Date.now();
   const tel = item.telefone;
   const supabase = createServiceClient();
   let entrada: string | null = null;
+  const concluir = retomada
+    ? async () => {}
+    : concluirFila;
 
   try {
     const config = await getIaConfig();
@@ -75,21 +91,35 @@ async function processarTelefone(item: ItemFila): Promise<void> {
 
     const estado = await getIaEstado(tel);
     const desdeId = estado?.ultima_mensagem_id ?? 0;
-    const { data: pendentes, error } = await supabase
-      .from("mensagens")
-      .select("*")
-      .eq("contact_norm", tel)
-      .eq("type", "lead")
-      .gt("id", desdeId)
-      .gte("created_at", new Date(Date.now() - JANELA_PENDENTES_MS).toISOString())
-      .order("id", { ascending: true })
-      .limit(30);
-    if (error) throw new Error(error.message);
-    if (!pendentes?.length) {
-      await concluir(item, null);
-      return;
+    let pendentes: Mensagem[] = [];
+    let ultimoId: number;
+    if (retomada) {
+      const { data: ultima } = await supabase
+        .from("mensagens")
+        .select("id")
+        .eq("contact_norm", tel)
+        .order("id", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      ultimoId = ultima?.id ?? desdeId;
+    } else {
+      const { data, error } = await supabase
+        .from("mensagens")
+        .select("*")
+        .eq("contact_norm", tel)
+        .eq("type", "lead")
+        .gt("id", desdeId)
+        .gte("created_at", new Date(Date.now() - JANELA_PENDENTES_MS).toISOString())
+        .order("id", { ascending: true })
+        .limit(30);
+      if (error) throw new Error(error.message);
+      pendentes = data ?? [];
+      if (!pendentes.length) {
+        await concluir(item, null);
+        return;
+      }
+      ultimoId = pendentes[pendentes.length - 1].id;
     }
-    const ultimoId = pendentes[pendentes.length - 1].id;
 
     if (estado?.pausada) {
       // Atendimento humano: só marca como lidas pela IA.
@@ -108,7 +138,9 @@ async function processarTelefone(item: ItemFila): Promise<void> {
       m.ia_conteudo = await conteudoParaIA(m);
       await supabase.from("mensagens").update({ ia_conteudo: m.ia_conteudo }).eq("id", m.id);
     }
-    entrada = pendentes.map((m) => m.ia_conteudo).filter(Boolean).join("\n");
+    entrada = retomada
+      ? INSTRUCAO_RETOMADA
+      : pendentes.map((m) => m.ia_conteudo).filter(Boolean).join("\n");
 
     // 2) Histórico (memória) — desde o último /reset. Inclui o que a equipe
     // conversou com o cliente enquanto a IA estava pausada.
@@ -116,7 +148,7 @@ async function processarTelefone(item: ItemFila): Promise<void> {
       .from("mensagens")
       .select("*")
       .eq("contact_norm", tel)
-      .lt("id", pendentes[0].id)
+      .lt("id", retomada ? ultimoId + 1 : pendentes[0].id)
       .order("id", { ascending: false })
       .limit(HISTORICO_MAX);
     if (estado?.memoria_desde) histQuery = histQuery.gte("created_at", estado.memoria_desde);
@@ -249,6 +281,18 @@ let cadeia: Promise<unknown> = Promise.resolve();
  */
 export function processarFilaIA(): Promise<{ processados: number }> {
   const execucao = cadeia.then(rodarFila, rodarFila);
+  cadeia = execucao.catch(() => {});
+  return execucao;
+}
+
+/** A equipe devolveu a conversa e pediu que a IA continue o atendimento agora. */
+export function retomarAtendimentoIA(telefone: string, instancia: string | null): Promise<void> {
+  const rodar = () =>
+    processarTelefone(
+      { telefone, instancia, processar_apos: new Date().toISOString() },
+      true
+    );
+  const execucao = cadeia.then(rodar, rodar);
   cadeia = execucao.catch(() => {});
   return execucao;
 }

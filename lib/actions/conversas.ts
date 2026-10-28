@@ -1,6 +1,9 @@
 "use server";
 
 import { getAppUser } from "@/lib/actions/auth";
+import { after } from "next/server";
+import { getIaConfig, iaAtendeTelefone, normalizarTelefone } from "@/lib/ia-whatsapp/config";
+import { retomarAtendimentoIA } from "@/lib/ia-whatsapp/processar";
 import { controlarIA } from "@/lib/n8n";
 import { createClient } from "@/lib/supabase/server";
 
@@ -46,9 +49,18 @@ export async function setControleIA(input: {
   acao: "pausar" | "despausar";
   telefone: string;
   instancia?: string | null;
+  /** despausar: a IA manda já uma mensagem continuando (senão espera o cliente escrever). */
+  responderAgora?: boolean;
 }) {
   const user = await getAppUser();
   if (!user) throw new Error("Não autenticado");
+
+  const responderAgora = input.acao === "despausar" && input.responderAgora === true;
+  if (responderAgora && !iaAtendeTelefone(await getIaConfig(), normalizarTelefone(input.telefone))) {
+    throw new Error(
+      "A IA não atende este contato agora (desligada ou em modo teste). Ligue a IA em IA do WhatsApp."
+    );
+  }
 
   const result = await controlarIA(
     input.acao,
@@ -60,6 +72,14 @@ export async function setControleIA(input: {
   }
   if (!result.ok) {
     throw new Error(result.error ?? "Falha ao controlar a IA");
+  }
+  if (responderAgora) {
+    const telefone = normalizarTelefone(input.telefone);
+    after(() =>
+      retomarAtendimentoIA(telefone, input.instancia ?? null).catch((e) =>
+        console.error("[ia-whatsapp] retomar", telefone, e)
+      )
+    );
   }
   return { success: true as const };
 }

@@ -16,8 +16,13 @@ import {
   Bot,
   Check,
   ChevronDown,
+  Clock,
   Contact,
+  Download,
+  ExternalLink,
   FileText,
+  ListFilter,
+  Play,
   Handshake,
   ImageIcon,
   Loader2,
@@ -25,8 +30,10 @@ import {
   MessageSquare,
   Mic,
   Search,
+  Send,
   Tag,
   Video,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
@@ -82,6 +89,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { toastErroAcao } from "@/lib/client/erros";
 
@@ -151,6 +159,10 @@ type EstadoIA = {
   dica: string;
 };
 
+/** pausar · devolver esperando o cliente · devolver e a IA já manda mensagem */
+type ControleIA = "pausar" | "esperar" | "responder";
+type OnControleIA = (conv: Conversation, acao: ControleIA) => Promise<void>;
+
 function estadoIA(conv: Conversation, ia: IaInfo): EstadoIA {
   if (ia.modo === "desligado") {
     return {
@@ -170,7 +182,7 @@ function estadoIA(conv: Conversation, ia: IaInfo): EstadoIA {
     return {
       chave: "pausada",
       rotulo: "Humano atendendo · devolver para a IA",
-      dica: "A equipe está atendendo e a IA não responde. Clique para a IA voltar a atender: ela responde quando o cliente mandar a próxima mensagem, já sabendo tudo o que foi conversado.",
+      dica: "A equipe está atendendo e a IA não responde. Clique para devolver a conversa para a IA.",
     };
   }
   return {
@@ -347,6 +359,79 @@ function ContactAvatar({
   );
 }
 
+/** Link do Supabase Storage que baixa o arquivo em vez de abrir. */
+function linkDownload(url: string, nome: string) {
+  return `${url}${url.includes("?") ? "&" : "?"}download=${encodeURIComponent(nome)}`;
+}
+
+function BotaoBaixarMidia({ url, nome }: { url: string; nome: string }) {
+  return (
+    <a
+      href={linkDownload(url, nome)}
+      download={nome}
+      aria-label="Baixar"
+      title="Baixar"
+      onClick={(e) => e.stopPropagation()}
+      className="absolute right-2 top-2 flex size-8 items-center justify-center rounded-full bg-black/55 text-white opacity-0 transition hover:bg-black/75 focus-visible:opacity-100 group-hover/midia:opacity-100"
+    >
+      <Download className="h-4 w-4" />
+    </a>
+  );
+}
+
+/** Janela para ver foto, vídeo ou PDF grande, com baixar e abrir em nova aba. */
+function MidiaDialog({
+  open,
+  onOpenChange,
+  url,
+  nome,
+  baixavel,
+  children,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  url: string;
+  nome: string;
+  baixavel: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        showCloseButton
+        className="max-h-[min(94vh,960px)] w-auto max-w-[min(96vw,1100px)] border-[#e2e8f0] bg-white p-3 sm:max-w-[min(96vw,1100px)]"
+      >
+        <DialogTitle className="sr-only">Visualizar mídia</DialogTitle>
+        <DialogDescription className="sr-only">
+          Mídia ampliada da conversa. Feche com Esc, pelo botão ou clicando fora.
+        </DialogDescription>
+        {open ? children : null}
+        {baixavel ? (
+          <div className="mt-1 flex items-center justify-center gap-4 text-xs font-medium text-[#0b2148]">
+            <a
+              href={linkDownload(url, nome)}
+              download={nome}
+              className="inline-flex items-center gap-1 underline-offset-2 hover:underline"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Baixar
+            </a>
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 underline-offset-2 hover:underline"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              Abrir em nova aba
+            </a>
+          </div>
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function MediaPreview({
   msg,
   isClient,
@@ -444,48 +529,42 @@ function MediaPreview({
   }
 
   const mediaKind = resolveMediaDisplayKind(type, url);
+  const nomeArquivo = fileNameFromUrl(url);
+  const baixavel = !url.startsWith("blob:");
 
   if (mediaKind === "image") {
     return (
       <>
-        <button
-          type="button"
-          onClick={() => setImageOpen(true)}
-          className="mb-1 block cursor-zoom-in rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-[#0b2148]/40"
+        <div className="group/midia relative mb-1 w-fit">
+          <button
+            type="button"
+            onClick={() => setImageOpen(true)}
+            className="block cursor-zoom-in rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-[#0b2148]/40"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={url}
+              alt="Foto"
+              onLoad={onMediaLoad}
+              className="max-h-80 w-auto max-w-full rounded-lg object-cover sm:max-w-[320px]"
+            />
+          </button>
+          {baixavel ? <BotaoBaixarMidia url={url} nome={nomeArquivo} /> : null}
+        </div>
+        <MidiaDialog
+          open={imageOpen}
+          onOpenChange={setImageOpen}
+          url={url}
+          nome={nomeArquivo}
+          baixavel={baixavel}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={url}
-            alt="Mídia"
-            onLoad={onMediaLoad}
-            className="max-h-48 max-w-full rounded-lg object-cover"
+            alt="Foto"
+            className="mx-auto max-h-[min(80vh,820px)] max-w-full rounded-lg object-contain"
           />
-        </button>
-        <Dialog open={imageOpen} onOpenChange={setImageOpen}>
-          <DialogContent
-            showCloseButton
-            className="max-h-[min(92vh,920px)] w-auto max-w-[min(96vw,1100px)] border-[#e2e8f0] bg-white p-3 sm:max-w-[min(96vw,1100px)]"
-          >
-            <DialogTitle className="sr-only">Visualizar mídia</DialogTitle>
-            <DialogDescription className="sr-only">
-              Imagem ampliada da conversa. Feche com Esc, pelo botão ou clicando fora.
-            </DialogDescription>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={url}
-              alt="Mídia"
-              className="mx-auto max-h-[min(80vh,820px)] max-w-full rounded-lg object-contain"
-            />
-            <a
-              href={url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-1 block text-center text-xs font-medium text-[#0b2148] underline underline-offset-2 opacity-80 hover:opacity-100"
-            >
-              Abrir original
-            </a>
-          </DialogContent>
-        </Dialog>
+        </MidiaDialog>
       </>
     );
   }
@@ -508,43 +587,107 @@ function MediaPreview({
 
   if (mediaKind === "video") {
     return (
-      <div className="mb-1 max-w-full">
-        <video
-          controls
-          src={url}
-          onLoadedMetadata={onMediaLoad}
-          className="max-h-48 max-w-full rounded-lg"
-          preload="metadata"
-        />
-      </div>
+      <>
+        <div className="group/midia relative mb-1 w-fit">
+          <button
+            type="button"
+            onClick={() => setImageOpen(true)}
+            aria-label="Assistir vídeo"
+            className="relative block overflow-hidden rounded-lg bg-black outline-none focus-visible:ring-2 focus-visible:ring-[#0b2148]/40"
+          >
+            <video
+              src={url}
+              muted
+              playsInline
+              preload="metadata"
+              onLoadedMetadata={onMediaLoad}
+              className="max-h-80 w-auto max-w-full sm:max-w-[320px]"
+            />
+            <span className="absolute inset-0 flex items-center justify-center bg-black/20 transition hover:bg-black/30">
+              <span className="flex size-12 items-center justify-center rounded-full bg-black/55 text-white">
+                <Play className="ml-0.5 h-6 w-6 fill-current" />
+              </span>
+            </span>
+          </button>
+          {baixavel ? <BotaoBaixarMidia url={url} nome={nomeArquivo} /> : null}
+        </div>
+        <MidiaDialog
+          open={imageOpen}
+          onOpenChange={setImageOpen}
+          url={url}
+          nome={nomeArquivo}
+          baixavel={baixavel}
+        >
+          <video
+            src={url}
+            controls
+            autoPlay
+            playsInline
+            className="mx-auto max-h-[min(80vh,820px)] max-w-full rounded-lg bg-black"
+          />
+        </MidiaDialog>
+      </>
     );
   }
 
   if (mediaKind === "document") {
-    const name = fileNameFromUrl(url);
-    const ext = name.includes(".")
-      ? name.split(".").pop()!.toUpperCase()
+    const ext = nomeArquivo.includes(".")
+      ? nomeArquivo.split(".").pop()!.toUpperCase()
       : "DOC";
+    const ehPdf = ext === "PDF";
     return (
-      <a
-        href={url}
-        target="_blank"
-        rel="noopener noreferrer"
-        className={cn(
-          "mb-1 flex items-center gap-2.5 rounded-lg border p-2.5 transition hover:border-[#0b2148]/30",
-          shell
-        )}
-      >
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[#0b2148]/10 text-[#0b2148]">
-          <FileText className="h-4 w-4" />
-        </span>
-        <span className="min-w-0">
-          <span className="block truncate text-sm font-medium text-[#0b2148]">
-            {name}
-          </span>
-          <span className="text-[11px] text-[#64748B]">{ext}</span>
-        </span>
-      </a>
+      <>
+        <div
+          className={cn(
+            "mb-1 flex min-w-[220px] items-center gap-2.5 rounded-lg border p-2.5",
+            shell
+          )}
+        >
+          <button
+            type="button"
+            onClick={() => (ehPdf ? setImageOpen(true) : window.open(url, "_blank", "noopener"))}
+            className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+          >
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[#0b2148]/10 text-[#0b2148]">
+              <FileText className="h-4 w-4" />
+            </span>
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-medium text-[#0b2148]">
+                {nomeArquivo}
+              </span>
+              <span className="text-[11px] text-[#64748B]">
+                {ext} · {ehPdf ? "clique para ver" : "clique para abrir"}
+              </span>
+            </span>
+          </button>
+          {baixavel ? (
+            <a
+              href={linkDownload(url, nomeArquivo)}
+              download={nomeArquivo}
+              aria-label="Baixar"
+              title="Baixar"
+              className="flex size-8 shrink-0 items-center justify-center rounded-full text-[#0b2148] transition hover:bg-[#0b2148]/10"
+            >
+              <Download className="h-4 w-4" />
+            </a>
+          ) : null}
+        </div>
+        {ehPdf ? (
+          <MidiaDialog
+            open={imageOpen}
+            onOpenChange={setImageOpen}
+            url={url}
+            nome={nomeArquivo}
+            baixavel={baixavel}
+          >
+            <iframe
+              src={url}
+              title={nomeArquivo}
+              className="h-[min(78vh,820px)] w-[min(90vw,900px)] rounded-lg border border-[#e2e8f0] bg-white"
+            />
+          </MidiaDialog>
+        ) : null}
+      </>
     );
   }
 
@@ -582,23 +725,74 @@ function PreviewIcon({ kind }: { kind: Conversation["lastKind"] }) {
 }
 
 /** Itens do menu de uma conversa (lista e cabeçalho), como o "⌄" do WhatsApp. */
+/** As duas formas de devolver a conversa para a IA. */
+function DevolverIAItens({
+  onEscolher,
+}: {
+  onEscolher: (acao: "responder" | "esperar") => void;
+}) {
+  return (
+    <>
+      <DropdownMenuItem onClick={() => onEscolher("responder")} className="items-start">
+        <Send className="mt-0.5 h-4 w-4" />
+        <span>
+          <span className="block font-medium">IA continua agora</span>
+          <span className="block text-xs text-[#64748B]">
+            Ela manda uma mensagem ao cliente seguindo o atendimento
+          </span>
+        </span>
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={() => onEscolher("esperar")} className="items-start">
+        <Clock className="mt-0.5 h-4 w-4" />
+        <span>
+          <span className="block font-medium">IA espera o cliente</span>
+          <span className="block text-xs text-[#64748B]">
+            Só responde quando o cliente mandar mensagem
+          </span>
+        </span>
+      </DropdownMenuItem>
+    </>
+  );
+}
+
 function ConversaMenuItens({
   conv,
+  estado,
   etiquetas,
   fichaHref,
   onToggleNaoLida,
   onToggleEtiqueta,
   onGerenciarEtiquetas,
+  onControleIA,
 }: {
   conv: Conversation;
+  estado: EstadoIA;
   etiquetas: Etiqueta[];
   fichaHref: string;
   onToggleNaoLida: (conv: Conversation) => void;
   onToggleEtiqueta: (conv: Conversation, etiquetaId: number, marcada: boolean) => void;
   onGerenciarEtiquetas: () => void;
+  onControleIA: OnControleIA;
 }) {
   return (
     <>
+      {estado.chave === "pausada" ? (
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            <Bot className="h-4 w-4" />
+            Devolver para a IA
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="min-w-64">
+            <DevolverIAItens onEscolher={(acao) => void onControleIA(conv, acao)} />
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+      ) : estado.chave === "ligada" ? (
+        <DropdownMenuItem onClick={() => void onControleIA(conv, "pausar")}>
+          <Bot className="h-4 w-4" />
+          Pausar a IA e assumir
+        </DropdownMenuItem>
+      ) : null}
+      {estado.chave === "pausada" || estado.chave === "ligada" ? <DropdownMenuSeparator /> : null}
       <DropdownMenuItem onClick={() => onToggleNaoLida(conv)}>
         {temNaoLida(conv) ? "Marcar como lida" : "Marcar como não lida"}
       </DropdownMenuItem>
@@ -651,7 +845,11 @@ function ConversationList({
   onToggleNaoLida,
   onToggleEtiqueta,
   onGerenciarEtiquetas,
+  ia,
+  onControleIA,
 }: {
+  ia: IaInfo;
+  onControleIA: OnControleIA;
   conversations: Conversation[];
   etiquetas: Etiqueta[];
   etiquetaById: Map<number, Etiqueta>;
@@ -674,40 +872,139 @@ function ConversationList({
 }) {
   const [menuAberto, setMenuAberto] = useState<string | null>(null);
 
-  const chips: { key: Filtro; label: string; count?: number; cor?: string; parceiro?: boolean }[] = [
+  const [filtrosAbertos, setFiltrosAbertos] = useState(false);
+
+  const rapidos: { key: Filtro; label: string; count?: number }[] = [
     { key: "todas", label: "Todas" },
     { key: "nao_lidas", label: "Não lidas", count: counts.naoLidas },
     { key: "humano", label: "Pedem humano", count: counts.humano },
-    ...etiquetas.map((e) => ({
-      key: `etq:${e.id}` as Filtro,
-      label: e.nome,
-      count: counts.porEtiqueta[e.id] ?? 0,
-      cor: e.cor,
-    })),
-    ...Object.keys(counts.porParceiro)
-      .sort((a, b) => a.localeCompare(b, "pt-BR"))
-      .map((nome) => ({
-        key: `parc:${nome}` as Filtro,
-        label: nome,
-        count: counts.porParceiro[nome],
-        parceiro: true,
-      })),
   ];
+  const parceiros = Object.keys(counts.porParceiro).sort((a, b) => a.localeCompare(b, "pt-BR"));
+  const etiquetaAtiva = filtro.startsWith("etq:") ? etiquetaById.get(Number(filtro.slice(4))) : null;
+  const parceiroAtivo = filtro.startsWith("parc:") ? filtro.slice(5) : null;
+  const filtroAvancado = Boolean(etiquetaAtiva || parceiroAtivo);
+
+  const escolher = (f: Filtro) => {
+    onFiltroChange(f);
+    setFiltrosAbertos(false);
+  };
+
+  const itemFiltro = (
+    key: Filtro,
+    conteudo: React.ReactNode,
+    count: number | undefined
+  ) => (
+    <button
+      key={key}
+      type="button"
+      onClick={() => escolher(filtro === key ? "todas" : key)}
+      className={cn(
+        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition",
+        filtro === key ? "bg-[#0b2148] text-white" : "text-[#334155] hover:bg-[#F1F5F9]"
+      )}
+    >
+      {conteudo}
+      <span
+        className={cn(
+          "ml-auto text-xs",
+          filtro === key ? "text-white/80" : "text-[#94a3b8]"
+        )}
+      >
+        {count ?? 0}
+      </span>
+    </button>
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col border-r border-[#e2e8f0] bg-[#F8FAFC]">
       <div className="space-y-2.5 border-b border-[#e2e8f0] bg-white p-3">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#94a3b8]" />
-          <Input
-            placeholder="Pesquisar nome, número ou mensagem"
-            value={search}
-            onChange={(e) => onSearchChange(e.target.value)}
-            className="h-10 border-[#e2e8f0] bg-[#F8FAFC] pl-9 text-[#0b2148] placeholder:text-[#94a3b8] focus-visible:border-[#0b2148] focus-visible:ring-[#0b2148]/12"
-          />
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#94a3b8]" />
+            <Input
+              placeholder="Pesquisar nome, número ou mensagem"
+              value={search}
+              onChange={(e) => onSearchChange(e.target.value)}
+              className="h-10 border-[#e2e8f0] bg-[#F8FAFC] pl-9 text-[#0b2148] placeholder:text-[#94a3b8] focus-visible:border-[#0b2148] focus-visible:ring-[#0b2148]/12"
+            />
+          </div>
+          <Popover open={filtrosAbertos} onOpenChange={setFiltrosAbertos}>
+            <PopoverTrigger
+              aria-label="Filtrar conversas"
+              title="Filtrar por etiqueta ou parceiro"
+              className={cn(
+                "relative inline-flex h-10 shrink-0 items-center gap-1.5 rounded-md border px-3 text-sm font-medium transition",
+                filtroAvancado
+                  ? "border-[#0b2148] bg-[#0b2148] text-white"
+                  : "border-[#e2e8f0] bg-white text-[#0b2148] hover:bg-[#F1F5F9]"
+              )}
+            >
+              <ListFilter className="h-4 w-4" />
+              Filtrar
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-72 p-2">
+              <div className="max-h-[60vh] space-y-3 overflow-y-auto">
+                <div>
+                  <p className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-[#94a3b8]">
+                    Conversas
+                  </p>
+                  {rapidos.map((r) => itemFiltro(r.key, r.label, r.count))}
+                </div>
+                <div>
+                  <p className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-[#94a3b8]">
+                    Etiquetas
+                  </p>
+                  {etiquetas.length ? (
+                    etiquetas.map((e) =>
+                      itemFiltro(
+                        `etq:${e.id}`,
+                        <>
+                          <EtiquetaDot cor={e.cor} />
+                          <span className="truncate">{e.nome}</span>
+                        </>,
+                        counts.porEtiqueta[e.id]
+                      )
+                    )
+                  ) : (
+                    <p className="px-2 py-1 text-xs text-[#94a3b8]">Nenhuma etiqueta criada.</p>
+                  )}
+                </div>
+                {parceiros.length ? (
+                  <div>
+                    <p className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-[#94a3b8]">
+                      Parceiros
+                    </p>
+                    {parceiros.map((nome) =>
+                      itemFiltro(
+                        `parc:${nome}`,
+                        <>
+                          <Handshake className="size-3.5 shrink-0 text-amber-600" />
+                          <span className="truncate">{nome}</span>
+                        </>,
+                        counts.porParceiro[nome]
+                      )
+                    )}
+                  </div>
+                ) : null}
+              </div>
+              <div className="mt-2 border-t border-[#e2e8f0] pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFiltrosAbertos(false);
+                    onGerenciarEtiquetas();
+                  }}
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-[#64748B] transition hover:bg-[#F1F5F9] hover:text-[#0b2148]"
+                >
+                  <Tag className="h-3.5 w-3.5" />
+                  Gerenciar etiquetas…
+                </button>
+              </div>
+            </PopoverContent>
+          </Popover>
         </div>
-        <div className="-mx-3 flex gap-1.5 overflow-x-auto px-3 pb-0.5 [scrollbar-width:none]">
-          {chips.map((chip) => (
+        <div className="flex flex-wrap gap-1.5">
+          {rapidos.map((chip) => (
             <button
               key={chip.key}
               type="button"
@@ -719,12 +1016,6 @@ function ConversationList({
                   : "border-[#e2e8f0] bg-white text-[#64748B] hover:border-[#0b2148]/30 hover:text-[#0b2148]"
               )}
             >
-              {chip.cor ? <EtiquetaDot cor={chip.cor} /> : null}
-              {chip.parceiro ? (
-                <Handshake
-                  className={cn("size-3", filtro === chip.key ? "text-white" : "text-amber-600")}
-                />
-              ) : null}
               {chip.label}
               {chip.count ? (
                 <span className={cn(filtro === chip.key ? "text-white/80" : "text-[#94a3b8]")}>
@@ -733,14 +1024,19 @@ function ConversationList({
               ) : null}
             </button>
           ))}
-          <button
-            type="button"
-            onClick={onGerenciarEtiquetas}
-            className="inline-flex shrink-0 items-center gap-1 rounded-full border border-dashed border-[#cbd5e1] px-3 py-1 text-xs font-medium text-[#64748B] hover:border-[#0b2148]/40 hover:text-[#0b2148]"
-          >
-            <Tag className="h-3 w-3" />
-            Etiquetas
-          </button>
+          {filtroAvancado ? (
+            <button
+              type="button"
+              onClick={() => onFiltroChange("todas")}
+              title="Tirar filtro"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[#0b2148] bg-[#0b2148] px-3 py-1 text-xs font-medium text-white"
+            >
+              {etiquetaAtiva ? <EtiquetaDot cor={etiquetaAtiva.cor} /> : null}
+              {parceiroAtivo ? <Handshake className="size-3 text-white" /> : null}
+              {etiquetaAtiva?.nome ?? parceiroAtivo}
+              <X className="h-3 w-3" />
+            </button>
+          ) : null}
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -856,6 +1152,8 @@ function ConversationList({
                           >
                             <ConversaMenuItens
                               conv={c}
+                              estado={estadoIA(c, ia)}
+                              onControleIA={onControleIA}
                               etiquetas={etiquetas}
                               fichaHref={fichaHrefDe(c)}
                               onToggleNaoLida={onToggleNaoLida}
@@ -917,7 +1215,9 @@ function ConversationThread({
   onToggleNaoLida,
   onToggleEtiqueta,
   onGerenciarEtiquetas,
+  onControleIA,
 }: {
+  onControleIA: OnControleIA;
   conv: Conversation;
   ia: IaInfo;
   etiquetas: Etiqueta[];
@@ -1098,25 +1398,11 @@ function ConversationThread({
 
   const estado = estadoIA(conv, ia);
 
-  const toggleAgent = async () => {
+  const controlar = async (acao: ControleIA) => {
     if (agentBusy) return;
-    if (estado.chave !== "ligada" && estado.chave !== "pausada") return;
     setAgentBusy(true);
-    const pausar = estado.chave === "ligada";
     try {
-      await setControleIA({
-        acao: pausar ? "pausar" : "despausar",
-        telefone: conv.phone,
-        instancia: whatsappInstancia,
-      });
-      onIaPausadaChange(pausar);
-      toast.success(
-        pausar
-          ? "IA pausada nesta conversa. A equipe assume daqui."
-          : "Devolvido para a IA. Ela responde quando o cliente mandar a próxima mensagem."
-      );
-    } catch (err) {
-      toastErroAcao(err, "Falha ao controlar a IA");
+      await onControleIA(conv, acao);
     } finally {
       setAgentBusy(false);
     }
@@ -1186,11 +1472,32 @@ function ConversationThread({
               {statusText}
             </span>
           ) : null}
-          {estado.chave === "ligada" || estado.chave === "pausada" ? (
+          {estado.chave === "pausada" ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                disabled={agentBusy}
+                title={estado.dica}
+                className={cn(
+                  "inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition disabled:opacity-60",
+                  iaClasses[estado.chave]
+                )}
+              >
+                <Bot className="h-3.5 w-3.5" />
+                {estado.rotulo}
+                <ChevronDown className="h-3.5 w-3.5" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-72">
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>Devolver para a IA</DropdownMenuLabel>
+                  <DevolverIAItens onEscolher={(acao) => void controlar(acao)} />
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : estado.chave === "ligada" ? (
             <button
               type="button"
               disabled={agentBusy}
-              onClick={() => void toggleAgent()}
+              onClick={() => void controlar("pausar")}
               title={estado.dica}
               className={cn(
                 "inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition disabled:opacity-60",
@@ -1649,6 +1956,31 @@ export function AtendimentosPanel({
     []
   );
 
+  const handleControleIA = useCallback<OnControleIA>(
+    async (conv, acao) => {
+      const pausar = acao === "pausar";
+      try {
+        await setControleIA({
+          acao: pausar ? "pausar" : "despausar",
+          telefone: conv.phone,
+          instancia: whatsappInstancia,
+          responderAgora: acao === "responder",
+        });
+        atualizarRow(conv.contact_norm, { ia_pausada: pausar });
+        toast.success(
+          pausar
+            ? "IA pausada nesta conversa. A equipe assume daqui."
+            : acao === "responder"
+              ? "Devolvido para a IA. Ela já vai mandar uma mensagem continuando o atendimento."
+              : "Devolvido para a IA. Ela responde quando o cliente mandar a próxima mensagem."
+        );
+      } catch (err) {
+        toastErroAcao(err, "Falha ao controlar a IA");
+      }
+    },
+    [atualizarRow, whatsappInstancia]
+  );
+
   const handleToggleNaoLida = useCallback(
     async (conv: Conversation) => {
       try {
@@ -1729,6 +2061,8 @@ export function AtendimentosPanel({
               onToggleNaoLida={(c) => void handleToggleNaoLida(c)}
               onToggleEtiqueta={(c, id, m) => void handleToggleEtiqueta(c, id, m)}
               onGerenciarEtiquetas={() => setGerenciarAberto(true)}
+              ia={ia}
+              onControleIA={handleControleIA}
             />
           </div>
 
@@ -1756,6 +2090,7 @@ export function AtendimentosPanel({
                 onIaPausadaChange={(pausada) =>
                   atualizarRow(selectedConv.contact_norm, { ia_pausada: pausada })
                 }
+                onControleIA={handleControleIA}
                 onToggleNaoLida={(c) => void handleToggleNaoLida(c)}
                 onToggleEtiqueta={(c, id, m) => void handleToggleEtiqueta(c, id, m)}
                 onGerenciarEtiquetas={() => setGerenciarAberto(true)}
