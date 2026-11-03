@@ -6,6 +6,7 @@ import { getAppUser } from "@/lib/actions/auth";
 import { getAgenteConfig, publicarAgenteConfig } from "@/lib/actions/configuracoes";
 import { normalizarTelefone, type IaModo } from "@/lib/ia-whatsapp/config";
 import { despausarIA, pausarIA, reiniciarMemoriaIA } from "@/lib/ia-whatsapp/estado";
+import { PROMPT_PARCEIROS_PADRAO } from "@/lib/ia-whatsapp/parceiros";
 import { processarFilaIA } from "@/lib/ia-whatsapp/processar";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -60,6 +61,47 @@ export async function salvarConfigIA(input: {
     entidade_id: 1,
     acao: "salvar",
     payload: { modo: input.modo },
+  });
+  revalidatePath("/ia-whatsapp");
+  return { success: true as const };
+}
+
+export async function salvarConfigParceiros(input: {
+  modo: "desligado" | "teste" | "ativo";
+  consultaDireta: boolean;
+  cadastroDireto: boolean;
+  prompt: string;
+}) {
+  const user = await exigirAdvogado();
+  if (!["desligado", "teste", "ativo"].includes(input.modo)) throw new Error("Modo inválido");
+  const prompt = input.prompt.trim();
+  if (prompt.length > 30000) throw new Error("Instruções muito longas (máximo 30.000 caracteres)");
+
+  const supabase = createServiceClient();
+  const { error } = await supabase
+    .from("app_ia_whatsapp_config")
+    .update({
+      parceiros_modo: input.modo,
+      parceiros_consulta_direta: input.consultaDireta,
+      parceiros_cadastro_direto: input.cadastroDireto,
+      // Igual ao padrão = vazio, para acompanhar melhorias futuras do padrão.
+      prompt_parceiros: prompt && prompt !== PROMPT_PARCEIROS_PADRAO.trim() ? prompt : null,
+      updated_at: new Date().toISOString(),
+      updated_by: user.id,
+    })
+    .eq("id", 1);
+  if (error) throw new Error(error.message);
+
+  await supabase.from("app_log_eventos").insert({
+    usuario_id: user.id,
+    entidade: "app_ia_whatsapp_config",
+    entidade_id: 1,
+    acao: "salvar_parceiros",
+    payload: {
+      modo: input.modo,
+      consulta_direta: input.consultaDireta,
+      cadastro_direto: input.cadastroDireto,
+    },
   });
   revalidatePath("/ia-whatsapp");
   return { success: true as const };

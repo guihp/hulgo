@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getAppUser } from "@/lib/actions/auth";
 import { getIaConfig, urlPainel } from "@/lib/ia-whatsapp/config";
+import { PROMPT_PARCEIROS_PADRAO } from "@/lib/ia-whatsapp/parceiros";
 import { createServiceClient } from "@/lib/supabase/service";
 import { IaWhatsappUi } from "@/components/ia-whatsapp/ia-whatsapp-ui";
 
@@ -24,7 +25,7 @@ export default async function IaWhatsappPage({
   const supabase = createServiceClient();
   const seteDias = seteDiasAtras();
 
-  const [config, pausados, fila, execucoes, semana, prompt] = await Promise.all([
+  const [config, pausados, fila, execucoes, semana, prompt, parceiros] = await Promise.all([
     getIaConfig(),
     supabase
       .from("app_ia_estado")
@@ -48,6 +49,11 @@ export default async function IaWhatsappPage({
       .select("versao, persona, persona_rascunho, updated_at")
       .eq("id", 1)
       .maybeSingle(),
+    supabase
+      .from("app_parceiros")
+      .select("id", { count: "exact", head: true })
+      .not("telefone", "is", null)
+      .neq("telefone", ""),
   ]);
 
   const linhas = semana.data ?? [];
@@ -90,6 +96,8 @@ export default async function IaWhatsappPage({
       }
       rascunhoAtualizadoEm={prompt.data?.updated_at ?? null}
       mostrarSuporte={suporte === "1"}
+      promptParceirosPadrao={PROMPT_PARCEIROS_PADRAO}
+      parceirosComWhatsapp={parceiros.count ?? 0}
     />
   );
 }

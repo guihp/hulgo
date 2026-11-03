@@ -36,7 +36,7 @@ export function substituirExpressoesN8n(
   });
 }
 
-function agoraEmBrasilia(): string {
+export function agoraEmBrasilia(): string {
   return new Intl.DateTimeFormat("pt-BR", {
     timeZone: "America/Sao_Paulo",
     weekday: "long",

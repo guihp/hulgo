@@ -441,6 +441,10 @@ export type Database = {
           resumo_final: string | null;
           status: string | null;
           telefone_cliente: string;
+          tipo: "consulta" | "novo_processo";
+          parceiro_id: string | null;
+          dados: Json | null;
+          processo_id: number | null;
         };
         Insert: {
           cpf?: string | null;
@@ -459,6 +463,10 @@ export type Database = {
           resumo_final?: string | null;
           status?: string | null;
           telefone_cliente: string;
+          tipo?: "consulta" | "novo_processo";
+          parceiro_id?: string | null;
+          dados?: Json | null;
+          processo_id?: number | null;
         };
         Update: {
           cpf?: string | null;
@@ -477,6 +485,10 @@ export type Database = {
           resumo_final?: string | null;
           status?: string | null;
           telefone_cliente?: string;
+          tipo?: "consulta" | "novo_processo";
+          parceiro_id?: string | null;
+          dados?: Json | null;
+          processo_id?: number | null;
         };
         Relationships: [];
       };
@@ -753,6 +765,10 @@ export type Database = {
           webhook_token: string;
           updated_at: string;
           updated_by: string | null;
+          parceiros_modo: "desligado" | "teste" | "ativo";
+          parceiros_consulta_direta: boolean;
+          parceiros_cadastro_direto: boolean;
+          prompt_parceiros: string | null;
         };
         Insert: {
           id?: number;
@@ -765,6 +781,10 @@ export type Database = {
           webhook_token?: string;
           updated_at?: string;
           updated_by?: string | null;
+          parceiros_modo?: "desligado" | "teste" | "ativo";
+          parceiros_consulta_direta?: boolean;
+          parceiros_cadastro_direto?: boolean;
+          prompt_parceiros?: string | null;
         };
         Update: {
           id?: number;
@@ -777,6 +797,10 @@ export type Database = {
           webhook_token?: string;
           updated_at?: string;
           updated_by?: string | null;
+          parceiros_modo?: "desligado" | "teste" | "ativo";
+          parceiros_consulta_direta?: boolean;
+          parceiros_cadastro_direto?: boolean;
+          prompt_parceiros?: string | null;
         };
         Relationships: [];
       };

@@ -58,6 +58,32 @@ const MENSAGEM_RECUSA_PADRAO =
 
 type FiltroPill = "pendentes" | "aprovadas" | "recusadas" | "todas";
 
+type DadosParceiro = {
+  parceiro_nome?: string;
+  nome?: string;
+  cpf?: string;
+  data_nascimento?: string | null;
+  beneficio?: string | null;
+  area?: string | null;
+  telefone_cliente?: string | null;
+  descricao?: string | null;
+  documentos?: { nome_documento: string; url_media: string }[];
+};
+
+/** Pedido feito por parceiro pelo WhatsApp (consulta de andamento ou processo novo). */
+function pedidoParceiro(a: Aprovacao): { nome: string; novoProcesso: boolean; dados: DadosParceiro } | null {
+  if (!a.parceiro_id) return null;
+  const dados =
+    a.dados && typeof a.dados === "object" && !Array.isArray(a.dados) ? (a.dados as DadosParceiro) : {};
+  return { nome: dados.parceiro_nome || "Parceiro", novoProcesso: a.tipo === "novo_processo", dados };
+}
+
+const AREA_LABEL: Record<string, string> = {
+  administrativo: "Administrativo (INSS)",
+  previdenciario: "Judicial previdenciário",
+  civel: "Cível",
+};
+
 // Foto do WhatsApp (app_ia_estado.foto_url), uma busca por telefone.
 const fotosCache = new Map<string, Promise<string | null>>();
 
@@ -532,6 +558,7 @@ function ListCard({
   const dias = diasAguardando(aprovacao.created_at);
   const snippet = aprovacao.resumo.trim().replace(/\s+/g, " ");
   const urg = urgenciaHoras(aprovacao.created_at);
+  const parceiro = pedidoParceiro(aprovacao);
 
   return (
     <button
@@ -563,8 +590,18 @@ function ListCard({
             >
               {statusLabel(aprovacao.status)}
             </span>
+            {parceiro && (
+              <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800">
+                Parceiro: {parceiro.nome}
+              </span>
+            )}
           </div>
-          {(beneficio || aprovacao.numero_processo) && (
+          {parceiro ? (
+            <p className="mt-0.5 truncate text-xs text-[#64748B]">
+              {parceiro.novoProcesso ? "Processo novo mandado pelo parceiro" : "Consulta de andamento do parceiro"}
+              {aprovacao.numero_processo ? ` · ${aprovacao.numero_processo.slice(-8)}` : ""}
+            </p>
+          ) : (beneficio || aprovacao.numero_processo) && (
             <p className="mt-0.5 truncate text-xs text-[#64748B]">
               {beneficio ?? "Consulta processual"}
               {aprovacao.numero_processo
@@ -646,13 +683,15 @@ function AprovacaoDetailPanel({
   const router = useRouter();
   const isAdvogado = user.papel === "advogado";
   const isPendente = aprovacao.status === "pendente";
+  const parceiro = pedidoParceiro(aprovacao);
 
   const [texto, setTexto] = useState(aprovacao.resumo);
   const [modoResposta, setModoResposta] = useState(false);
   const [respostaManual, setRespostaManual] = useState("");
   const [motivoRecusa, setMotivoRecusa] = useState("");
   const [msgRecusa, setMsgRecusa] = useState(MENSAGEM_RECUSA_PADRAO);
-  const [enviarMsgRecusa, setEnviarMsgRecusa] = useState(true);
+  // Parceiro: recusar não manda aviso por padrão (a equipe fala com ele se precisar).
+  const [enviarMsgRecusa, setEnviarMsgRecusa] = useState(!aprovacao.parceiro_id);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -661,15 +700,19 @@ function AprovacaoDetailPanel({
     setRespostaManual("");
     setMotivoRecusa("");
     setMsgRecusa(MENSAGEM_RECUSA_PADRAO);
-  }, [aprovacao.id, aprovacao.resumo]);
+    setEnviarMsgRecusa(!aprovacao.parceiro_id);
+  }, [aprovacao.id, aprovacao.resumo, aprovacao.parceiro_id]);
 
   const editado = texto.trim() !== aprovacao.resumo.trim();
   const baseAnalise = useMemo(
     () => deriveBaseAnalise(aprovacao, contexto),
     [aprovacao, contexto]
   );
-  const beneficio =
-    contexto?.casoFunil?.beneficio_identificado ?? "Consulta processual";
+  const beneficio = parceiro
+    ? parceiro.novoProcesso
+      ? `Processo novo mandado por ${parceiro.nome}`
+      : `Consulta de andamento pedida por ${parceiro.nome}`
+    : (contexto?.casoFunil?.beneficio_identificado ?? "Consulta processual");
 
   async function decidir(
     acao: "aprovar" | "responder" | "recusar",
@@ -735,10 +778,16 @@ function AprovacaoDetailPanel({
               >
                 {statusLabel(aprovacao.status)}
               </span>
-              {isPendente && (
+              {parceiro ? (
                 <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-800">
-                  Atendimento pausado
+                  Parceiro: {parceiro.nome}
                 </span>
+              ) : (
+                isPendente && (
+                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-800">
+                    Atendimento pausado
+                  </span>
+                )
               )}
               {editado && isPendente && (
                 <Badge variant="outline" className="text-[#0b2148]">
@@ -758,14 +807,71 @@ function AprovacaoDetailPanel({
           <MetaField label="Processo" value={aprovacao.numero_processo ?? "—"} mono />
           <MetaField label="CPF" value={<CpfDisplay value={aprovacao.cpf} />} />
           <MetaField
-            label="Canal"
+            label={parceiro ? "WhatsApp do parceiro" : "Canal"}
             value={formatPhone(aprovacao.telefone_cliente) || "WhatsApp"}
           />
         </div>
 
+        {parceiro?.novoProcesso && (
+          <section className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/40 p-4">
+            <h3 className="text-sm font-semibold text-[#0b2148]">
+              Processo que será criado ao aprovar
+            </h3>
+            {aprovacao.processo_id ? (
+              <p className="text-sm text-emerald-800">
+                Processo criado (#{aprovacao.processo_id}).
+              </p>
+            ) : null}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <MetaField label="Cliente" value={parceiro.dados.nome ?? "—"} />
+              <MetaField label="Nascimento" value={parceiro.dados.data_nascimento || "—"} />
+              <MetaField label="Benefício / assunto" value={parceiro.dados.beneficio || "—"} />
+              <MetaField
+                label="Área"
+                value={AREA_LABEL[parceiro.dados.area ?? ""] ?? "Judicial previdenciário"}
+              />
+              <MetaField
+                label="Telefone do cliente"
+                value={formatPhone(parceiro.dados.telefone_cliente ?? "") || "—"}
+              />
+            </div>
+            {parceiro.dados.descricao ? (
+              <p className="whitespace-pre-wrap text-sm text-[#334155]">{parceiro.dados.descricao}</p>
+            ) : null}
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-[#64748B]">
+                Documentos enviados pelo parceiro ({parceiro.dados.documentos?.length ?? 0})
+              </p>
+              {parceiro.dados.documentos?.length ? (
+                <ul className="space-y-1">
+                  {parceiro.dados.documentos.map((d) => (
+                    <li key={d.url_media}>
+                      <a
+                        href={d.url_media}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 text-sm text-[#0b2148] underline-offset-2 hover:underline"
+                      >
+                        <FileText className="h-3.5 w-3.5" aria-hidden />
+                        {d.nome_documento}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-[#94a3b8]">Nenhum documento.</p>
+              )}
+            </div>
+            <p className="text-xs text-[#64748B]">
+              Ao aprovar, o processo é criado sem número, ligado ao parceiro, e os documentos vão para
+              a pasta do processo na ficha do cliente. Depois a mensagem abaixo vai para o parceiro.
+            </p>
+          </section>
+        )}
+
         <section className="space-y-2">
           <h3 className="text-sm font-semibold text-[#0b2148]">
-            Resumo gerado pela IA
+            {parceiro?.novoProcesso ? "Mensagem de confirmação ao parceiro" : "Resumo gerado pela IA"}
           </h3>
           <div className="rounded-xl border border-[#e2e8f0] bg-[#F8FAFC] p-4 text-sm leading-relaxed text-[#334155] whitespace-pre-wrap">
             {aprovacao.resumo}
@@ -839,7 +945,11 @@ function AprovacaoDetailPanel({
                 className="gap-2 bg-[#0b2148] text-white hover:bg-[#163a7a]"
               >
                 <Send className="h-4 w-4" />
-                {editado ? "Aprovar com edição e enviar" : "Aprovar e enviar"}
+                {parceiro?.novoProcesso
+                  ? "Aprovar, criar processo e avisar o parceiro"
+                  : editado
+                    ? "Aprovar com edição e enviar"
+                    : "Aprovar e enviar"}
               </Button>
 
               <AlertDialog>

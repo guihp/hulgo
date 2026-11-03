@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getAppUser } from "@/lib/actions/auth";
 import { enviarMensagem } from "@/lib/actions/mensagens";
 import { controlarIA } from "@/lib/n8n";
+import { aplicarAprovacaoDeParceiro } from "@/lib/parceiros/processo-parceiro";
 import { normalizeCpf } from "@/lib/utils/cpf";
 import { phoneToContactNorm } from "@/lib/utils/phone";
 import type { AprovacaoAcao, AprovacaoStatus, Json } from "@/types/database";
@@ -183,6 +184,12 @@ export async function decidirAprovacao(
     throw new Error("Esta pendência já foi decidida");
   }
 
+  // 0) Processo novo mandado por parceiro: cria o processo antes de confirmar a ele.
+  let processoCriado: number | null = null;
+  if (input.acao !== "recusar") {
+    processoCriado = await aplicarAprovacaoDeParceiro(aprovacao);
+  }
+
   // 1) Envia a mensagem ao cliente pelo próprio sistema (EvoGo)
   let messageId: string | null = null;
   let warning: string | undefined;
@@ -228,13 +235,16 @@ export async function decidirAprovacao(
     );
   }
 
-  // 3) Despausa a IA no n8n (a mensagem já foi enviada pelo sistema)
-  const webhook = await controlarIA(
-    "despausar",
-    aprovacao.telefone_cliente,
-    aprovacao.instancia,
-    { id_aprovacao: input.id, acao_aprovacao: input.acao, mensagem_ja_enviada: true }
-  );
+  // 3) Despausa a IA (a mensagem já foi enviada pelo sistema). Pendência de parceiro
+  // não pausa a conversa — ele segue mandando outros casos —, então não mexe na IA.
+  const webhook = aprovacao.parceiro_id
+    ? { configured: false, ok: true }
+    : await controlarIA(
+        "despausar",
+        aprovacao.telefone_cliente,
+        aprovacao.instancia,
+        { id_aprovacao: input.id, acao_aprovacao: input.acao, mensagem_ja_enviada: true }
+      );
 
   await logEvent(
     input.id,
@@ -244,6 +254,7 @@ export async function decidirAprovacao(
       status,
       mensagem_enviada: deveEnviar,
       message_id: messageId,
+      processo_criado: processoCriado,
       motivo_recusa: input.motivoRecusa ?? null,
       webhook_configured: webhook.configured,
       webhook_ok: webhook.ok,
@@ -255,6 +266,7 @@ export async function decidirAprovacao(
   revalidatePath("/aprovacoes");
   revalidatePath(`/aprovacoes/${input.id}`);
   revalidatePath("/");
+  if (processoCriado) revalidatePath("/processos");
 
   return {
     success: true,

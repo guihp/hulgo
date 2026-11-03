@@ -17,6 +17,8 @@ export type ContextoFerramenta = {
   telefone: string;
   instancia: string | null;
   config: IaWhatsappConfig;
+  /** Preenchido quando quem escreve é um parceiro cadastrado (IA dos parceiros). */
+  parceiro?: { id: string; nome: string; cidade: string | null };
   /** Marca efeitos que mudam o que fazer com a resposta final. */
   efeitos: {
     encaminhamentoEnviado: boolean;
@@ -341,7 +343,7 @@ async function registrarDocumento(p: Params, ctx: ContextoFerramenta) {
   };
 }
 
-async function checklist(p: Params) {
+export async function checklist(p: Params) {
   const tipos = await listTiposCaso({ service: true });
   const publico = (t: TipoCasoMatch) => ({
     chave: t.chave,
@@ -513,7 +515,7 @@ async function buscarProcessos(p: Params) {
   };
 }
 
-function dataBr(iso: string | null | undefined): string | null {
+export function dataBr(iso: string | null | undefined): string | null {
   if (!iso) return null;
   const d = new Date(iso);
   return Number.isNaN(d.getTime())

@@ -18,6 +18,7 @@ import {
   Play,
   RefreshCw,
   RotateCcw,
+  Handshake,
   Wrench,
 } from "lucide-react";
 import {
@@ -27,6 +28,7 @@ import {
   publicarVersaoEmTeste,
   reiniciarMemoriaIAAction,
   salvarConfigIA,
+  salvarConfigParceiros,
 } from "@/lib/actions/ia-whatsapp";
 import { toastErroAcao } from "@/lib/client/erros";
 import { createClient } from "@/lib/supabase/client";
@@ -119,6 +121,11 @@ const ACAO_FERRAMENTA: Record<string, string> = {
   enviar_para_aprovacao_advogado: "Pediu a aprovação do advogado",
   buscar_processos_por_cpf: "Buscou os processos do cliente pelo CPF",
   consultar_processo_datajud: "Consultou o andamento do processo",
+  listar_processos_do_parceiro: "Buscou os processos do parceiro",
+  consultar_justica_agora: "Consultou o processo na Justiça",
+  informar_andamento: "Preparou o andamento para o parceiro",
+  cadastrar_processo_parceiro: "Recebeu um processo novo do parceiro",
+  chamar_equipe: "Chamou a equipe para o parceiro",
 };
 
 function versaoLegivel(origem: string | null): string | null {
@@ -164,6 +171,8 @@ export function IaWhatsappUi(props: {
   rascunhoAtualizadoEm: string | null;
   /** Mostra a área técnica (conexão/agendamento) — só para o suporte. */
   mostrarSuporte: boolean;
+  promptParceirosPadrao: string;
+  parceirosComWhatsapp: number;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -343,6 +352,14 @@ export function IaWhatsappUi(props: {
           ) : null}
         </div>
       </div>
+
+      <ParceirosCard
+        config={props.config}
+        promptPadrao={props.promptParceirosPadrao}
+        parceirosComWhatsapp={props.parceirosComWhatsapp}
+        pending={pending}
+        onSalvar={(dados) => acao(() => salvarConfigParceiros(dados), "IA dos parceiros salva")}
+      />
 
       <LogExecucoes
         execucoes={props.execucoes}
@@ -664,6 +681,149 @@ function ConfigCard(props: {
             Salvar configuração
           </Button>
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+const MODOS_PARCEIROS: { value: Config["parceiros_modo"]; label: string; descricao: string }[] = [
+  {
+    value: "desligado",
+    label: "Desligada",
+    descricao: "A IA não responde os parceiros. A equipe responde pelo painel.",
+  },
+  {
+    value: "teste",
+    label: "Modo teste",
+    descricao: "Só responde parceiros cujo número também está nos números de teste da equipe.",
+  },
+  {
+    value: "ativo",
+    label: "Ligada para os parceiros",
+    descricao: "Responde todos os parceiros cadastrados com WhatsApp.",
+  },
+];
+
+function ParceirosCard(props: {
+  config: Config;
+  promptPadrao: string;
+  parceirosComWhatsapp: number;
+  pending: boolean;
+  onSalvar: (dados: Parameters<typeof salvarConfigParceiros>[0]) => void;
+}) {
+  const c = props.config;
+  const [modo, setModo] = useState(c.parceiros_modo);
+  const [consultaDireta, setConsultaDireta] = useState(c.parceiros_consulta_direta);
+  const [cadastroDireto, setCadastroDireto] = useState(c.parceiros_cadastro_direto);
+  const [prompt, setPrompt] = useState(c.prompt_parceiros?.trim() || props.promptPadrao);
+  const [verInstrucoes, setVerInstrucoes] = useState(false);
+  const personalizado = prompt.trim() !== props.promptPadrao.trim();
+
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-5 p-5">
+        <div>
+          <h2 className="flex items-center gap-2 font-semibold text-[#0b2148]">
+            <Handshake className="h-4 w-4" aria-hidden /> IA dos parceiros
+          </h2>
+          <p className="mt-1 max-w-3xl text-sm text-[#64748B]">
+            Quando quem escreve é um parceiro cadastrado (Configurações → Parceiros), a IA não atende
+            como cliente: ela consulta o andamento dos processos <strong>daquele parceiro</strong> e
+            recebe os casos novos que ele manda, com os documentos. Hoje há{" "}
+            {props.parceirosComWhatsapp} parceiro(s) com WhatsApp cadastrado. Parceiros não viram
+            card no funil de vendas.
+          </p>
+        </div>
+
+        <div className="grid gap-2 sm:grid-cols-3">
+          {MODOS_PARCEIROS.map((m) => (
+            <button
+              key={m.value}
+              type="button"
+              onClick={() => setModo(m.value)}
+              className={cn(
+                "rounded-lg border p-3 text-left transition-colors",
+                modo === m.value
+                  ? "border-[#0b2148] bg-[#0b2148]/5"
+                  : "border-[#e2e8f0] hover:bg-slate-50"
+              )}
+            >
+              <p className="text-sm font-medium text-[#0b2148]">{m.label}</p>
+              <p className="text-xs text-[#64748B]">{m.descricao}</p>
+            </button>
+          ))}
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="flex items-start gap-3 text-sm text-[#0b2148]">
+            <Switch
+              checked={consultaDireta}
+              onCheckedChange={setConsultaDireta}
+              className="mt-0.5 data-checked:bg-[#0b2148]"
+            />
+            <span>
+              Responder o andamento direto, sem aprovação
+              <span className="block text-xs text-[#64748B]">
+                Desligado: cada resumo de andamento vai para Aprovações e só chega ao parceiro depois
+                que a equipe aprovar. Ligado: a IA responde na hora.
+              </span>
+            </span>
+          </label>
+          <label className="flex items-start gap-3 text-sm text-[#0b2148]">
+            <Switch
+              checked={cadastroDireto}
+              onCheckedChange={setCadastroDireto}
+              className="mt-0.5 data-checked:bg-[#0b2148]"
+            />
+            <span>
+              Cadastrar processo novo direto, sem aprovação
+              <span className="block text-xs text-[#64748B]">
+                Desligado: o caso vai para Aprovações; ao aprovar, o sistema cria o processo (sem
+                número, ligado ao parceiro, com os documentos) e confirma ao parceiro. Ligado: cria
+                na hora e avisa o grupo.
+              </span>
+            </span>
+          </label>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setVerInstrucoes((v) => !v)}
+          className="flex items-center gap-1.5 self-start text-sm font-medium text-[#64748B] hover:text-[#0b2148]"
+          aria-expanded={verInstrucoes}
+        >
+          Instruções da IA dos parceiros{personalizado ? " (personalizadas)" : ""}
+          <ChevronDown className={cn("h-4 w-4 transition-transform", verInstrucoes && "rotate-180")} />
+        </button>
+        {verInstrucoes ? (
+          <div className="flex flex-col gap-2">
+            <Textarea
+              rows={16}
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              className="text-sm"
+            />
+            {personalizado ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="self-start"
+                onClick={() => setPrompt(props.promptPadrao)}
+              >
+                <RotateCcw className="mr-1 h-3.5 w-3.5" /> Voltar ao texto padrão
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+
+        <Button
+          disabled={props.pending}
+          onClick={() => props.onSalvar({ modo, consultaDireta, cadastroDireto, prompt })}
+          className="self-start bg-[#0b2148] text-white hover:bg-[#0b2148]/90"
+        >
+          Salvar IA dos parceiros
+        </Button>
       </CardContent>
     </Card>
   );

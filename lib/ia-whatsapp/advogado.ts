@@ -4,6 +4,7 @@ import type { IaWhatsappConfig } from "@/lib/ia-whatsapp/config";
 import { enviarParaAdvogado, enviarTextoCliente } from "@/lib/ia-whatsapp/enviar";
 import { despausarIA, pausarIA } from "@/lib/ia-whatsapp/estado";
 import type { MensagemRecebida } from "@/lib/ia-whatsapp/evogo-payload";
+import { aplicarAprovacaoDeParceiro } from "@/lib/parceiros/processo-parceiro";
 import { createServiceClient } from "@/lib/supabase/service";
 
 const AJUDA =
@@ -45,6 +46,20 @@ export async function tratarComandoAdvogado(
     return;
   }
 
+  // Processo novo de parceiro: cria antes de confirmar a ele.
+  let processoCriado: number | null = null;
+  if (acao !== "recusar") {
+    try {
+      processoCriado = await aplicarAprovacaoDeParceiro(p);
+    } catch (e) {
+      await enviarParaAdvogado(
+        grupo,
+        `⚠️ Pendência #${id}: não consegui criar o processo (${e instanceof Error ? e.message : "erro"}). Nada foi enviado.`
+      );
+      return;
+    }
+  }
+
   const telefone = p.telefone_cliente.replace(/@.*$/, "").replace(/\D/g, "");
   const envio = acao === "aprovar" ? p.resumo : acao === "responder" ? texto : "";
   let messageId: string | null = null;
@@ -66,21 +81,35 @@ export async function tratarComandoAdvogado(
     })
     .eq("id", id);
 
-  if (acao === "recusar") await pausarIA(telefone, "aprovacao_recusada");
-  else await despausarIA(telefone);
+  // Pendência de parceiro não pausou a conversa: não mexe na IA dele.
+  if (!p.parceiro_id) {
+    if (acao === "recusar") await pausarIA(telefone, "aprovacao_recusada");
+    else await despausarIA(telefone);
+  }
 
   await supabase.from("app_log_eventos").insert({
     entidade: "aprovacoes_pendentes",
     entidade_id: id,
     acao: "decisao",
-    payload: { acao, status, origem: "whatsapp", advogado: msg.remetente, message_id: messageId },
+    payload: {
+      acao,
+      status,
+      origem: "whatsapp",
+      advogado: msg.remetente,
+      message_id: messageId,
+      processo_criado: processoCriado,
+    },
   });
 
   const nome = p.nome_cliente ?? telefone;
   await enviarParaAdvogado(
     grupo,
-    acao === "recusar"
-      ? `❌ Pendência #${id} recusada. O cliente segue PAUSADO para a IA — responda a ele manualmente.`
-      : `✅ Pendência #${id} enviada ao cliente ${nome}. IA reativada para ele.`
+    p.parceiro_id
+      ? acao === "recusar"
+        ? `❌ Pendência #${id} recusada. Nada foi enviado ao parceiro.`
+        : `✅ Pendência #${id} enviada ao parceiro${processoCriado ? ` — processo de ${nome} criado` : ""}.`
+      : acao === "recusar"
+        ? `❌ Pendência #${id} recusada. O cliente segue PAUSADO para a IA — responda a ele manualmente.`
+        : `✅ Pendência #${id} enviada ao cliente ${nome}. IA reativada para ele.`
   );
 }

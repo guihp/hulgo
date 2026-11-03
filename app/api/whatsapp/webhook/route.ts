@@ -5,6 +5,7 @@ import { foiEnviadoPeloSistema, enviarTextoCliente } from "@/lib/ia-whatsapp/env
 import { pausarIA, resetarNumeroTeste } from "@/lib/ia-whatsapp/estado";
 import { atualizarFotoPerfil } from "@/lib/ia-whatsapp/foto-perfil";
 import { parseEvogoWebhook } from "@/lib/ia-whatsapp/evogo-payload";
+import { getParceiroPorTelefone, iaAtendeParceiro } from "@/lib/ia-whatsapp/parceiros";
 import { salvarMensagemRecebida } from "@/lib/ia-whatsapp/ingest";
 import { processarFilaIA } from "@/lib/ia-whatsapp/processar";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -58,9 +59,11 @@ export async function POST(req: Request) {
     { onConflict: "telefone" }
   );
 
+  const parceiro = await getParceiroPorTelefone(msg.telefone);
+
   // Contato novo vira card "Em atendimento" no Funil de vendas já na 1ª mensagem
-  // (números de teste e da equipe ficam de fora; a IA cria o deles ao registrar o caso).
-  if (!ehNumeroDeTeste(config, msg.telefone) && !ehAdvogado(config, msg.telefone)) {
+  // (números de teste, da equipe e de parceiros ficam de fora; a IA cria o dos testes ao registrar o caso).
+  if (!parceiro && !ehNumeroDeTeste(config, msg.telefone) && !ehAdvogado(config, msg.telefone)) {
     const { error } = await supabase.rpc("garantir_caso_contato", {
       p_telefone: msg.telefone,
       p_nome: msg.nome || undefined,
@@ -78,7 +81,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, reset: true });
   }
 
-  if (!iaAtendeTelefone(config, msg.telefone)) return NextResponse.json({ ok: true, ia: false });
+  const atende = parceiro ? iaAtendeParceiro(config, msg.telefone) : iaAtendeTelefone(config, msg.telefone);
+  if (!atende) return NextResponse.json({ ok: true, ia: false });
 
   await supabase.rpc("ia_fila_agendar", {
     p_telefone: msg.telefone,

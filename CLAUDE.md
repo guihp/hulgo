@@ -159,3 +159,12 @@
   (`lib/ia-whatsapp/estado.ts`): memória zerada, IA despausada, card volta a "Em atendimento" sem CPF/dados, processos
   soltam `caso_id`/`telefone`, aprovações pendentes do número viram recusadas. Botão "Processo" da conversa tem
   "Desvincular" (`desvincularProcessoDaConversa`: tira caso/telefone e, se o elo era o CPF do card, limpa o CPF do card).
+- **IA dos parceiros** (2026-11-03): número de `app_parceiros.telefone` não é atendido como cliente — `processar.ts`
+  troca prompt e ferramentas (`lib/ia-whatsapp/parceiros.ts`: listar/consultar SÓ os processos do parceiro, consultar
+  CNJ, `informar_andamento`, `cadastrar_processo_parceiro`, checklist, `chamar_equipe`) e o webhook não cria card no funil.
+  Config própria em `app_ia_whatsapp_config`: `parceiros_modo` (desligado | teste = parceiro que também é nº de teste |
+  ativo), `parceiros_consulta_direta` e `parceiros_cadastro_direto` (false = vai para Aprovações), `prompt_parceiros`
+  (vazio = `PROMPT_PARCEIROS_PADRAO`). Card "IA dos parceiros" em /ia-whatsapp. `aprovacoes_pendentes` ganhou `tipo`
+  (consulta | novo_processo), `parceiro_id`, `dados`, `processo_id`; aprovar `novo_processo` (tela ou #aprovar) cria o
+  processo sem número + documentos na pasta (`lib/parceiros/processo-parceiro.ts`) e só então confirma ao parceiro.
+  Pendência de parceiro não pausa a conversa. Migration `20261103120000_ia_parceiros.sql`.

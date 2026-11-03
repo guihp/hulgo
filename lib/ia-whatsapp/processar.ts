@@ -8,7 +8,14 @@ import { enviarTextoCliente, pausa } from "@/lib/ia-whatsapp/enviar";
 import { getIaEstado, iaEstaPausada, pausarIA } from "@/lib/ia-whatsapp/estado";
 import { marcarAtendimento } from "@/lib/ia-whatsapp/etiquetas-atendimento";
 import { conteudoParaIA } from "@/lib/ia-whatsapp/midia";
-import { carregarPersona, montarSystemPrompt } from "@/lib/ia-whatsapp/prompt";
+import {
+  executarFerramentaParceiro,
+  FERRAMENTAS_PARCEIRO,
+  getParceiroPorTelefone,
+  iaAtendeParceiro,
+  montarPromptParceiro,
+} from "@/lib/ia-whatsapp/parceiros";
+import { agoraEmBrasilia, carregarPersona, montarSystemPrompt } from "@/lib/ia-whatsapp/prompt";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json, Tables } from "@/types/database";
 
@@ -84,7 +91,10 @@ async function processarTelefone(item: ItemFila, retomada = false): Promise<void
 
   try {
     const config = await getIaConfig();
-    if (!iaAtendeTelefone(config, tel)) {
+    // Parceiro cadastrado: IA própria (consulta os processos dele e recebe casos novos).
+    const parceiro = await getParceiroPorTelefone(tel);
+    const atende = parceiro ? iaAtendeParceiro(config, tel) : iaAtendeTelefone(config, tel);
+    if (!atende) {
       await concluir(item, null);
       return;
     }
@@ -192,13 +202,17 @@ async function processarTelefone(item: ItemFila, retomada = false): Promise<void
     // IA liberada ao público, para testar mudanças antes de publicar. Os demais clientes
     // seguem na versão publicada.
     const usarRascunho = config.usar_rascunho_no_teste && ehNumeroDeTeste(config, tel);
-    const persona = await carregarPersona(usarRascunho);
+    const persona = parceiro
+      ? { texto: "", origem: config.prompt_parceiros?.trim() ? "parceiros" : "parceiros (padrão)" }
+      : await carregarPersona(usarRascunho);
     const urlsMidia = pendentes.map((m) => m.conteudo_media).filter((u): u is string => Boolean(u));
-    const systemPrompt = montarSystemPrompt(persona.texto, {
-      telefone: tel,
-      nome: estado?.nome_contato ?? "",
-      urlsMidia,
-    });
+    const systemPrompt = parceiro
+      ? montarPromptParceiro(config, parceiro, agoraEmBrasilia())
+      : montarSystemPrompt(persona.texto, {
+          telefone: tel,
+          nome: estado?.nome_contato ?? "",
+          urlsMidia,
+        });
 
     // 4) Agente
     const efeitos = {
@@ -210,7 +224,10 @@ async function processarTelefone(item: ItemFila, retomada = false): Promise<void
       systemPrompt,
       historico,
       mensagemAtual: entrada,
-      contexto: { telefone: tel, instancia: item.instancia, config, efeitos },
+      contexto: parceiro
+        ? { telefone: tel, instancia: item.instancia, config, efeitos, parceiro }
+        : { telefone: tel, instancia: item.instancia, config, efeitos },
+      ...(parceiro ? { ferramentas: FERRAMENTAS_PARCEIRO, executar: executarFerramentaParceiro } : {}),
     });
 
     // Avança antes de enviar: um erro no envio não roda as ferramentas de novo.

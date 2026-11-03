@@ -53,13 +53,17 @@ function textoDaResposta(body: RespostaApi): string {
   return partes.join("\n").trim();
 }
 
-async function chamarModelo(input: Entrada[], anterior?: string): Promise<RespostaApi & { id: string }> {
+async function chamarModelo(
+  input: Entrada[],
+  tools: readonly unknown[],
+  anterior?: string
+): Promise<RespostaApi & { id: string }> {
   const config = await getOpenAIConfig();
   const apiKey = await exigirChaveOpenAI();
   const payload: Record<string, unknown> = {
     model: config.modeloWhatsapp,
     input,
-    tools: FERRAMENTAS,
+    tools,
     tool_choice: "auto",
     reasoning: { effort: config.raciocinioWhatsapp },
   };
@@ -88,7 +92,12 @@ export async function rodarAgente(input: {
   historico: { role: "user" | "assistant"; content: string }[];
   mensagemAtual: string;
   contexto: ContextoFerramenta;
+  /** Outro conjunto de ferramentas (ex.: IA dos parceiros). Padrão: as do atendimento ao cliente. */
+  ferramentas?: readonly unknown[];
+  executar?: (nome: string, args: Record<string, unknown>, ctx: ContextoFerramenta) => Promise<unknown>;
 }): Promise<{ resposta: string; chamadas: ChamadaRegistrada[]; modelo: string }> {
+  const ferramentas = input.ferramentas ?? FERRAMENTAS;
+  const executar = input.executar ?? executarFerramenta;
   const chamadas: ChamadaRegistrada[] = [];
   let anterior: string | undefined;
   let proxima: Entrada[] = [
@@ -98,7 +107,7 @@ export async function rodarAgente(input: {
   ];
 
   for (let rodada = 0; rodada < MAX_RODADAS; rodada++) {
-    const body = await chamarModelo(proxima, anterior);
+    const body = await chamarModelo(proxima, ferramentas, anterior);
     anterior = body.id;
 
     const funcoes = (body.output ?? []).filter(
@@ -120,7 +129,7 @@ export async function rodarAgente(input: {
       let erro: string | undefined;
       const evento = await iniciarEventoFerramenta(input.contexto.telefone, f.name);
       try {
-        resultado = await executarFerramenta(f.name, args, input.contexto);
+        resultado = await executar(f.name, args, input.contexto);
       } catch (e) {
         erro = e instanceof Error ? e.message : "erro na ferramenta";
         resultado = { ok: false, erro };
