@@ -247,12 +247,22 @@ export function IaWhatsappUi(props: {
       />
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <ConfigCard
-          config={props.config}
-          nomesNumeros={props.nomesNumeros}
-          pending={pending}
-          onSalvar={(dados) => acao(() => salvarConfigIA(dados), "Configuração salva")}
-        />
+        <div className="flex flex-col gap-6">
+          <ConfigCard
+            config={props.config}
+            nomesNumeros={props.nomesNumeros}
+            pending={pending}
+            onSalvar={(dados) => acao(() => salvarConfigIA(dados), "Configuração salva")}
+          />
+
+          <ParceirosCard
+            config={props.config}
+            promptPadrao={props.promptParceirosPadrao}
+            parceirosComWhatsapp={props.parceirosComWhatsapp}
+            pending={pending}
+            onSalvar={(dados) => acao(() => salvarConfigParceiros(dados), "IA dos parceiros salva")}
+          />
+        </div>
 
         <div className="flex flex-col gap-6">
           <Card>
@@ -273,7 +283,7 @@ export function IaWhatsappUi(props: {
                   Nenhuma conversa pausada.
                 </p>
               ) : (
-                <ul className="divide-y rounded-lg border">
+                <ul className="max-h-[28rem] divide-y overflow-y-auto rounded-lg border">
                   {props.pausados.map((p) => (
                     <li key={p.telefone} className="flex flex-wrap items-center justify-between gap-2 p-3">
                       <div className="min-w-0">
@@ -350,14 +360,6 @@ export function IaWhatsappUi(props: {
           ) : null}
         </div>
       </div>
-
-      <ParceirosCard
-        config={props.config}
-        promptPadrao={props.promptParceirosPadrao}
-        parceirosComWhatsapp={props.parceirosComWhatsapp}
-        pending={pending}
-        onSalvar={(dados) => acao(() => salvarConfigParceiros(dados), "IA dos parceiros salva")}
-      />
 
       <LogExecucoes
         execucoes={props.execucoes}
@@ -734,7 +736,7 @@ function ParceirosCard(props: {
           </p>
         </div>
 
-        <div className="grid gap-2 sm:grid-cols-3">
+        <div className="grid gap-2">
           {MODOS_PARCEIROS.map((m) => (
             <button
               key={m.value}
@@ -753,7 +755,7 @@ function ParceirosCard(props: {
           ))}
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-4">
           <label className="flex items-start gap-3 text-sm text-[#0b2148]">
             <Switch
               checked={consultaDireta}
