@@ -324,6 +324,11 @@ const ROTULO_FERRAMENTA: Record<string, string> = {
   enviar_para_aprovacao_advogado: "enviar para aprovação do advogado",
   buscar_processos_por_cpf: "buscar processos pelo CPF",
   consultar_processo_datajud: "consultar a Justiça (DataJud)",
+  listar_processos_do_parceiro: "buscar os processos do parceiro",
+  consultar_justica_agora: "consultar a Justiça (DataJud)",
+  informar_andamento: "preparar o andamento para o parceiro",
+  cadastrar_processo_parceiro: "cadastrar processo novo do parceiro",
+  chamar_equipe: "chamar a equipe",
 };
 
 /** Linha só da equipe: a IA acionou uma ferramenta (aguardando / resultado). */

@@ -168,3 +168,7 @@
   (consulta | novo_processo), `parceiro_id`, `dados`, `processo_id`; aprovar `novo_processo` (tela ou #aprovar) cria o
   processo sem número + documentos na pasta (`lib/parceiros/processo-parceiro.ts`) e só então confirma ao parceiro.
   Pendência de parceiro não pausa a conversa. Migration `20261103120000_ia_parceiros.sql`.
+- **Números de teste por contato + assistente ajusta a IA dos parceiros** (2026-11-03): em /ia-whatsapp os números de
+  teste e "quem aprova pelo grupo" usam `SeletorNumeros` (busca em conversas, parceiros, clientes e funil via
+  `buscarContatosSistema`; aceita número digitado). Assistente: `ler_prompt_parceiros` + `propor_alteracao_prompt_parceiros`
+  (`lib/assistente/ia-parceiros.ts`, card Confirmar, vale na hora, também liga/desliga andamento/cadastro direto).

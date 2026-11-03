@@ -279,6 +279,8 @@ function toolLabel(name: string): string {
       return "Reverter prompt do agente";
     case "propor_alteracao_tipo_caso":
       return "Ajustar tipo de caso";
+    case "propor_alteracao_prompt_parceiros":
+      return "Ajustar IA dos parceiros";
     default:
       return name;
   }

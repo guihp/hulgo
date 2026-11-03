@@ -66,6 +66,80 @@ export async function salvarConfigIA(input: {
   return { success: true as const };
 }
 
+export type ContatoSistema = { telefone: string; nome: string; origem: string };
+
+/**
+ * Contatos que já existem no sistema (conversas, parceiros, clientes com processo e
+ * cards do funil) para escolher os números de teste e de quem aprova pelo grupo.
+ */
+export async function buscarContatosSistema(termo: string): Promise<ContatoSistema[]> {
+  await exigirAdvogado();
+  const q = termo.trim().replace(/[%,()]/g, "");
+  if (q.length < 2) return [];
+  const digitos = q.replace(/\D/g, "");
+  const porTelefone = digitos.length >= 3;
+  const supabase = createServiceClient();
+  const padrao = porTelefone ? `%${digitos}%` : `%${q}%`;
+
+  const [conversas, parceiros, processos, casos] = await Promise.all([
+    supabase
+      .from("app_ia_estado")
+      .select("telefone, nome_contato")
+      .ilike(porTelefone ? "telefone" : "nome_contato", padrao)
+      .limit(10),
+    supabase
+      .from("app_parceiros")
+      .select("telefone, nome")
+      .ilike(porTelefone ? "telefone" : "nome", padrao)
+      .limit(10),
+    supabase
+      .from("processos_clientes")
+      .select("telefone, nome")
+      .not("telefone", "is", null)
+      .ilike(porTelefone ? "telefone" : "nome", padrao)
+      .limit(10),
+    supabase
+      .from("casos_novos")
+      .select("telefone, nome")
+      .not("telefone", "is", null)
+      .ilike(porTelefone ? "telefone" : "nome", padrao)
+      .limit(10),
+  ]);
+
+  // Parceiro > cliente com processo > card do funil > conversa (nome mais confiável primeiro).
+  const vistos = new Map<string, ContatoSistema>();
+  const juntar = (rows: { telefone: string | null; nome: string | null }[] | null, origem: string) => {
+    for (const r of rows ?? []) {
+      const tel = normalizarTelefone(r.telefone);
+      if (tel.length < 12 || vistos.has(tel)) continue;
+      vistos.set(tel, { telefone: tel, nome: r.nome?.trim() || "", origem });
+    }
+  };
+  juntar(parceiros.data, "Parceiro");
+  juntar(processos.data, "Cliente");
+  juntar(casos.data, "Funil");
+  juntar(
+    (conversas.data ?? []).map((c) => ({ telefone: c.telefone, nome: c.nome_contato })),
+    "Conversa"
+  );
+  return [...vistos.values()].slice(0, 15);
+}
+
+/** Nome de cada número já salvo (para mostrar "Fulano · (98) 9…" em vez do número cru). */
+export async function nomesDosNumeros(telefones: string[]): Promise<Record<string, string>> {
+  const tels = [...new Set(telefones.map((t) => normalizarTelefone(t)).filter((t) => t.length >= 12))];
+  if (!tels.length) return {};
+  const supabase = createServiceClient();
+  const [parceiros, conversas] = await Promise.all([
+    supabase.from("app_parceiros").select("telefone, nome").in("telefone", tels),
+    supabase.from("app_ia_estado").select("telefone, nome_contato").in("telefone", tels),
+  ]);
+  const nomes: Record<string, string> = {};
+  for (const c of conversas.data ?? []) if (c.nome_contato) nomes[c.telefone] = c.nome_contato;
+  for (const p of parceiros.data ?? []) if (p.telefone && p.nome) nomes[p.telefone] = `${p.nome} (parceiro)`;
+  return nomes;
+}
+
 export async function salvarConfigParceiros(input: {
   modo: "desligado" | "teste" | "ativo";
   consultaDireta: boolean;

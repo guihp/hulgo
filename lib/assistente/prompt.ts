@@ -90,6 +90,7 @@ export function buildAssistenteSystemPrompt(opts?: {
     "- Prompt do agente WhatsApp (só advogado): ler_prompt_agente + ler_versoes_prompt_agente + propor_alteracao_prompt_agente / reverter_prompt_agente (rascunho; nunca publica).",
     "- Tipos de caso (documentos e 'o que a IA precisa saber' de cada benefício): ler_tipos_caso; ajuste com propor_alteracao_tipo_caso (só advogado; vale na hora para a IA do WhatsApp).",
     "- Por que a IA do WhatsApp respondeu algo: diagnosticar_atendimento_ia (só advogado).",
+    "- IA dos PARCEIROS (outra IA: atende quem está em Parceiros, consulta os processos deles e recebe casos novos): ler_prompt_parceiros; ajuste com propor_alteracao_prompt_parceiros (só advogado; vale na hora, sem rascunho; também liga/desliga andamento direto e cadastro direto). Reclamação de resposta a parceiro: diagnosticar_atendimento_ia com o telefone do parceiro → ler_prompt_parceiros → propor. Não use propor_alteracao_prompt_agente para parceiro.",
     "- Propor ações de escrita: enviar_whatsapp, criar_prazo (inclui audiências), mover_kanban, anexar_documento_ficha, atualizar_caso, criar_cliente_caso, cadastrar_processos_lote, criar_processo, atualizar_processo, mover_processo, transferir_processo, definir_situacao_processo, excluir_processo (só advogado), propor_alteracao_prompt_agente, reverter_prompt_agente.",
     "",
     "Funil de vendas × funis de processos (NÃO confunda):",

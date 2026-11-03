@@ -31,6 +31,7 @@ import {
   salvarConfigParceiros,
 } from "@/lib/actions/ia-whatsapp";
 import { toastErroAcao } from "@/lib/client/erros";
+import { SeletorNumeros } from "@/components/ia-whatsapp/seletor-numeros";
 import { createClient } from "@/lib/supabase/client";
 import { formatPhone } from "@/lib/utils/phone";
 import type { Tables } from "@/types/database";
@@ -142,12 +143,6 @@ function telefoneLegivel(t: string) {
   }
 }
 
-function linhas(texto: string): string[] {
-  return texto
-    .split(/[\n,;]+/)
-    .map((l) => l.trim())
-    .filter(Boolean);
-}
 
 function copiar(texto: string) {
   void navigator.clipboard.writeText(texto).then(
@@ -173,6 +168,8 @@ export function IaWhatsappUi(props: {
   mostrarSuporte: boolean;
   promptParceirosPadrao: string;
   parceirosComWhatsapp: number;
+  /** Nome de cada número de teste / de quem aprova. */
+  nomesNumeros: Record<string, string>;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -252,6 +249,7 @@ export function IaWhatsappUi(props: {
       <div className="grid gap-6 lg:grid-cols-2">
         <ConfigCard
           config={props.config}
+          nomesNumeros={props.nomesNumeros}
           pending={pending}
           onSalvar={(dados) => acao(() => salvarConfigIA(dados), "Configuração salva")}
         />
@@ -516,24 +514,25 @@ function VersaoTesteCard(props: {
 
 function ConfigCard(props: {
   config: Config;
+  nomesNumeros: Record<string, string>;
   pending: boolean;
   onSalvar: (dados: Parameters<typeof salvarConfigIA>[0]) => void;
 }) {
   const c = props.config;
   const [modo, setModo] = useState<Modo>(c.modo);
-  const [numerosTeste, setNumerosTeste] = useState(c.numeros_teste.join("\n"));
+  const [numerosTeste, setNumerosTeste] = useState(c.numeros_teste);
   const [rascunho, setRascunho] = useState(c.usar_rascunho_no_teste);
   const [debounce, setDebounce] = useState(String(c.debounce_segundos));
   const [grupo, setGrupo] = useState(c.grupo_advogado ?? "");
-  const [numerosAdvogado, setNumerosAdvogado] = useState(c.numeros_advogado.join("\n"));
+  const [numerosAdvogado, setNumerosAdvogado] = useState(c.numeros_advogado);
 
   const dados = {
     modo,
-    numerosTeste: linhas(numerosTeste),
+    numerosTeste,
     usarRascunhoNoTeste: rascunho,
     debounceSegundos: Number(debounce) || 15,
     grupoAdvogado: grupo,
-    numerosAdvogado: linhas(numerosAdvogado),
+    numerosAdvogado,
   };
   const virandoPublico = modo === "publico" && c.modo !== "publico";
   const [avancado, setAvancado] = useState(false);
@@ -565,18 +564,18 @@ function ConfigCard(props: {
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="numeros-teste">Números de teste da equipe (um por linha)</Label>
-          <Textarea
+          <Label htmlFor="numeros-teste">Números de teste da equipe</Label>
+          <SeletorNumeros
             id="numeros-teste"
-            rows={5}
-            value={numerosTeste}
-            onChange={(e) => setNumerosTeste(e.target.value)}
-            placeholder="5598999999999"
+            valor={numerosTeste}
+            onChange={setNumerosTeste}
+            nomes={props.nomesNumeros}
           />
           <p className="text-xs text-[#64748B]">
-            Celulares da equipe usados para conversar com a IA como se fossem clientes. Basta o DDD
-            e o número. Para começar uma conversa do zero, mande <strong>/reset</strong> de um desses
-            números.
+            Celulares da equipe usados para conversar com a IA como se fossem clientes. Busque pelo
+            nome de quem já conversou com o escritório (ou de um parceiro/cliente cadastrado), ou
+            digite o número com DDD. Para começar uma conversa do zero, mande <strong>/reset</strong>{" "}
+            de um desses números. Depois clique em <strong>Salvar configuração</strong>.
           </p>
         </div>
 
@@ -635,11 +634,11 @@ function ConfigCard(props: {
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="advogados">Quem pode aprovar pelo grupo</Label>
-            <Textarea
+            <SeletorNumeros
               id="advogados"
-              rows={2}
-              value={numerosAdvogado}
-              onChange={(e) => setNumerosAdvogado(e.target.value)}
+              valor={numerosAdvogado}
+              onChange={setNumerosAdvogado}
+              nomes={props.nomesNumeros}
             />
             <p className="text-xs text-[#64748B]">
               Números que podem responder #aprovar, #responder ou #recusar no grupo.

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getAppUser } from "@/lib/actions/auth";
+import { nomesDosNumeros } from "@/lib/actions/ia-whatsapp";
 import { getIaConfig, urlPainel } from "@/lib/ia-whatsapp/config";
 import { PROMPT_PARCEIROS_PADRAO } from "@/lib/ia-whatsapp/parceiros";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -98,6 +99,7 @@ export default async function IaWhatsappPage({
       mostrarSuporte={suporte === "1"}
       promptParceirosPadrao={PROMPT_PARCEIROS_PADRAO}
       parceirosComWhatsapp={parceiros.count ?? 0}
+      nomesNumeros={await nomesDosNumeros([...config.numeros_teste, ...config.numeros_advogado])}
     />
   );
 }

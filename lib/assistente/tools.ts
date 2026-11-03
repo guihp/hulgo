@@ -9,6 +9,7 @@ import {
   toolDiagnosticarAtendimentoIA,
   toolLerTiposCaso,
 } from "@/lib/assistente/ia-diagnostico";
+import { IA_PARCEIROS_READ_TOOLS, toolLerPromptParceiros } from "@/lib/assistente/ia-parceiros";
 import { loadFichaPessoa } from "@/lib/data/ficha";
 import { listKanbanColunas } from "@/lib/data/kanban-colunas";
 import {
@@ -472,6 +473,7 @@ export const ASSISTENTE_TOOL_DEFINITIONS = [
     },
   },
   ...IA_DIAGNOSTICO_READ_TOOLS,
+  ...IA_PARCEIROS_READ_TOOLS,
   ...ASSISTENTE_WRITE_TOOL_DEFINITIONS,
 ] as const;
 
@@ -2107,6 +2109,8 @@ export async function executeAssistenteTool(
         return await toolLerTiposCaso(args);
       case "diagnosticar_atendimento_ia":
         return await toolDiagnosticarAtendimentoIA(args);
+      case "ler_prompt_parceiros":
+        return await toolLerPromptParceiros();
       default:
         return { ok: false, summary: `Ferramenta desconhecida: ${name}` };
     }

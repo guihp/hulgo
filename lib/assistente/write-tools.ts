@@ -38,6 +38,11 @@ import {
   proposeAlteracaoTipoCaso,
 } from "@/lib/assistente/ia-diagnostico";
 import {
+  PROPOR_PROMPT_PARCEIROS_DEFINITION,
+  execAlteracaoPromptParceiros,
+  proposeAlteracaoPromptParceiros,
+} from "@/lib/assistente/ia-parceiros";
+import {
   applyPromptEditsBatch,
   clipPreview,
   parsePromptDocumento,
@@ -110,6 +115,7 @@ export const WRITE_TOOL_NAMES = [
   "propor_alteracao_prompt_agente",
   "reverter_prompt_agente",
   "propor_alteracao_tipo_caso",
+  "propor_alteracao_prompt_parceiros",
 ] as const;
 
 export type AssistenteWriteToolName = (typeof WRITE_TOOL_NAMES)[number];
@@ -710,6 +716,7 @@ export const ASSISTENTE_WRITE_TOOL_DEFINITIONS = [
     },
   },
   PROPOR_TIPO_CASO_DEFINITION,
+  PROPOR_PROMPT_PARCEIROS_DEFINITION,
 ] as const;
 
 function asRecord(raw: unknown): Record<string, unknown> {
@@ -2413,6 +2420,8 @@ async function proposeWrite(
       return proposeExcluirProcesso(args);
     case "propor_alteracao_tipo_caso":
       return proposeAlteracaoTipoCaso(args);
+    case "propor_alteracao_prompt_parceiros":
+      return proposeAlteracaoPromptParceiros(args);
   }
 }
 
@@ -3313,6 +3322,8 @@ export async function executeAssistenteWriteTool(
         return await execReverterPromptAgente(args);
       case "propor_alteracao_tipo_caso":
         return await execAlteracaoTipoCaso(args);
+      case "propor_alteracao_prompt_parceiros":
+        return await execAlteracaoPromptParceiros(args);
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro ao executar ação";
