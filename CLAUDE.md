@@ -176,4 +176,7 @@
   (`components/layout/whatsapp-desconectado-alerta.tsx`, checa `/api/whatsapp/status` a cada 60 s — qualquer usuário
   logado, cache de 30 s no servidor; `conectado: null` quando a EvoGo não responde = sem alerta). "Reconectar agora"
   leva a /configuracoes (só advogado). Lista de /atendimentos mostra a hora embaixo do dia ("segunda / 14:32").
-  EvoGo 0.7.2 levou "Client outdated (405)" do WhatsApp em 02/11 → imagem trocada para `0.7.2-beta`.
+  EvoGo 0.7.2 levou "Client outdated (405)" do WhatsApp em 02/11 (bug: busca a versão do WhatsApp Web mas não chama
+  `store.SetWAVersion`; PR #227 do evolution-go). O compose do serviço evogo no Coolify agora COMPILA a tag 0.7.2 com
+  essa linha (`build.dockerfile_inline`, imagem local `evolution-go-fix405:0.7.2`); log mostra "Applied store.SetWAVersion".
+  Voltar para a imagem oficial quando sair versão com a correção.
