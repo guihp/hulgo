@@ -1161,17 +1161,23 @@ function ConversationList({
                       className="h-12 w-12"
                     />
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-baseline justify-between gap-2">
+                      <div className="flex items-start justify-between gap-2">
                         <p className="truncate font-semibold text-[#0b2148]">
                           {c.displayName ?? formatPhone(c.phone)}
                         </p>
                         <span
                           className={cn(
-                            "shrink-0 text-[11px]",
+                            "flex shrink-0 flex-col items-end pt-0.5 text-[11px] leading-tight",
                             naoLida ? "font-semibold text-emerald-600" : "text-[#94a3b8]"
                           )}
                         >
                           {formatChatListTime(c.lastAt)}
+                          {/* Hoje já mostra a hora; nos outros dias, a hora vai embaixo do dia. */}
+                          {formatChatListTime(c.lastAt) !== formatChatTime(c.lastAt) ? (
+                            <span className="text-[10px] font-normal text-[#94a3b8]">
+                              {formatChatTime(c.lastAt)}
+                            </span>
+                          ) : null}
                         </span>
                       </div>
                       <div className="mt-0.5 flex items-center gap-2">

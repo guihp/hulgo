@@ -172,3 +172,8 @@
   teste e "quem aprova pelo grupo" usam `SeletorNumeros` (busca em conversas, parceiros, clientes e funil via
   `buscarContatosSistema`; aceita número digitado). Assistente: `ler_prompt_parceiros` + `propor_alteracao_prompt_parceiros`
   (`lib/assistente/ia-parceiros.ts`, card Confirmar, vale na hora, também liga/desliga andamento/cadastro direto).
+- **Alerta de WhatsApp desconectado + hora na lista** (2026-11-04): faixa vermelha fixa abaixo do header
+  (`components/layout/whatsapp-desconectado-alerta.tsx`, checa `/api/whatsapp/status` a cada 60 s — qualquer usuário
+  logado, cache de 30 s no servidor; `conectado: null` quando a EvoGo não responde = sem alerta). "Reconectar agora"
+  leva a /configuracoes (só advogado). Lista de /atendimentos mostra a hora embaixo do dia ("segunda / 14:32").
+  EvoGo 0.7.2 levou "Client outdated (405)" do WhatsApp em 02/11 → imagem trocada para `0.7.2-beta`.

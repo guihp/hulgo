@@ -31,6 +31,7 @@ import { AssistenteDrawer } from "@/components/assistente/assistente-drawer";
 import { GlobalSearch } from "@/components/layout/global-search";
 import { NotificationsBell } from "@/components/layout/notifications-bell";
 import { PwaInstallBanner } from "@/components/layout/pwa-install-banner";
+import { WhatsAppDesconectadoAlerta } from "@/components/layout/whatsapp-desconectado-alerta";
 import { NotificationsProvider } from "@/components/providers/notifications-provider";
 import { AppLogo } from "@/components/layout/app-logo";
 import { NAV_GROUPS, type NavIconName } from "@/lib/constants";
@@ -318,6 +319,8 @@ export function AppShell({ user, children }: { user: AppUser; children: React.Re
                 </div>
               </div>
             </header>
+
+            <WhatsAppDesconectadoAlerta podeReconectar={user.papel === "advogado"} />
 
             <main className="min-h-0 flex-1 overflow-y-auto bg-[#F1F5F9] p-4 pb-20 lg:p-6">
               {children}
