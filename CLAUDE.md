@@ -179,4 +179,7 @@
   EvoGo 0.7.2 levou "Client outdated (405)" do WhatsApp em 02/11 (bug: busca a versão do WhatsApp Web mas não chama
   `store.SetWAVersion`; PR #227 do evolution-go). O compose do serviço evogo no Coolify agora COMPILA a tag 0.7.2 com
   essa linha (`build.dockerfile_inline`, imagem local `evolution-go-fix405:0.7.2`); log mostra "Applied store.SetWAVersion".
-  Voltar para a imagem oficial quando sair versão com a correção.
+  05/11: também caía a cada 50 min (`stream:error <ack class="status" type="media"/>`) e NÃO recebia mensagens (fila
+  offline crescendo) — whatsmeow de 30/06 não responde nós `<status>`. O build agora sobe whatsmeow para
+  `v0.0.0-20261102152715-54038813c47f` (Go 1.26 + 4 ajustes em `pkg/user/service/user_service.go`, PR #233), imagem
+  `evolution-go-fix405:0.7.2-wm1102`. Voltar para a imagem oficial quando sair versão com as duas correções.
