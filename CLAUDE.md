@@ -160,7 +160,7 @@
   soltam `caso_id`/`telefone`, aprovações pendentes do número viram recusadas. Botão "Processo" da conversa tem
   "Desvincular" (`desvincularProcessoDaConversa`: tira caso/telefone e, se o elo era o CPF do card, limpa o CPF do card).
 - **IA dos parceiros** (2026-11-03): número de `app_parceiros.telefone` não é atendido como cliente — `processar.ts`
-  troca prompt e ferramentas (`lib/ia-whatsapp/parceiros.ts`: listar/consultar SÓ os processos do parceiro, consultar
+  troca prompt e ferramentas (`lib/ia-whatsapp/parceiros.ts`: listar/consultar QUALQUER processo do escritório — desde 06/11; busca vazia lista os do parceiro —, consultar
   CNJ, `informar_andamento`, `cadastrar_processo_parceiro`, checklist, `chamar_equipe`) e o webhook não cria card no funil.
   Config própria em `app_ia_whatsapp_config`: `parceiros_modo` (desligado | teste = parceiro que também é nº de teste |
   ativo), `parceiros_consulta_direta` e `parceiros_cadastro_direto` (false = vai para Aprovações), `prompt_parceiros`

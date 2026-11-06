@@ -39,9 +39,9 @@ export const PROMPT_PARCEIROS_PADRAO = `Você é a assistente do escritório Bou
 O parceiro costuma fazer duas coisas, às vezes várias de uma vez:
 
 1) PERGUNTAR COMO ESTÁ O PROCESSO de um ou mais clientes.
-- Use listar_processos_do_parceiro com o nome, CPF ou número que ele mandou. Ele só pode consultar os processos que são dele.
+- Use listar_processos_do_parceiro com o nome, CPF ou número que ele mandou. O parceiro pode consultar qualquer processo do escritório, não só os que ele indicou.
 - Se vier mais de um processo com o mesmo nome, pergunte qual (cite o CPF parcial ou o benefício).
-- Se não encontrar, diga que não achou esse cliente entre os processos dele e peça o CPF ou o nome completo. Não diga se o cliente existe em outro lugar do escritório.
+- Se não encontrar, diga que não achou esse cliente no escritório e peça o CPF ou o nome completo.
 - Se o processo tem número e a última movimentação é antiga ou o parceiro quer o andamento atualizado, use consultar_justica_agora.
 - Monte um resumo curto, em linguagem simples (fase, última movimentação com data, próximo passo se estiver claro) e chame informar_andamento para CADA processo. Siga a instrução que a ferramenta devolver.
 
@@ -66,10 +66,12 @@ export const FERRAMENTAS_PARCEIRO = [
     type: "function",
     name: "listar_processos_do_parceiro",
     description:
-      "Lista os processos que pertencem a ESTE parceiro. Com busca (nome, parte do nome, CPF ou número do processo) filtra; vazio lista todos. Retorna id, nome do cliente, CPF, número, área, fase no escritório, último andamento registrado pela equipe e a última movimentação da Justiça que o sistema já tem.",
+      "Busca processos do escritório (de qualquer parceiro ou sem parceiro) por nome, parte do nome, CPF ou número do processo. Vazio lista os processos indicados por ESTE parceiro. Retorna id, nome do cliente, CPF, número, área, fase no escritório, parceiro que indicou, último andamento registrado pela equipe e a última movimentação da Justiça que o sistema já tem.",
     parameters: {
       type: "object",
-      properties: { busca: str("Nome, CPF ou número do processo. Vazio para listar todos.") },
+      properties: {
+        busca: str("Nome, CPF ou número do processo. Vazio para listar os processos indicados por este parceiro."),
+      },
       additionalProperties: false,
     },
   },
@@ -77,7 +79,7 @@ export const FERRAMENTAS_PARCEIRO = [
     type: "function",
     name: "consultar_justica_agora",
     description:
-      "Consulta AGORA as movimentações de um processo do parceiro na base oficial do Judiciário (DataJud/CNJ) e grava no sistema. Só para processos com número. Pode demorar; a ferramenta já avisa o parceiro. Se vier CNJ_LENTO, use a última movimentação que o sistema já tinha.",
+      "Consulta AGORA as movimentações de um processo na base oficial do Judiciário (DataJud/CNJ) e grava no sistema. Só para processos com número. Pode demorar; a ferramenta já avisa o parceiro. Se vier CNJ_LENTO, use a última movimentação que o sistema já tinha.",
     parameters: {
       type: "object",
       properties: { processo_id: { type: "number", description: "id do processo (de listar_processos_do_parceiro)." } },
@@ -89,7 +91,7 @@ export const FERRAMENTAS_PARCEIRO = [
     type: "function",
     name: "informar_andamento",
     description:
-      "Entrega ao parceiro o resumo do andamento de UM processo dele. Chame uma vez por processo consultado. Conforme a configuração do escritório, o resumo vai direto ou passa antes pela aprovação da equipe — siga a instrução devolvida.",
+      "Entrega ao parceiro o resumo do andamento de UM processo. Chame uma vez por processo consultado. Conforme a configuração do escritório, o resumo vai direto ou passa antes pela aprovação da equipe — siga a instrução devolvida.",
     parameters: {
       type: "object",
       properties: {
@@ -171,16 +173,16 @@ function texto(v: unknown): string | null {
 }
 
 const CAMPOS_PROCESSO =
-  "id, nome, cpf, telefone, numero_processo, area, funil_coluna, beneficio_identificado, situacao, ultimo_movimento, ultimo_andamento_data, datajud_mov_texto, datajud_mov_data, datajud_mov_chave, ultima_consulta_datajud";
+  "id, nome, cpf, telefone, numero_processo, area, funil_coluna, beneficio_identificado, situacao, ultimo_movimento, ultimo_andamento_data, datajud_mov_texto, datajud_mov_data, datajud_mov_chave, ultima_consulta_datajud, parceiro_id, parceiro:app_parceiros(nome)";
 
-async function processoDoParceiro(id: unknown, parceiroId: string) {
+/** Qualquer processo do escritório: o parceiro consulta também os que não indicou. */
+async function processoPorId(id: unknown) {
   const n = Number(id);
   if (!Number.isFinite(n)) return null;
   const { data } = await createServiceClient()
     .from("processos_clientes")
     .select(CAMPOS_PROCESSO)
     .eq("id", n)
-    .eq("parceiro_id", parceiroId)
     .maybeSingle();
   return data;
 }
@@ -191,10 +193,11 @@ async function listarProcessos(p: Params, ctx: ContextoParceiro) {
   let q = supabase
     .from("processos_clientes")
     .select(CAMPOS_PROCESSO)
-    .eq("parceiro_id", ctx.parceiro.id)
     .eq("ativo", true)
     .order("nome")
     .limit(25);
+  // Sem busca, "meus processos": os que este parceiro indicou.
+  if (!busca) q = q.eq("parceiro_id", ctx.parceiro.id);
   if (busca) {
     const digitos = busca.replace(/\D/g, "");
     if (digitos.length >= 5) {
@@ -222,6 +225,8 @@ async function listarProcessos(p: Params, ctx: ContextoParceiro) {
       area: labelFunilProcesso(r.area),
       fase_no_escritorio: fase(r.area, r.funil_coluna),
       beneficio: r.beneficio_identificado,
+      parceiro_que_indicou:
+        r.parceiro_id === ctx.parceiro.id ? "este parceiro" : (r.parceiro?.nome ?? "nenhum"),
       situacao: r.situacao,
       andamento_da_equipe: r.ultimo_movimento,
       data_andamento_da_equipe: dataBr(r.ultimo_andamento_data),
@@ -230,14 +235,14 @@ async function listarProcessos(p: Params, ctx: ContextoParceiro) {
       consultado_na_justica_em: dataBr(r.ultima_consulta_datajud),
     })),
     ...(busca && !data?.length
-      ? { instrucao: "Nada encontrado entre os processos deste parceiro. Peça o CPF ou o nome completo." }
+      ? { instrucao: "Nenhum processo encontrado no escritório. Peça o CPF ou o nome completo." }
       : {}),
   };
 }
 
 async function consultarJustica(p: Params, ctx: ContextoParceiro) {
-  const proc = await processoDoParceiro(p.processo_id, ctx.parceiro.id);
-  if (!proc) return { resultado: "ERRO", texto: "Processo não encontrado entre os processos deste parceiro." };
+  const proc = await processoPorId(p.processo_id);
+  if (!proc) return { resultado: "ERRO", texto: "Processo não encontrado." };
   if (!proc.numero_processo) return { resultado: "SEM_NUMERO", texto: "Processo ainda sem número: não há o que consultar na Justiça." };
 
   if (!ctx.efeitos.avisoConsultaJustica) {
@@ -284,8 +289,8 @@ async function consultarJustica(p: Params, ctx: ContextoParceiro) {
 async function informarAndamento(p: Params, ctx: ContextoParceiro) {
   const resumo = texto(p.resumo);
   if (!resumo) return { ok: false, erro: "resumo é obrigatório" };
-  const proc = await processoDoParceiro(p.processo_id, ctx.parceiro.id);
-  if (!proc) return { ok: false, erro: "Processo não encontrado entre os processos deste parceiro." };
+  const proc = await processoPorId(p.processo_id);
+  if (!proc) return { ok: false, erro: "Processo não encontrado." };
 
   if (ctx.config.parceiros_consulta_direta) {
     return {

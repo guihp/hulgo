@@ -729,7 +729,7 @@ function ParceirosCard(props: {
           </h2>
           <p className="mt-1 max-w-3xl text-sm text-[#64748B]">
             Quando quem escreve é um parceiro cadastrado (Configurações → Parceiros), a IA não atende
-            como cliente: ela consulta o andamento dos processos <strong>daquele parceiro</strong> e
+            como cliente: ela consulta o andamento de <strong>qualquer processo do escritório</strong> e
             recebe os casos novos que ele manda, com os documentos. Hoje há{" "}
             {props.parceirosComWhatsapp} parceiro(s) com WhatsApp cadastrado. Parceiros não viram
             card no funil de vendas.
